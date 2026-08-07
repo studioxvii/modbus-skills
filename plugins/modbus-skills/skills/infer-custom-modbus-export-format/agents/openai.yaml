@@ -1,0 +1,4 @@
+interface:
+  display_name: "Infer Modbus Export"
+  short_description: "Create a safe declarative text exporter"
+  default_prompt: "Use $infer-custom-modbus-export-format to define a safe reusable text export format."

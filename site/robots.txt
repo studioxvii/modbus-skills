@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://studioxvii.github.io/modbus-skills/sitemap.xml

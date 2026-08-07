@@ -1,0 +1,26 @@
+{
+  "registers": [
+    {
+      "address": "40001",
+      "address_convention": "modicon-reference",
+      "area": "holding-register",
+      "unit_id": 1,
+      "route_id": "lab",
+      "logical_point_id": "temperature",
+      "name": "Temperature",
+      "datatype": "float32",
+      "word_count": 2,
+      "byte_order": "ABCD",
+      "engineering_unit": "degC"
+    },
+    {
+      "protocol_offset": 20,
+      "area": "coil",
+      "unit_id": 1,
+      "route_id": "lab",
+      "logical_point_id": "pump_running",
+      "name": "Pump Running",
+      "datatype": "bool"
+    }
+  ]
+}

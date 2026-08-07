@@ -1,0 +1,4 @@
+interface:
+  display_name: "Extract Modbus PDF"
+  short_description: "Extract register tables from Modbus manuals"
+  default_prompt: "Use $extract-modbus-map-from-pdf to extract the register tables in this manual."

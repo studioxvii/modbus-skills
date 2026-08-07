@@ -1,0 +1,4 @@
+interface:
+  display_name: "Parse Modbus Map"
+  short_description: "Parse register maps with evidence and holds"
+  default_prompt: "Use $parse-modbus-map to parse this register map into a reviewed artifact."

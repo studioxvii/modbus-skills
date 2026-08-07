@@ -1,0 +1,411 @@
+{
+  "schema_version": "skill-activation/v1",
+  "cases": [
+    {
+      "skill_id": "analyze-modbus-capture",
+      "positive": [
+        "Analyze this Modbus capture for stale and missing samples.",
+        "Please analyze this Modbus capture for stale and missing samples.",
+        "Can you analyze this Modbus capture for stale and missing samples.",
+        "I need you to analyze this Modbus capture for stale and missing samples.",
+        "Help me analyze this Modbus capture for stale and missing samples.",
+        "Find communication and signal-quality problems in this Modbus data.",
+        "Please find communication and signal-quality problems in this Modbus data.",
+        "Can you find communication and signal-quality problems in this Modbus data.",
+        "I need you to find communication and signal-quality problems in this Modbus data.",
+        "Help me find communication and signal-quality problems in this Modbus data."
+      ],
+      "negative": [
+        "generate a Node-RED flow from this register map",
+        "convert 40001 to a protocol offset",
+        "compare two register maps",
+        "write a coil to test the device",
+        "summarize this unrelated network packet capture"
+      ]
+    },
+    {
+      "skill_id": "ask-modbus",
+      "positive": [
+        "Help me choose the right Modbus workflow.",
+        "Please help me choose the right Modbus workflow.",
+        "Can you help me choose the right Modbus workflow.",
+        "I need you to help me choose the right Modbus workflow.",
+        "Help me help me choose the right Modbus workflow.",
+        "Route this unclear Modbus problem to the correct skill.",
+        "Please route this unclear Modbus problem to the correct skill.",
+        "Can you route this unclear Modbus problem to the correct skill.",
+        "I need you to route this unclear Modbus problem to the correct skill.",
+        "Help me route this unclear Modbus problem to the correct skill.",
+        "Stop this unsafe request to write a Modbus coil.",
+        "Please stop this unsafe request to write a Modbus coil.",
+        "Can you stop this unsafe request to write a Modbus coil.",
+        "I need you to stop this unsafe request to write a Modbus coil.",
+        "Help me stop this unsafe request to write a Modbus coil.",
+        "Reject this Modbus network discovery scan.",
+        "Please reject this Modbus network discovery scan.",
+        "Can you reject this Modbus network discovery scan.",
+        "I need you to reject this Modbus network discovery scan.",
+        "Help me reject this Modbus network discovery scan."
+      ],
+      "negative": [
+        "format this Word document",
+        "review this Python pull request",
+        "create a calendar event",
+        "find a restaurant",
+        "summarize this non-industrial PDF"
+      ]
+    },
+    {
+      "skill_id": "build-modbus-tool-pack",
+      "positive": [
+        "Build Node-RED, Modpoll, and ModScan outputs from this map.",
+        "Please build Node-RED, Modpoll, and ModScan outputs from this map.",
+        "Can you build Node-RED, Modpoll, and ModScan outputs from this map.",
+        "I need you to build Node-RED, Modpoll, and ModScan outputs from this map.",
+        "Help me build Node-RED, Modpoll, and ModScan outputs from this map.",
+        "Create any selected combination of Modbus tool files.",
+        "Please create any selected combination of Modbus tool files.",
+        "Can you create any selected combination of Modbus tool files.",
+        "I need you to create any selected combination of Modbus tool files.",
+        "Help me create any selected combination of Modbus tool files."
+      ],
+      "negative": [
+        "generate only a Node-RED flow",
+        "analyze this completed capture",
+        "compare two map revisions",
+        "write these holding registers",
+        "scan the subnet for Modbus devices"
+      ]
+    },
+    {
+      "skill_id": "capture-modbus-sample",
+      "positive": [
+        "Create a raw read probe so I can determine byte order.",
+        "Please create a raw read probe so I can determine byte order.",
+        "Can you create a raw read probe so I can determine byte order.",
+        "I need you to create a raw read probe so I can determine byte order.",
+        "Help me create a raw read probe so I can determine byte order.",
+        "Collect bounded raw Modbus words through Modpoll.",
+        "Please collect bounded raw Modbus words through Modpoll.",
+        "Can you collect bounded raw Modbus words through Modpoll.",
+        "I need you to collect bounded raw Modbus words through Modpoll.",
+        "Help me collect bounded raw Modbus words through Modpoll."
+      ],
+      "negative": [
+        "decode these raw words that I already captured",
+        "generate the final confirmed configuration",
+        "scan all register addresses",
+        "write a test value",
+        "compare two register maps"
+      ]
+    },
+    {
+      "skill_id": "compare-modbus-maps",
+      "positive": [
+        "Compare these two Modbus register maps.",
+        "Please compare these two Modbus register maps.",
+        "Can you compare these two Modbus register maps.",
+        "I need you to compare these two Modbus register maps.",
+        "Help me compare these two Modbus register maps.",
+        "Show map changes between these firmware revisions.",
+        "Please show map changes between these firmware revisions.",
+        "Can you show map changes between these firmware revisions.",
+        "I need you to show map changes between these firmware revisions.",
+        "Help me show map changes between these firmware revisions."
+      ],
+      "negative": [
+        "validate one register map",
+        "convert these addresses",
+        "analyze time-series samples",
+        "generate a ModScan plan",
+        "compare two unrelated text files"
+      ]
+    },
+    {
+      "skill_id": "compile-modbus-read-plan",
+      "positive": [
+        "Group these Modbus points into bounded reads.",
+        "Please group these Modbus points into bounded reads.",
+        "Can you group these Modbus points into bounded reads.",
+        "I need you to group these Modbus points into bounded reads.",
+        "Help me group these Modbus points into bounded reads.",
+        "Compile a traceable FC03 and FC04 poll plan.",
+        "Please compile a traceable FC03 and FC04 poll plan.",
+        "Can you compile a traceable FC03 and FC04 poll plan.",
+        "I need you to compile a traceable FC03 and FC04 poll plan.",
+        "Help me compile a traceable FC03 and FC04 poll plan."
+      ],
+      "negative": [
+        "parse this vendor CSV",
+        "decode these raw words",
+        "generate writes for these points",
+        "analyze a completed capture",
+        "find devices on the network"
+      ]
+    },
+    {
+      "skill_id": "diagnose-modbus-map",
+      "positive": [
+        "Clean and validate this complete Modbus register map.",
+        "Please clean and validate this complete Modbus register map.",
+        "Can you clean and validate this complete Modbus register map.",
+        "I need you to clean and validate this complete Modbus register map.",
+        "Help me clean and validate this complete Modbus register map.",
+        "Run the full parse normalize lint and review workflow.",
+        "Please run the full parse normalize lint and review workflow.",
+        "Can you run the full parse normalize lint and review workflow.",
+        "I need you to run the full parse normalize lint and review workflow.",
+        "Help me run the full parse normalize lint and review workflow."
+      ],
+      "negative": [
+        "only convert these addresses",
+        "only compare byte orders",
+        "generate a Node-RED flow from a confirmed map",
+        "analyze live samples",
+        "edit a non-Modbus spreadsheet"
+      ]
+    },
+    {
+      "skill_id": "evaluate-modbus-byte-order",
+      "positive": [
+        "Evaluate ABCD BADC CDAB and DCBA from these words.",
+        "Please evaluate ABCD BADC CDAB and DCBA from these words.",
+        "Can you evaluate ABCD BADC CDAB and DCBA from these words.",
+        "I need you to evaluate ABCD BADC CDAB and DCBA from these words.",
+        "Help me evaluate ABCD BADC CDAB and DCBA from these words.",
+        "Compare integer and float interpretations of one Modbus sample.",
+        "Please compare integer and float interpretations of one Modbus sample.",
+        "Can you compare integer and float interpretations of one Modbus sample.",
+        "I need you to compare integer and float interpretations of one Modbus sample.",
+        "Help me compare integer and float interpretations of one Modbus sample."
+      ],
+      "negative": [
+        "capture raw words from the device",
+        "convert 40001 to offset zero",
+        "generate a Modpoll file",
+        "select the correct layout without evidence",
+        "analyze an Ethernet packet capture"
+      ]
+    },
+    {
+      "skill_id": "extract-modbus-map-from-pdf",
+      "positive": [
+        "Extract register tables with page evidence from this PDF.",
+        "Please extract register tables with page evidence from this PDF.",
+        "Can you extract register tables with page evidence from this PDF.",
+        "I need you to extract register tables with page evidence from this PDF.",
+        "Help me extract register tables with page evidence from this PDF.",
+        "Find candidate Modbus rows in this device manual.",
+        "Please find candidate Modbus rows in this device manual.",
+        "Can you find candidate Modbus rows in this device manual.",
+        "I need you to find candidate Modbus rows in this device manual.",
+        "Help me find candidate Modbus rows in this device manual."
+      ],
+      "negative": [
+        "parse this CSV register list",
+        "summarize the whole manual",
+        "publish this vendor PDF",
+        "generate a Node-RED flow",
+        "compare two JSON maps"
+      ]
+    },
+    {
+      "skill_id": "generate-modpoll-config",
+      "positive": [
+        "Generate a Witte Modbus Poll setup from this map.",
+        "Please generate a Witte Modbus Poll setup from this map.",
+        "Can you generate a Witte Modbus Poll setup from this map.",
+        "I need you to generate a Witte Modbus Poll setup from this map.",
+        "Help me generate a Witte Modbus Poll setup from this map.",
+        "Create a gavinying modpoll CSV configuration.",
+        "Please create a gavinying modpoll CSV configuration.",
+        "Can you create a gavinying modpoll CSV configuration.",
+        "I need you to create a gavinying modpoll CSV configuration.",
+        "Help me create a gavinying modpoll CSV configuration."
+      ],
+      "negative": [
+        "generate a Node-RED flow",
+        "generate a ModScan plan",
+        "invent an undocumented MBP binary",
+        "analyze capture data",
+        "write device registers"
+      ]
+    },
+    {
+      "skill_id": "generate-modscan-config",
+      "positive": [
+        "Generate a documented ModScan read plan.",
+        "Please generate a documented ModScan read plan.",
+        "Can you generate a documented ModScan read plan.",
+        "I need you to generate a documented ModScan read plan.",
+        "Help me generate a documented ModScan read plan.",
+        "Create a ModScan raw probe from this map.",
+        "Please create a ModScan raw probe from this map.",
+        "Can you create a ModScan raw probe from this map.",
+        "I need you to create a ModScan raw probe from this map.",
+        "Help me create a ModScan raw probe from this map."
+      ],
+      "negative": [
+        "generate a Modpoll CSV",
+        "generate a Node-RED flow",
+        "invent a binary TST file",
+        "compare firmware maps",
+        "write a holding register"
+      ]
+    },
+    {
+      "skill_id": "generate-node-red-flow",
+      "positive": [
+        "Generate a read-only Node-RED Modbus flow.",
+        "Please generate a read-only Node-RED Modbus flow.",
+        "Can you generate a read-only Node-RED Modbus flow.",
+        "I need you to generate a read-only Node-RED Modbus flow.",
+        "Help me generate a read-only Node-RED Modbus flow.",
+        "Create a disabled Node-RED raw probe with bounded block reads.",
+        "Please create a disabled Node-RED raw probe with bounded block reads.",
+        "Can you create a disabled Node-RED raw probe with bounded block reads.",
+        "I need you to create a disabled Node-RED raw probe with bounded block reads.",
+        "Help me create a disabled Node-RED raw probe with bounded block reads."
+      ],
+      "negative": [
+        "generate a ModScan plan",
+        "generate a Witte Modbus Poll setup",
+        "add Modbus write nodes",
+        "parse a PDF manual",
+        "analyze a CSV capture"
+      ]
+    },
+    {
+      "skill_id": "infer-custom-modbus-export-format",
+      "positive": [
+        "Define a declarative Modbus CSV format from this example.",
+        "Please define a declarative Modbus CSV format from this example.",
+        "Can you define a declarative Modbus CSV format from this example.",
+        "I need you to define a declarative Modbus CSV format from this example.",
+        "Help me define a declarative Modbus CSV format from this example.",
+        "Create a safe reusable text exporter for this documented format.",
+        "Please create a safe reusable text exporter for this documented format.",
+        "Can you create a safe reusable text exporter for this documented format.",
+        "I need you to create a safe reusable text exporter for this documented format.",
+        "Help me create a safe reusable text exporter for this documented format."
+      ],
+      "negative": [
+        "generate a Node-RED graph",
+        "invent a proprietary binary file",
+        "execute this custom template code",
+        "analyze live values",
+        "parse a register-map PDF"
+      ]
+    },
+    {
+      "skill_id": "lint-modbus-map",
+      "positive": [
+        "Find duplicates overlaps and invalid widths in this Modbus map.",
+        "Please find duplicates overlaps and invalid widths in this Modbus map.",
+        "Can you find duplicates overlaps and invalid widths in this Modbus map.",
+        "I need you to find duplicates overlaps and invalid widths in this Modbus map.",
+        "Help me find duplicates overlaps and invalid widths in this Modbus map.",
+        "Check this normalized map for unresolved and unsafe fields.",
+        "Please check this normalized map for unresolved and unsafe fields.",
+        "Can you check this normalized map for unresolved and unsafe fields.",
+        "I need you to check this normalized map for unresolved and unsafe fields.",
+        "Help me check this normalized map for unresolved and unsafe fields."
+      ],
+      "negative": [
+        "parse this raw PDF",
+        "convert all addresses",
+        "generate a tool pack",
+        "analyze time-series values",
+        "write a coil"
+      ]
+    },
+    {
+      "skill_id": "normalize-modbus-map",
+      "positive": [
+        "Normalize this mixed-convention Modbus map without guessing.",
+        "Please normalize this mixed-convention Modbus map without guessing.",
+        "Can you normalize this mixed-convention Modbus map without guessing.",
+        "I need you to normalize this mixed-convention Modbus map without guessing.",
+        "Help me normalize this mixed-convention Modbus map without guessing.",
+        "Resolve explicit register metadata into protocol offsets.",
+        "Please resolve explicit register metadata into protocol offsets.",
+        "Can you resolve explicit register metadata into protocol offsets.",
+        "I need you to resolve explicit register metadata into protocol offsets.",
+        "Help me resolve explicit register metadata into protocol offsets."
+      ],
+      "negative": [
+        "extract tables from a PDF",
+        "generate a final Node-RED flow",
+        "compare two normalized maps",
+        "analyze a capture",
+        "silently assume every unknown is uint16"
+      ]
+    },
+    {
+      "skill_id": "parse-modbus-map",
+      "positive": [
+        "Parse this CSV Modbus register map with rejected-row evidence.",
+        "Please parse this CSV Modbus register map with rejected-row evidence.",
+        "Can you parse this CSV Modbus register map with rejected-row evidence.",
+        "I need you to parse this CSV Modbus register map with rejected-row evidence.",
+        "Help me parse this CSV Modbus register map with rejected-row evidence.",
+        "Turn this JSON XML or XLSX register list into candidates.",
+        "Please turn this JSON XML or XLSX register list into candidates.",
+        "Can you turn this JSON XML or XLSX register list into candidates.",
+        "I need you to turn this JSON XML or XLSX register list into candidates.",
+        "Help me turn this JSON XML or XLSX register list into candidates."
+      ],
+      "negative": [
+        "extract this PDF manual",
+        "confirm unresolved engineering choices",
+        "generate a Modpoll configuration",
+        "analyze live data",
+        "parse an unrelated contact spreadsheet"
+      ]
+    },
+    {
+      "skill_id": "remap-modbus-addresses",
+      "positive": [
+        "Convert these 40001 references to protocol offsets.",
+        "Please convert these 40001 references to protocol offsets.",
+        "Can you convert these 40001 references to protocol offsets.",
+        "I need you to convert these 40001 references to protocol offsets.",
+        "Help me convert these 40001 references to protocol offsets.",
+        "Preview a one-based to zero-based Modbus address conversion.",
+        "Please preview a one-based to zero-based Modbus address conversion.",
+        "Can you preview a one-based to zero-based Modbus address conversion.",
+        "I need you to preview a one-based to zero-based Modbus address conversion.",
+        "Help me preview a one-based to zero-based Modbus address conversion."
+      ],
+      "negative": [
+        "parse a complete manual",
+        "guess the register area",
+        "evaluate byte order",
+        "generate a Node-RED flow",
+        "write to address 40001"
+      ]
+    },
+    {
+      "skill_id": "review-modbus-evidence",
+      "positive": [
+        "Show which parsed Modbus fields are confirmed or inferred.",
+        "Please show which parsed Modbus fields are confirmed or inferred.",
+        "Can you show which parsed Modbus fields are confirmed or inferred.",
+        "I need you to show which parsed Modbus fields are confirmed or inferred.",
+        "Help me show which parsed Modbus fields are confirmed or inferred.",
+        "Review rejected rows assumptions and holds before promotion.",
+        "Please review rejected rows assumptions and holds before promotion.",
+        "Can you review rejected rows assumptions and holds before promotion.",
+        "I need you to review rejected rows assumptions and holds before promotion.",
+        "Help me review rejected rows assumptions and holds before promotion."
+      ],
+      "negative": [
+        "parse a new CSV",
+        "automatically approve all candidate rows",
+        "generate a ModScan plan",
+        "analyze capture timing",
+        "convert addresses"
+      ]
+    }
+  ]
+}

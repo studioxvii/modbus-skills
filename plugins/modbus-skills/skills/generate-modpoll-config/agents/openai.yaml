@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate Modpoll Config"
+  short_description: "Generate Modbus Poll or modpoll artifacts"
+  default_prompt: "Use $generate-modpoll-config to create the correct Modpoll profile for this map."

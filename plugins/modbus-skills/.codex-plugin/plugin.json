@@ -1,0 +1,34 @@
+{
+  "name": "modbus-skills",
+  "version": "0.1.0",
+  "description": "Read-only Modbus map, byte-order, tool-generation, and capture-analysis workflows.",
+  "author": {
+    "name": "Studio Seventeen",
+    "url": "https://github.com/studioxvii"
+  },
+  "repository": "https://github.com/studioxvii/modbus-skills",
+  "keywords": [
+    "modbus",
+    "industrial-automation",
+    "node-red",
+    "register-map",
+    "byte-order"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Modbus Skills",
+    "shortDescription": "Read-only Modbus engineering workflows",
+    "longDescription": "Parse and review register maps, evaluate byte order, compile bounded read plans, generate tool configurations, and analyze captures.",
+    "developerName": "Studio Seventeen",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Review this Modbus register map.",
+      "Evaluate byte order from these raw words.",
+      "Build a Modbus tool pack for these targets."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

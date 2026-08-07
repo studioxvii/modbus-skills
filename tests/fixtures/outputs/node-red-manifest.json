@@ -1,0 +1,39 @@
+{
+  "adapter_version": "1.0.0",
+  "artifact_type": "modbus-target-manifest",
+  "assumptions": [],
+  "disabled_by_default": true,
+  "environment": [
+    "MODBUS_HOST",
+    "MODBUS_PORT",
+    "MODBUS_POLL_INTERVAL_MS",
+    "MODBUS_WATCHDOG_MS"
+  ],
+  "findings": [],
+  "holds": [],
+  "input_hashes": {
+    "canonical_map": "79ad30a6abca4292ebe85a97d692b70ba6b1a11395c12d8090d219aa9d8f6bbd",
+    "read_plan": "414130988319418b5c8c1ebafdc809cdb3adeea0806751ad1b655299172ee3ec"
+  },
+  "map_hash": "79ad30a6abca4292ebe85a97d692b70ba6b1a11395c12d8090d219aa9d8f6bbd",
+  "mode": "final",
+  "physical_read_nodes": 1,
+  "read_block_ids": [
+    "read-0001"
+  ],
+  "read_plan_hash": "414130988319418b5c8c1ebafdc809cdb3adeea0806751ad1b655299172ee3ec",
+  "required_node_module": "node-red-contrib-modbus",
+  "safety": {
+    "allowed_function_codes": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "network_discovery": false,
+    "read_only": true
+  },
+  "schema_version": "modbus-target-manifest/v1",
+  "target": "node-red",
+  "verification": "not-run"
+}

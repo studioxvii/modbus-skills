@@ -1,0 +1,48 @@
+{
+  "schema_version": "capture/v1",
+  "analysis_time": "2026-01-01T00:00:30Z",
+  "points": [
+    {
+      "logical_point_id": "tank_level",
+      "expected_interval_seconds": 10,
+      "minimum": 0,
+      "maximum": 100
+    },
+    {
+      "logical_point_id": "process_temperature",
+      "expected_interval_seconds": 10,
+      "minimum": -40,
+      "maximum": 150
+    }
+  ],
+  "samples": [
+    {
+      "sample_id": "level-001",
+      "point_id": "tank_level",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "value": 50.0,
+      "response_ms": 8
+    },
+    {
+      "sample_id": "level-002",
+      "point_id": "tank_level",
+      "timestamp": "2026-01-01T00:00:10Z",
+      "value": 50.1,
+      "response_ms": 9
+    },
+    {
+      "sample_id": "temp-001",
+      "point_id": "process_temperature",
+      "timestamp": "2026-01-01T00:00:00Z",
+      "value": 123.0,
+      "response_ms": 8
+    },
+    {
+      "sample_id": "temp-002",
+      "point_id": "process_temperature",
+      "timestamp": "2026-01-01T00:00:10Z",
+      "value": 123.5,
+      "response_ms": 10
+    }
+  ]
+}

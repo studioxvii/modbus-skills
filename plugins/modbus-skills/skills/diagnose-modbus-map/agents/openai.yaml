@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnose Modbus Map"
+  short_description: "Run the complete register-map review flow"
+  default_prompt: "Use $diagnose-modbus-map to parse, normalize, lint, and review this map."

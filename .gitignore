@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.coverage
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+artifacts/
+private/
+vendor/
+*.pdf
+.DS_Store

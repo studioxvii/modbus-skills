@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Modbus Tool Pack"
+  short_description: "Build any selected combination of tool outputs"
+  default_prompt: "Use $build-modbus-tool-pack to generate Node-RED, Modpoll, and ModScan outputs from one map."

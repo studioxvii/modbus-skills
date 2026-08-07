@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remap Modbus Addresses"
+  short_description: "Convert address conventions with collision checks"
+  default_prompt: "Use $remap-modbus-addresses to preview a safe address-convention conversion."

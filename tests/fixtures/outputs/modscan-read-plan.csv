@@ -1,0 +1,2 @@
+request_id,route_id,unit_id,function_code,area,protocol_offset_base_0,common_reference_base_1,quantity,poll_interval_ms,point_ids
+read-0001,default,1,03,holding-register,100,40101,2,1000,pressure

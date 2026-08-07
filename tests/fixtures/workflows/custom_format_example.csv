@@ -1,0 +1,2 @@
+logical_point_id,name,protocol_offset,datatype
+example_point,Example Point,12,uint16

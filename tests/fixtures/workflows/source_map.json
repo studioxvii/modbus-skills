@@ -1,0 +1,29 @@
+{
+  "registers": [
+    {
+      "logical_point_id": "tank_level",
+      "name": "Tank Level",
+      "route_id": "synthetic-loop",
+      "unit_id": 7,
+      "area": "holding-register",
+      "protocol_offset": 0,
+      "datatype": "uint16",
+      "word_count": 1,
+      "scale": 0.1,
+      "engineering_unit": "%"
+    },
+    {
+      "logical_point_id": "process_temperature",
+      "name": "Process Temperature",
+      "route_id": "synthetic-loop",
+      "unit_id": 7,
+      "area": "holding-register",
+      "protocol_offset": 1,
+      "datatype": "float32",
+      "word_count": 2,
+      "byte_order": "ABCD",
+      "scale": 1.0,
+      "engineering_unit": "degC"
+    }
+  ]
+}

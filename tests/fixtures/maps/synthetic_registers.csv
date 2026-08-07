@@ -1,0 +1,5 @@
+Address;Address Convention;Area;Unit ID;Route ID;Point ID;Name;Description;Data Type;Word Count;Byte Order;Scale;Engineering Unit
+0;protocol-offset;holding-register;1;lab;level_raw;Tank Level;Synthetic level value;UINT16;1;;0.1;%
+2;protocol-offset;holding-register;1;lab;flow_rate;Flow Rate;"Synthetic flow value,
+with a multiline description";FLOAT32;2;CDAB;1.0;L/s
+10;protocol-offset;input-register;2;lab;energy_total;Energy Total;Synthetic counter;UINT64;4;ABCDEFGH;1;kWh

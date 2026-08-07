@@ -1,0 +1,2 @@
+test_id,route_id,unit_id,request_pdu_hex,expected_function_hex,expected_byte_count,expected_response_prefix_hex,expected_data_hex
+read-0001,default,1,03 00 64 00 02,03,4,03 04,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze Modbus Capture"
+  short_description: "Analyze bounded live or recorded Modbus data"
+  default_prompt: "Use $analyze-modbus-capture to find communication and signal-quality problems in this capture."

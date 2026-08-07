@@ -1,0 +1,292 @@
+{
+  "schema_version": "workflow-catalog/v2",
+  "workflows": [
+    {
+      "id": "review-register-map",
+      "name": "Review a register map",
+      "goal": "Produce a reviewed Modbus map without silent engineering guesses.",
+      "steps": [
+        {
+          "id": "parse",
+          "kind": "skill",
+          "skill": "parse-modbus-map",
+          "inputs": [
+            "source-bundle/v1"
+          ],
+          "output": "candidate-map/v1"
+        },
+        {
+          "id": "normalize",
+          "kind": "skill",
+          "skill": "normalize-modbus-map",
+          "inputs": [
+            "candidate-map/v1"
+          ],
+          "output": "modbus-map/v1"
+        },
+        {
+          "id": "lint",
+          "kind": "skill",
+          "skill": "lint-modbus-map",
+          "inputs": [
+            "modbus-map/v1"
+          ],
+          "output": "modbus-map-lint/v1"
+        },
+        {
+          "id": "review",
+          "kind": "skill",
+          "skill": "review-modbus-evidence",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-map-lint/v1"
+          ],
+          "output": "modbus-map-evidence-review/v1"
+        },
+        {
+          "id": "confirm-map",
+          "kind": "human-gate",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-map-evidence-review/v1"
+          ],
+          "output": "modbus-map/v1",
+          "instruction": "Resolve every blocking hold and record each decision as new evidence before the map is used for final generation."
+        }
+      ],
+      "stop_conditions": [
+        "unresolved route or address convention",
+        "unresolved register area",
+        "unresolved unit identifier",
+        "unreviewed rejected rows",
+        "unconfirmed multi-register byte order"
+      ]
+    },
+    {
+      "id": "determine-byte-order",
+      "name": "Determine byte order from supplied raw words",
+      "goal": "Compare explicit layouts from one immutable raw sample and record human confirmation.",
+      "steps": [
+        {
+          "id": "evaluate",
+          "kind": "skill",
+          "skill": "evaluate-modbus-byte-order",
+          "inputs": [
+            "capture/v1"
+          ],
+          "output": "modbus-byte-order-evidence/v1"
+        },
+        {
+          "id": "confirm-layout",
+          "kind": "human-gate",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-byte-order-evidence/v1"
+          ],
+          "output": "modbus-map/v1",
+          "instruction": "Confirm one explicit layout with engineering evidence. Keep the raw sample and all candidates."
+        }
+      ],
+      "stop_conditions": [
+        "no raw words",
+        "ambiguous sample identity",
+        "no human confirmation"
+      ]
+    },
+    {
+      "id": "probe-resolve-finalize-tool-pack",
+      "name": "Probe, resolve byte order, and finalize a tool pack",
+      "goal": "Use a selected tool target to collect one raw sample, compare byte-order candidates, then regenerate all selected targets with the confirmed layout.",
+      "steps": [
+        {
+          "id": "plan-probe",
+          "kind": "skill",
+          "skill": "compile-modbus-read-plan",
+          "inputs": [
+            "modbus-map/v1"
+          ],
+          "output": "modbus-read-plan/v1"
+        },
+        {
+          "id": "build-probe",
+          "kind": "skill",
+          "skill": "build-modbus-tool-pack",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-read-plan/v1",
+            "probe-tool-pack-request/v1"
+          ],
+          "output": "modbus-tool-pack/v1"
+        },
+        {
+          "id": "run-probe",
+          "kind": "external-gate",
+          "inputs": [
+            "modbus-tool-pack/v1"
+          ],
+          "output": "capture/v1",
+          "instruction": "Run one bounded read against the reviewed endpoint and save the returned raw 16-bit words. Do not scan or write."
+        },
+        {
+          "id": "evaluate",
+          "kind": "skill",
+          "skill": "evaluate-modbus-byte-order",
+          "inputs": [
+            "capture/v1"
+          ],
+          "output": "modbus-byte-order-evidence/v1"
+        },
+        {
+          "id": "confirm-layout",
+          "kind": "human-gate",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-byte-order-evidence/v1"
+          ],
+          "output": "modbus-map/v1",
+          "instruction": "Confirm the explicit layout and record the sample as evidence."
+        },
+        {
+          "id": "build-final",
+          "kind": "skill",
+          "skill": "build-modbus-tool-pack",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-read-plan/v1",
+            "final-tool-pack-request/v1"
+          ],
+          "output": "modbus-tool-pack/v1"
+        }
+      ],
+      "stop_conditions": [
+        "no selected target",
+        "unresolved route or unit identifier",
+        "no raw words",
+        "no human byte-order confirmation",
+        "write request detected"
+      ]
+    },
+    {
+      "id": "build-tool-pack",
+      "name": "Build a multi-target tool pack",
+      "goal": "Generate any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and one read plan.",
+      "steps": [
+        {
+          "id": "lint",
+          "kind": "skill",
+          "skill": "lint-modbus-map",
+          "inputs": [
+            "modbus-map/v1"
+          ],
+          "output": "modbus-map-lint/v1"
+        },
+        {
+          "id": "plan",
+          "kind": "skill",
+          "skill": "compile-modbus-read-plan",
+          "inputs": [
+            "modbus-map/v1"
+          ],
+          "output": "modbus-read-plan/v1"
+        },
+        {
+          "id": "build",
+          "kind": "skill",
+          "skill": "build-modbus-tool-pack",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-read-plan/v1",
+            "tool-pack-request/v1"
+          ],
+          "output": "modbus-tool-pack/v1"
+        }
+      ],
+      "stop_conditions": [
+        "no selected target",
+        "map validation error",
+        "required final decoding field unresolved",
+        "write request detected"
+      ]
+    },
+    {
+      "id": "analyze-read-data",
+      "name": "Analyze bounded read data",
+      "goal": "Find communication and signal-quality problems without issuing control commands.",
+      "steps": [
+        {
+          "id": "analyze",
+          "kind": "skill",
+          "skill": "analyze-modbus-capture",
+          "inputs": [
+            "capture/v1"
+          ],
+          "output": "modbus-capture-analysis/v1"
+        },
+        {
+          "id": "review-findings",
+          "kind": "human-gate",
+          "inputs": [
+            "modbus-capture-analysis/v1"
+          ],
+          "output": "review-disposition/v1",
+          "instruction": "Review thresholds, sample window, missing metadata, and alternative causes before acting on a finding."
+        }
+      ],
+      "stop_conditions": [
+        "unbounded capture",
+        "write request detected",
+        "missing sample identity",
+        "timezone missing from a timestamp"
+      ]
+    },
+    {
+      "id": "compare-map-revisions",
+      "name": "Compare map revisions",
+      "goal": "Report stable field changes without collapsing points from different routes, areas, or unit identifiers.",
+      "steps": [
+        {
+          "id": "review-before",
+          "kind": "workflow",
+          "workflow": "review-register-map",
+          "inputs": [
+            "before-source-bundle/v1"
+          ],
+          "output": "before-modbus-map/v1"
+        },
+        {
+          "id": "review-after",
+          "kind": "workflow",
+          "workflow": "review-register-map",
+          "inputs": [
+            "after-source-bundle/v1"
+          ],
+          "output": "after-modbus-map/v1"
+        },
+        {
+          "id": "compare",
+          "kind": "skill",
+          "skill": "compare-modbus-maps",
+          "inputs": [
+            "before-modbus-map/v1",
+            "after-modbus-map/v1"
+          ],
+          "output": "modbus-map-diff/v1"
+        },
+        {
+          "id": "review-diff",
+          "kind": "human-gate",
+          "inputs": [
+            "modbus-map-diff/v1"
+          ],
+          "output": "review-disposition/v1",
+          "instruction": "Review moved, added, removed, and changed points before accepting a new map revision."
+        }
+      ],
+      "stop_conditions": [
+        "map schema mismatch",
+        "unresolved composite identity",
+        "unreviewed source-map holds"
+      ]
+    }
+  ]
+}

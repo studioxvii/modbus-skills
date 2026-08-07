@@ -1,0 +1,9 @@
+[project]
+name = "modbus-skills-runtime"
+version = "0.1.0"
+description = "Deterministic runtime for read-only Modbus skills"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.modbus-skills]
+plugin-root = "plugins/modbus-skills"

@@ -1,0 +1,2 @@
+request_id,route_id,unit_id,function_code,area,protocol_offset,quantity,scan_rate_ms
+read-0001,default,1,03,holding-register,100,2,1000

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compile Modbus Read Plan"
+  short_description: "Group points into safe bounded Modbus reads"
+  default_prompt: "Use $compile-modbus-read-plan to build a traceable read-only poll plan."

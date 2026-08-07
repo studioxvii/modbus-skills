@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<registerMap>
+  <register>
+    <address>30001</address>
+    <addressConvention>modicon-reference</addressConvention>
+    <area>input-register</area>
+    <unitId>1</unitId>
+    <routeId>lab</routeId>
+    <pointId>line_voltage</pointId>
+    <name>Line Voltage</name>
+    <dataType>uint32</dataType>
+    <wordCount>2</wordCount>
+    <byteOrder>BADC</byteOrder>
+  </register>
+</registerMap>

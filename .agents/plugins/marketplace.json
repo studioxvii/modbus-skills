@@ -1,0 +1,20 @@
+{
+  "name": "modbus-skills",
+  "interface": {
+    "displayName": "Modbus Skills"
+  },
+  "plugins": [
+    {
+      "name": "modbus-skills",
+      "source": {
+        "source": "local",
+        "path": "./plugins/modbus-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

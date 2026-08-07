@@ -1,0 +1,216 @@
+{
+  "schema_version": "modbus-research/v1",
+  "retrieved_on": "2026-08-06",
+  "records": [
+    {
+      "id": "protocol-offset-vs-reference-number",
+      "problem": "Users and tools can mix zero-based protocol offsets with one-based or 3xxxx/4xxxx reference notation.",
+      "evidence": "The Modbus application protocol defines PDU starting addresses from zero. A Pymodbus issue also shows a user explicitly mapping 30001 to address 0.",
+      "sources": [
+        {
+          "type": "official-specification",
+          "url": "https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf"
+        },
+        {
+          "type": "project-issue",
+          "url": "https://github.com/pymodbus-dev/pymodbus/issues/2565"
+        }
+      ],
+      "skills": [
+        "normalize-modbus-map",
+        "remap-modbus-addresses",
+        "lint-modbus-map"
+      ]
+    },
+    {
+      "id": "register-area-identity",
+      "problem": "The same numeric offset can exist in coils, discrete inputs, input registers, and holding registers.",
+      "evidence": "A Pymodbus simulator discussion documents user confusion when holding and input register blocks appear to share numeric positions.",
+      "sources": [
+        {
+          "type": "project-discussion",
+          "url": "https://github.com/pymodbus-dev/pymodbus/discussions/2531"
+        }
+      ],
+      "skills": [
+        "normalize-modbus-map",
+        "lint-modbus-map",
+        "compare-modbus-maps"
+      ]
+    },
+    {
+      "id": "word-and-byte-order",
+      "problem": "Values wider than 16 bits can require different word and byte layouts.",
+      "evidence": "A FluentModbus issue records a request for big-endian, little-endian, and byte-swapped variants. The Witte Modbus Poll manual also documents arbitrary word and byte order for wider types.",
+      "sources": [
+        {
+          "type": "project-issue",
+          "url": "https://github.com/Apollo3zehn/FluentModbus/issues/27"
+        },
+        {
+          "type": "official-tool-documentation",
+          "url": "https://www.modbustools.com/mbpoll-user-manual.html"
+        }
+      ],
+      "skills": [
+        "capture-modbus-sample",
+        "evaluate-modbus-byte-order"
+      ]
+    },
+    {
+      "id": "bit-order-confusion",
+      "problem": "Coil and packed-bit order can be confused with multi-register byte order.",
+      "evidence": "A Pymodbus issue reports reversed bit interpretation while explicitly distinguishing it from byte and word endian concerns.",
+      "sources": [
+        {
+          "type": "project-issue",
+          "url": "https://github.com/pymodbus-dev/pymodbus/issues/2311"
+        }
+      ],
+      "skills": [
+        "parse-modbus-map",
+        "evaluate-modbus-byte-order",
+        "analyze-modbus-capture"
+      ]
+    },
+    {
+      "id": "serial-queue-contention",
+      "problem": "Several independent polls on one serial route can contend and fail when requests are not queued.",
+      "evidence": "A node-red-contrib-modbus issue reports failures with multiple RTU unit identifiers on one serial port and requests per-route queuing.",
+      "sources": [
+        {
+          "type": "project-issue",
+          "url": "https://github.com/BiancoRoyal/node-red-contrib-modbus/issues/161"
+        },
+        {
+          "type": "project-documentation",
+          "url": "https://github.com/BiancoRoyal/node-red-contrib-modbus"
+        }
+      ],
+      "skills": [
+        "compile-modbus-read-plan",
+        "generate-node-red-flow",
+        "analyze-modbus-capture"
+      ]
+    },
+    {
+      "id": "poll-rate-control",
+      "problem": "A configured polling interval can differ from observed request frequency.",
+      "evidence": "A Home Assistant issue reports Modbus sensors polling more often than the configured scan interval.",
+      "sources": [
+        {
+          "type": "project-issue",
+          "url": "https://github.com/home-assistant/core/issues/146246"
+        }
+      ],
+      "skills": [
+        "compile-modbus-read-plan",
+        "analyze-modbus-capture"
+      ]
+    },
+    {
+      "id": "unit-zero-ambiguity",
+      "problem": "Unit identifier zero has transport and tool-specific behavior and can represent broadcast behavior in serial contexts.",
+      "evidence": "A node-red-contrib-modbus issue records inconsistent Unit ID 0 validation. Tool documentation also exposes Unit ID 0 behavior, so generated read workflows must not silently choose it.",
+      "sources": [
+        {
+          "type": "project-issue",
+          "url": "https://github.com/BiancoRoyal/node-red-contrib-modbus/issues/274"
+        },
+        {
+          "type": "official-tool-documentation",
+          "url": "https://www.modbustools.com/modbus_poll.html"
+        }
+      ],
+      "skills": [
+        "lint-modbus-map",
+        "capture-modbus-sample",
+        "compile-modbus-read-plan"
+      ]
+    },
+    {
+      "id": "illegal-address-block-boundary",
+      "problem": "A read block can become invalid when its start and quantity cross the server's defined data range.",
+      "evidence": "The official protocol defines exception 02 for an invalid address and transfer-length combination. A Pymodbus discussion shows users working to restrict undefined register ranges.",
+      "sources": [
+        {
+          "type": "official-specification",
+          "url": "https://www.modbus.org/file/secure/modbusprotocolspecification.pdf"
+        },
+        {
+          "type": "project-discussion",
+          "url": "https://github.com/pymodbus-dev/pymodbus/discussions/2268"
+        }
+      ],
+      "skills": [
+        "lint-modbus-map",
+        "compile-modbus-read-plan",
+        "analyze-modbus-capture"
+      ]
+    },
+    {
+      "id": "malformed-or-short-response",
+      "problem": "A device can return a byte count or frame length that does not match the received payload.",
+      "evidence": "A Pymodbus issue documents a response whose declared length and received bytes disagree.",
+      "sources": [
+        {
+          "type": "project-issue",
+          "url": "https://github.com/pymodbus-dev/pymodbus/issues/2303"
+        }
+      ],
+      "skills": [
+        "analyze-modbus-capture",
+        "review-modbus-evidence"
+      ]
+    },
+    {
+      "id": "reusable-modpoll-config",
+      "problem": "Site work benefits from a reusable configuration that defines poll blocks and named references.",
+      "evidence": "The gavinying/modpoll project documents device, poll, and ref CSV records and describes configuration reuse for device polling.",
+      "sources": [
+        {
+          "type": "project-documentation",
+          "url": "https://github.com/gavinying/modpoll"
+        }
+      ],
+      "skills": [
+        "generate-modpoll-config",
+        "build-modbus-tool-pack"
+      ]
+    },
+    {
+      "id": "modscan-repeatable-test-script",
+      "problem": "Production and commissioning tests need repeatable request and expected-response sequences.",
+      "evidence": "WinTECH documents ModScan test scripts as editable message sequences that can run in a loop and log results.",
+      "sources": [
+        {
+          "type": "official-tool-documentation",
+          "url": "https://www.win-tech.com/html/modscan32.htm"
+        }
+      ],
+      "skills": [
+        "generate-modscan-config",
+        "build-modbus-tool-pack"
+      ]
+    },
+    {
+      "id": "modbus-poll-machine-readable-project",
+      "problem": "A reusable Modbus Poll setup needs a documented and versioned file contract.",
+      "evidence": "Witte documents OLE automation and publishes a Modbus Poll version 12 human-readable XML example.",
+      "sources": [
+        {
+          "type": "official-tool-documentation",
+          "url": "https://www.modbustools.com/mbpoll-user-manual.html"
+        },
+        {
+          "type": "official-tool-example",
+          "url": "https://www.modbustools.com/pollxml.html"
+        }
+      ],
+      "skills": [
+        "generate-modpoll-config",
+        "build-modbus-tool-pack"
+      ]
+    }
+  ]
+}
