@@ -10,6 +10,14 @@
       "path": "plugins/modbus-skills/skills/analyze-modbus-capture"
     },
     {
+      "id": "apply-modbus-review-decisions",
+      "display_name": "Apply Modbus Review Decisions",
+      "description": "Apply explicit human review decisions to a normalized Modbus map, preserve the decision evidence, exclude out-of-scope points, and approve the map only when no blocking hold remains. Use after evidence review or byte-order evaluation when a user confirms values or dispositions.",
+      "short_description": "Record reviewed map values and exclusions",
+      "default_prompt": "Use $apply-modbus-review-decisions to record my confirmed Modbus map decisions.",
+      "path": "plugins/modbus-skills/skills/apply-modbus-review-decisions"
+    },
+    {
       "id": "ask-modbus",
       "display_name": "Ask Modbus",
       "description": "Route an unclear Modbus engineering goal to one focused workflow. Use when the request does not provide enough information to select a focused skill. Also use as the safety stop for requests that ask for Modbus writes, broadcasts, network discovery, or unbounded polling. Do not use as the primary skill when a safe request names a concrete input, conversion, check, analysis, or target output that matches another skill.",
@@ -62,7 +70,7 @@
       "display_name": "Evaluate Byte Order",
       "description": "Evaluate raw Modbus register words as explicit byte and word layouts, signed and unsigned integers, and IEEE floating-point values from one immutable sample. Use for ABCD, BADC, CDAB, DCBA, endian, word-swap, implausible-value, or unknown encoding questions.",
       "short_description": "Evaluate byte and word layouts from one read",
-      "default_prompt": "Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words.",
+      "default_prompt": "Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words. Require the sampled point identity before a human records a decision.",
       "path": "plugins/modbus-skills/skills/evaluate-modbus-byte-order"
     },
     {

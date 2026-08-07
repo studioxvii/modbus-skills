@@ -168,6 +168,14 @@ def _unplannable_reason(
     limits: Mapping[RegisterArea, int],
 ) -> Finding | None:
     point_id = point.logical_point_id or "<unresolved>"
+    if point.access == "write-only":
+        return Finding(
+            code="read-plan.write-only-point",
+            severity=FindingSeverity.HOLD,
+            message="A write-only point cannot enter a read plan.",
+            point_ids=(point_id,),
+            field="access",
+        )
     if (
         not point.logical_point_id
         or not point.route_id

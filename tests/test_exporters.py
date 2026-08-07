@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sys
 import unittest
 from pathlib import Path
@@ -9,7 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
 sys.path.insert(0, str(RUNTIME))
 
-from modbus_skills.artifacts import assert_artifact_envelope  # noqa: E402
+from modbus_skills.artifacts import (  # noqa: E402
+    artifact_envelope,
+    assert_artifact_envelope,
+)
 from modbus_skills.exporters import (  # noqa: E402
     Artifact,
     ExportResult,
@@ -120,6 +124,234 @@ class ExporterContractTests(unittest.TestCase):
         self.assertIn("POINT_UNIT_UNRESOLVED", codes)
         self.assertIn("BLOCK_ROUTE_UNRESOLVED", codes)
         self.assertIn("BLOCK_UNIT_UNRESOLVED", codes)
+
+    def test_plan_hash_must_match_the_current_map_after_review_changes(self) -> None:
+        original_map = sample_map()
+        plan = artifact_envelope(
+            sample_plan(),
+            schema_version="modbus-read-plan/v1",
+            inputs={"canonical_map": original_map},
+        )
+        changed_map = sample_map(sample_point(byte_order="CDAB"))
+
+        codes = {
+            finding.code
+            for finding in preflight_common(changed_map, plan, mode="final")
+        }
+
+        self.assertIn("PLAN_MAP_HASH_MISMATCH", codes)
+
+    def test_final_plan_hash_is_required_and_must_be_valid(self) -> None:
+        canonical_map = sample_map()
+        raw_plan = compile_read_plan((sample_point(),)).to_dict()
+        missing_codes = {
+            finding.code
+            for finding in preflight_common(canonical_map, raw_plan, mode="final")
+        }
+        self.assertIn("PLAN_MAP_HASH_MISSING", missing_codes)
+
+        malformed_plan = dict(raw_plan)
+        malformed_plan["input_hashes"] = {"canonical_map": "not-a-sha256"}
+        invalid_codes = {
+            finding.code
+            for finding in preflight_common(
+                canonical_map, malformed_plan, mode="final"
+            )
+        }
+        self.assertIn("PLAN_MAP_HASH_INVALID", invalid_codes)
+
+    def test_probe_plan_hash_can_be_missing_but_not_malformed(self) -> None:
+        canonical_map = sample_map()
+        raw_plan = compile_read_plan((sample_point(),)).to_dict()
+        missing_codes = {
+            finding.code
+            for finding in preflight_common(canonical_map, raw_plan, mode="probe")
+        }
+        self.assertNotIn("PLAN_MAP_HASH_MISSING", missing_codes)
+
+        malformed_plan = dict(raw_plan)
+        malformed_plan["input_hashes"] = {"canonical_map": 123}
+        invalid_codes = {
+            finding.code
+            for finding in preflight_common(
+                canonical_map, malformed_plan, mode="probe"
+            )
+        }
+        self.assertIn("PLAN_MAP_HASH_INVALID", invalid_codes)
+
+    def test_active_write_only_and_source_excluded_points_are_rejected(self) -> None:
+        readable = sample_point()
+        unsafe_points = (
+            sample_point(
+                logical_point_id="write-command",
+                protocol_offset=110,
+                datatype="uint16",
+                word_span=1,
+                byte_order=None,
+                access="write-only",
+            ),
+            sample_point(
+                logical_point_id="source-excluded",
+                protocol_offset=120,
+                datatype="uint16",
+                word_span=1,
+                byte_order=None,
+                source_include=False,
+            ),
+        )
+        canonical_map = sample_map(readable, *unsafe_points)
+        plan = sample_plan(readable)
+        plan["input_hashes"] = {
+            "canonical_map": stable_hash(canonical_map),
+        }
+
+        codes = {
+            finding.code
+            for finding in preflight_common(canonical_map, plan, mode="probe")
+        }
+
+        self.assertIn("POINT_WRITE_ONLY_ACTIVE", codes)
+        self.assertIn("POINT_SOURCE_EXCLUDED_ACTIVE", codes)
+
+    def test_map_bound_plan_rejects_unjustified_ranges_and_traces(self) -> None:
+        first = sample_point()
+        second = sample_point(
+            logical_point_id="temperature",
+            protocol_offset=110,
+            datatype="uint16",
+            word_span=1,
+            byte_order=None,
+        )
+        canonical_map = sample_map(first, second)
+        base_plan = sample_plan(first, second)
+        base_plan["input_hashes"] = {
+            "canonical_map": stable_hash(canonical_map),
+        }
+
+        cases: tuple[tuple[str, dict[str, object], str], ...] = ()
+        excess = copy.deepcopy(base_plan)
+        excess["requests"][0]["quantity"] += 1  # type: ignore[index,operator]
+        cases += (("excess", excess, "BLOCK_RANGE_NOT_EXACT"),)
+
+        unrelated = copy.deepcopy(base_plan)
+        unrelated["requests"].append(  # type: ignore[union-attr]
+            {
+                "request_id": "unrelated",
+                "route_id": "other-route",
+                "unit_id": 2,
+                "area": "holding-register",
+                "function_code": 3,
+                "start_offset": 500,
+                "quantity": 1,
+                "points": [],
+            }
+        )
+        cases += (("unrelated", unrelated, "BLOCK_UNJUSTIFIED"),)
+
+        duplicate = copy.deepcopy(base_plan)
+        duplicate_block = copy.deepcopy(duplicate["requests"][0])  # type: ignore[index]
+        duplicate_block["request_id"] = "duplicate-range"
+        duplicate["requests"].append(duplicate_block)  # type: ignore[union-attr]
+        cases += (("duplicate", duplicate, "BLOCK_RANGE_DUPLICATE"),)
+
+        overlapping = copy.deepcopy(base_plan)
+        overlapping["requests"][1]["start_offset"] = 101  # type: ignore[index]
+        overlapping["requests"][1]["quantity"] = 10  # type: ignore[index]
+        cases += (("overlap", overlapping, "BLOCK_RANGE_OVERLAP"),)
+
+        bad_trace = copy.deepcopy(base_plan)
+        bad_trace["requests"][0]["points"][0]["relative_offset"] = 1  # type: ignore[index]
+        cases += (("trace", bad_trace, "BLOCK_POINT_TRACE_MISMATCH"),)
+
+        for label, plan, expected_code in cases:
+            with self.subTest(label=label):
+                codes = {
+                    finding.code
+                    for finding in preflight_common(
+                        canonical_map,
+                        plan,
+                        mode="probe",
+                    )
+                }
+                self.assertIn(expected_code, codes)
+
+    def test_map_bound_gap_requires_visible_hashed_planning_option(self) -> None:
+        first = sample_point()
+        second = sample_point(
+            logical_point_id="temperature",
+            protocol_offset=110,
+            datatype="uint16",
+            word_span=1,
+            byte_order=None,
+        )
+        canonical_map = sample_map(first, second)
+        options = {"max_gap": 8, "max_quantities": {}}
+        plan = compile_read_plan((first, second), max_gap=8).to_dict()
+        plan["planning_options"] = options
+        plan = artifact_envelope(
+            plan,
+            schema_version="modbus-read-plan/v1",
+            inputs={
+                "canonical_map": canonical_map,
+                "planning_options": options,
+            },
+        )
+
+        accepted = {
+            finding.code
+            for finding in preflight_common(canonical_map, plan, mode="final")
+        }
+        self.assertNotIn("BLOCK_GAP_EXCEEDS_PLAN_OPTION", accepted)
+        self.assertNotIn("PLAN_OPTIONS_HASH_MISMATCH", accepted)
+
+        tampered = copy.deepcopy(plan)
+        tampered["planning_options"]["max_gap"] = 0
+        tampered_codes = {
+            finding.code
+            for finding in preflight_common(
+                canonical_map, tampered, mode="final"
+            )
+        }
+        self.assertIn("PLAN_OPTIONS_HASH_MISMATCH", tampered_codes)
+        self.assertIn("BLOCK_GAP_EXCEEDS_PLAN_OPTION", tampered_codes)
+
+        hidden = copy.deepcopy(plan)
+        hidden.pop("planning_options")
+        hidden_codes = {
+            finding.code
+            for finding in preflight_common(canonical_map, hidden, mode="final")
+        }
+        self.assertIn("PLAN_OPTIONS_MISSING", hidden_codes)
+        self.assertIn("BLOCK_GAP_EXCEEDS_PLAN_OPTION", hidden_codes)
+
+    def test_map_bound_quantity_obeys_visible_area_limit(self) -> None:
+        first = sample_point()
+        second = sample_point(
+            logical_point_id="temperature",
+            protocol_offset=102,
+        )
+        canonical_map = sample_map(first, second)
+        options = {
+            "max_gap": 0,
+            "max_quantities": {"holding-register": 2},
+        }
+        plan = compile_read_plan((first, second)).to_dict()
+        plan["planning_options"] = options
+        plan = artifact_envelope(
+            plan,
+            schema_version="modbus-read-plan/v1",
+            inputs={
+                "canonical_map": canonical_map,
+                "planning_options": options,
+            },
+        )
+
+        codes = {
+            finding.code
+            for finding in preflight_common(canonical_map, plan, mode="final")
+        }
+
+        self.assertIn("BLOCK_QUANTITY_EXCEEDS_PLAN_OPTION", codes)
 
     def test_same_offset_in_two_areas_is_not_a_duplicate(self) -> None:
         holding = sample_point()

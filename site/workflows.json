@@ -50,8 +50,18 @@
             "modbus-map/v1",
             "modbus-map-evidence-review/v1"
           ],
-          "output": "modbus-map/v1",
-          "instruction": "Resolve every blocking hold and record each decision as new evidence before the map is used for final generation."
+          "output": "modbus-review-decisions/v1",
+          "instruction": "Resolve every blocking hold and state each value or exclusion with a reason and evidence reference."
+        },
+        {
+          "id": "apply-decisions",
+          "kind": "skill",
+          "skill": "apply-modbus-review-decisions",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-review-decisions/v1"
+          ],
+          "output": "modbus-map/v1"
         }
       ],
       "stop_conditions": [
@@ -83,8 +93,19 @@
             "modbus-map/v1",
             "modbus-byte-order-evidence/v1"
           ],
-          "output": "modbus-map/v1",
+          "output": "modbus-review-decisions/v1",
           "instruction": "Confirm one explicit layout with engineering evidence. Keep the raw sample and all candidates."
+        },
+        {
+          "id": "apply-layout",
+          "kind": "skill",
+          "skill": "apply-modbus-review-decisions",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-review-decisions/v1",
+            "modbus-byte-order-evidence/v1"
+          ],
+          "output": "modbus-map/v1"
         }
       ],
       "stop_conditions": [
@@ -143,8 +164,28 @@
             "modbus-map/v1",
             "modbus-byte-order-evidence/v1"
           ],
-          "output": "modbus-map/v1",
+          "output": "modbus-review-decisions/v1",
           "instruction": "Confirm the explicit layout and record the sample as evidence."
+        },
+        {
+          "id": "apply-layout",
+          "kind": "skill",
+          "skill": "apply-modbus-review-decisions",
+          "inputs": [
+            "modbus-map/v1",
+            "modbus-review-decisions/v1",
+            "modbus-byte-order-evidence/v1"
+          ],
+          "output": "modbus-map/v1"
+        },
+        {
+          "id": "plan-final",
+          "kind": "skill",
+          "skill": "compile-modbus-read-plan",
+          "inputs": [
+            "modbus-map/v1"
+          ],
+          "output": "modbus-read-plan/v1"
         },
         {
           "id": "build-final",

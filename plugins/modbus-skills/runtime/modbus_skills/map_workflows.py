@@ -103,6 +103,8 @@ _DATATYPE_ALIASES = {
     "float64": "float64",
     "double": "float64",
     "ieee754 double": "float64",
+    "string": "string",
+    "ascii": "string",
 }
 _BYTE_ORDER_ALIASES = {
     "abcd": "ABCD",
@@ -171,9 +173,20 @@ _KNOWN_SOURCE_FIELDS = {
     "engineering_offset",
     "engineering_unit",
     "access",
+    "access_readable",
+    "access_writable",
+    "access_write_requires",
+    "access_notes",
+    "writable",
     "function_code",
     "function",
     "fc",
+    "function_read_codes",
+    "function_write_codes",
+    "read_function_codes",
+    "write_function_codes",
+    "include",
+    "reviewed",
     "minimum",
     "maximum",
     "expected_interval_seconds",
@@ -270,6 +283,54 @@ def _boolean(value: Any) -> bool | None:
         if normalized == "false":
             return False
     raise ValueError("value must be true or false")
+
+
+def _review_flag(value: Any, *, label: str) -> bool | None:
+    """Parse source-workflow yes/no flags without treating them as approval."""
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes"}:
+            return True
+        if normalized in {"false", "no"}:
+            return False
+    raise ValueError(f"{label} must be true, false, yes, or no")
+
+
+def _function_codes(value: Any, *, label: str) -> tuple[int, ...]:
+    """Parse a source list of function codes without selecting one silently."""
+
+    if value in (None, ""):
+        return ()
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        raw_values = list(value)
+    else:
+        raw_values = [
+            item
+            for item in re.split(r"[,;/|\s]+", str(value).strip())
+            if item
+        ]
+    result: list[int] = []
+    for raw in raw_values:
+        text = str(raw).strip().lower()
+        if text.startswith("fc"):
+            text = text[2:]
+        try:
+            code = int(text[:-1], 16) if text.endswith("h") else int(text, 0)
+        except ValueError:
+            try:
+                code = int(text, 10)
+            except ValueError as exc:
+                raise ValueError(f"{label} contains invalid function code {raw!r}") from exc
+        if not 1 <= code <= 255:
+            raise ValueError(f"{label} function codes must be from 1 through 255")
+        if code not in result:
+            result.append(code)
+    return tuple(result)
 
 
 def _byte_order_input(
@@ -372,13 +433,13 @@ def _source_hold_items(value: Any) -> tuple[list[Any], list[dict[str, Any]]]:
 
 
 def _stable_point_id(record: Mapping[str, Any], normalized_parts: Mapping[str, Any]) -> str:
+    name = _text(record.get("name"))
     payload = {
-        "source": record.get("_source"),
-        "name": record.get("name"),
-        "raw_address": normalized_parts.get("raw_address"),
+        "name": name,
         "route_id": normalized_parts.get("route_id"),
         "unit_id": normalized_parts.get("unit_id"),
         "area": normalized_parts.get("area"),
+        "fallback_address": None if name else normalized_parts.get("raw_address"),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return "point-" + hashlib.sha256(encoded).hexdigest()[:16]
@@ -387,11 +448,54 @@ def _stable_point_id(record: Mapping[str, Any], normalized_parts: Mapping[str, A
 def _normalize_one(
     record: Mapping[str, Any],
     defaults: Mapping[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], bool]:
     assumptions: list[dict[str, Any]] = []
     holds: list[dict[str, Any]] = []
     evidence: list[dict[str, Any]] = []
     source = record.get("_source") if isinstance(record.get("_source"), Mapping) else {}
+
+    source_review_flags: dict[str, bool | None] = {}
+    for field in ("include", "reviewed"):
+        raw_flag = record.get(field)
+        try:
+            source_review_flags[field] = _review_flag(raw_flag, label=field)
+        except (TypeError, ValueError) as exc:
+            source_review_flags[field] = None
+            holds.append(
+                _hold(
+                    f"point.source-{field}-invalid",
+                    str(exc),
+                    field,
+                    source=source,
+                    severity="error",
+                )
+            )
+        evidence.append(
+            {
+                "field": f"source_{field}",
+                "source_field": field if raw_flag not in (None, "") else None,
+                "source_value": raw_flag,
+                "value": source_review_flags[field],
+            }
+        )
+    if source_review_flags["include"] is False:
+        holds.append(
+            _hold(
+                "point.source-excluded",
+                "The source marks this row as excluded. Confirm its disposition before planning reads.",
+                "include",
+                source=source,
+            )
+        )
+    if source_review_flags["reviewed"] is False:
+        holds.append(
+            _hold(
+                "point.source-review-incomplete",
+                "The source marks this row as not reviewed. Complete human review before planning reads.",
+                "reviewed",
+                source=source,
+            )
+        )
 
     route_raw, route_source = _get(record, defaults, "route_id")
     route_id = _text(route_raw)
@@ -739,7 +843,12 @@ def _normalize_one(
                 source=source,
             )
         )
-    if word_span is not None and word_span > 1 and byte_order is None:
+    if (
+        word_span is not None
+        and word_span > 1
+        and datatype_value != "string"
+        and byte_order is None
+    ):
         if byte_raw in (None, ""):
             holds.append(
                 _hold(
@@ -836,6 +945,188 @@ def _normalize_one(
             )
         )
 
+    access_fields_present = any(
+        field in record
+        for field in ("access_readable", "access_writable", "writable")
+    )
+    readable_raw = record.get("access_readable")
+    declared_writable_raw = record.get("access_writable")
+    writable_raw = (
+        declared_writable_raw
+        if declared_writable_raw not in (None, "")
+        else record.get("writable")
+    )
+    try:
+        readable = _boolean(readable_raw)
+    except (TypeError, ValueError) as exc:
+        readable = None
+        holds.append(
+            _hold(
+                "point.access-readable-invalid",
+                str(exc),
+                "access_readable",
+                source=source,
+                severity="error",
+            )
+        )
+    try:
+        writable = _boolean(writable_raw)
+    except (TypeError, ValueError) as exc:
+        writable = None
+        holds.append(
+            _hold(
+                "point.access-writable-invalid",
+                str(exc),
+                "access_writable",
+                source=source,
+                severity="error",
+            )
+        )
+    if (
+        declared_writable_raw not in (None, "")
+        and record.get("writable") not in (None, "")
+    ):
+        try:
+            legacy_writable = _boolean(record.get("writable"))
+        except (TypeError, ValueError):
+            legacy_writable = None
+        if legacy_writable is not None and writable is not None and legacy_writable != writable:
+            holds.append(
+                _hold(
+                    "point.access-writable-conflict",
+                    "The source writable fields disagree.",
+                    "access_writable",
+                    source=source,
+                )
+            )
+    derived_access = None
+    if readable is True and writable is True:
+        derived_access = "read-write"
+    elif readable is True and writable is False:
+        derived_access = "read-only"
+    elif readable is False and writable is True:
+        derived_access = "write-only"
+    elif readable is False and writable is False:
+        holds.append(
+            _hold(
+                "point.access-invalid",
+                "The source marks the point as neither readable nor writable.",
+                "access",
+                source=source,
+            )
+        )
+
+    if access is None and derived_access is not None:
+        access = derived_access
+    read_plan_blocked_by_access = readable is False or (
+        access is None and access_fields_present and readable is not True
+    )
+    if access is not None and (
+        (readable is not None and readable != (access in {"read-only", "read-write"}))
+        or (writable is not None and writable != (access in {"write-only", "read-write"}))
+    ):
+        holds.append(
+            _hold(
+                "point.access-conflict",
+                "The source access fields disagree.",
+                "access",
+                source=source,
+            )
+        )
+    if access is None and access_fields_present and (
+        readable is None or writable is None
+    ):
+        holds.append(
+            _hold(
+                "point.access-unresolved",
+                "Review the source access columns and declare whether the point is readable.",
+                "access",
+                source=source,
+            )
+        )
+    if readable is False and access != "write-only":
+        holds.append(
+            _hold(
+                "point.not-readable",
+                "The source declares that the point is not readable. It cannot enter a read plan.",
+                "access_readable",
+                source=source,
+            )
+        )
+    if access == "write-only":
+        holds.append(
+            _hold(
+                "point.write-only-not-readable",
+                "The source declares a write-only point. It cannot enter a read plan.",
+                "access",
+                source=source,
+            )
+        )
+    if read_plan_blocked_by_access:
+        # The core planner excludes write-only access. Use that conservative
+        # planning state when the source does not establish readability.
+        access = "write-only"
+    evidence.append(
+        {
+            "field": "access",
+            "source_field": "access" if access_raw not in (None, "") else "access flags" if access_fields_present else None,
+            "source_value": {
+                "access": access_raw,
+                "readable": readable_raw,
+                "writable": writable_raw,
+            },
+            "value": access,
+        }
+    )
+
+    read_codes_raw = record.get(
+        "read_function_codes", record.get("function_read_codes")
+    )
+    write_codes_raw = record.get(
+        "write_function_codes", record.get("function_write_codes")
+    )
+    try:
+        read_function_codes = _function_codes(
+            read_codes_raw, label="read_function_codes"
+        )
+    except (TypeError, ValueError) as exc:
+        read_function_codes = ()
+        holds.append(
+            _hold(
+                "point.read-function-codes-invalid",
+                str(exc),
+                "read_function_codes",
+                source=source,
+                severity="error",
+            )
+        )
+    try:
+        write_function_codes = _function_codes(
+            write_codes_raw, label="write_function_codes"
+        )
+    except (TypeError, ValueError) as exc:
+        write_function_codes = ()
+        holds.append(
+            _hold(
+                "point.write-function-codes-invalid",
+                str(exc),
+                "write_function_codes",
+                source=source,
+                severity="error",
+            )
+        )
+    invalid_read_codes = [code for code in read_function_codes if code not in {1, 2, 3, 4}]
+    if invalid_read_codes:
+        holds.append(
+            _hold(
+                "point.read-function-code-unsafe",
+                "Read function declarations must use FC01 through FC04.",
+                "read_function_codes",
+                source=source,
+                severity="error",
+            )
+        )
+
     function_raw, function_source = _get(
         record, defaults, "function_code", "function", "fc"
     )
@@ -843,8 +1134,35 @@ def _normalize_one(
         RegisterArea.coerce(area_value)
     )
     if function_raw in (None, ""):
-        function_code = expected_function_code
-        if function_code is not None:
+        readability_blocked = access == "write-only" or readable is False or (
+            access is None and access_fields_present and readable is not True
+        )
+        if readability_blocked:
+            function_code = None
+            function_source = "access"
+        elif expected_function_code is not None and expected_function_code in read_function_codes:
+            function_code = expected_function_code
+            function_source = "read_function_codes"
+        elif read_function_codes and len(read_function_codes) == 1:
+            function_code = read_function_codes[0]
+            function_source = "read_function_codes"
+        else:
+            function_code = expected_function_code
+        if (
+            read_function_codes
+            and expected_function_code is not None
+            and expected_function_code not in read_function_codes
+        ):
+            holds.append(
+                _hold(
+                    "function-code.area-mismatch",
+                    f"{area_value} requires FC{expected_function_code:02d}, but the source read list does not include it.",
+                    "read_function_codes",
+                    source=source,
+                    severity="error",
+                )
+            )
+        if function_code is not None and function_source != "read_function_codes":
             assumptions.append(
                 _assumption(
                     "function-code-from-area",
@@ -914,6 +1232,20 @@ def _normalize_one(
             "value": function_code,
         }
     )
+    evidence.append(
+        {
+            "field": "function_codes",
+            "source_field": "function code lists",
+            "source_value": {
+                "read": read_codes_raw,
+                "write": write_codes_raw,
+            },
+            "value": {
+                "read": list(read_function_codes),
+                "write": list(write_function_codes),
+            },
+        }
+    )
 
     explicit_id = _text(record.get("logical_point_id", record.get("point_id", record.get("id"))))
     id_parts = {
@@ -965,6 +1297,12 @@ def _normalize_one(
         "offset": numeric_values["engineering_offset"],
         "engineering_unit": _text(record.get("engineering_unit")),
         "access": access,
+        "read_function_codes": list(read_function_codes),
+        "write_function_codes": list(write_function_codes),
+        "access_write_requires": _text(record.get("access_write_requires")),
+        "access_notes": _text(record.get("access_notes")),
+        "source_include": source_review_flags["include"],
+        "source_reviewed": source_review_flags["reviewed"],
         "minimum": numeric_values["minimum"],
         "maximum": numeric_values["maximum"],
         "expected_interval_seconds": numeric_values["expected_interval_seconds"],
@@ -978,7 +1316,7 @@ def _normalize_one(
         "source_location": dict(source),
         "unmapped_fields": unmapped_fields,
     }
-    return point, assumptions, holds
+    return point, assumptions, holds, explicit_id is None
 
 
 def normalize_map(
@@ -1021,11 +1359,33 @@ def normalize_map(
 
     points: list[dict[str, Any]] = []
     holds: list[dict[str, Any]] = list(unresolved_source_holds)
+    points_by_id: dict[str, list[dict[str, Any]]] = {}
+    generated_ids: set[str] = set()
     for record in raw_records:
-        point, point_assumptions, point_holds = _normalize_one(record, defaults)
+        point, point_assumptions, point_holds, generated_id = _normalize_one(
+            record, defaults
+        )
         points.append(point)
+        logical_point_id = point["logical_point_id"]
+        points_by_id.setdefault(logical_point_id, []).append(point)
+        if generated_id:
+            generated_ids.add(logical_point_id)
         assumptions.extend(point_assumptions)
         holds.extend(point_holds)
+    for logical_point_id in sorted(generated_ids):
+        matching_points = points_by_id[logical_point_id]
+        if len(matching_points) < 2:
+            continue
+        collision_hold = _hold(
+            "point.generated-logical-id-collision",
+            "Multiple source records generated the same logical point ID. Assign a unique explicit logical_point_id to each record.",
+            "logical_point_id",
+            point_id=logical_point_id,
+        )
+        collision_hold["details"] = {"record_count": len(matching_points)}
+        holds.append(collision_hold)
+        for point in matching_points:
+            point["normalization_status"] = "pending"
     return {
         "schema_version": "modbus-map/v1",
         "source_format": source_format,
@@ -1080,7 +1440,49 @@ def lint_map(canonical_map: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> 
                     "details": {"access": access},
                 }
             )
-    combined = workflow_holds + findings
+        write_codes = point.get("write_function_codes", ())
+        if isinstance(write_codes, Sequence) and not isinstance(
+            write_codes, (str, bytes, bytearray)
+        ) and write_codes:
+            findings.append(
+                {
+                    "code": "point.write-function-declared",
+                    "severity": "warning",
+                    "message": "The source declares one or more write functions. Generated workflows remain read-only.",
+                    "point_ids": [_text(point.get("logical_point_id")) or "<unresolved>"],
+                    "field": "write_function_codes",
+                    "details": {"function_codes": list(write_codes)},
+                }
+            )
+    def semantic_key(finding: Mapping[str, Any]) -> tuple[Any, ...]:
+        point_ids = finding.get("point_ids", ()) if isinstance(finding, Mapping) else ()
+        return (
+            finding.get("code") if isinstance(finding, Mapping) else None,
+            finding.get("severity") if isinstance(finding, Mapping) else None,
+            finding.get("field") if isinstance(finding, Mapping) else None,
+            tuple(str(value) for value in point_ids)
+            if isinstance(point_ids, Sequence)
+            and not isinstance(point_ids, (str, bytes, bytearray))
+            else (),
+        )
+
+    combined: list[dict[str, Any]] = []
+    seen_exact: set[str] = set()
+    workflow_keys = {semantic_key(finding) for finding in workflow_holds}
+    for finding in workflow_holds:
+        exact_key = json.dumps(finding, sort_keys=True, separators=(",", ":"), default=str)
+        if exact_key in seen_exact:
+            continue
+        seen_exact.add(exact_key)
+        combined.append(finding)
+    for finding in findings:
+        if semantic_key(finding) in workflow_keys:
+            continue
+        exact_key = json.dumps(finding, sort_keys=True, separators=(",", ":"), default=str)
+        if exact_key in seen_exact:
+            continue
+        seen_exact.add(exact_key)
+        combined.append(finding)
     severity_counts = Counter(str(finding.get("severity", "unknown")) for finding in combined if isinstance(finding, Mapping))
     return {
         "contract": "modbus-map-lint/v1",

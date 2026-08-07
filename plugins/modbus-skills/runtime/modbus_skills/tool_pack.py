@@ -14,8 +14,18 @@ from .exporters import (
     Artifact,
     ExportResult,
     ExporterInputError,
+    block_point_ids,
     canonical_map_hash,
     normalize_mode,
+    point_area,
+    point_byte_order,
+    point_datatype,
+    point_id,
+    point_name,
+    point_protocol_offset,
+    point_route_id,
+    point_unit_id,
+    point_word_count,
     read_plan_hash,
     stable_json,
 )
@@ -35,6 +45,70 @@ _SENSITIVE_SINGLE_KEY_PARTS = frozenset(
 _SENSITIVE_KEY_PAIRS = frozenset({("api", "key"), ("private", "key")})
 _PEM_KEY_BLOCK = re.compile(r"-{5}[A-Z ]+KEY-{5}")
 _WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+_EMBEDDED_WINDOWS_PATH = re.compile(
+    r"(?:^|[\s'\"`(=\[,])[A-Za-z]:[\\/]",
+    re.IGNORECASE,
+)
+_EMBEDDED_WINDOWS_UNC = re.compile(r"(?:^|[\s'\"`(=\[,])\\\\[^\\\s]+\\")
+_EMBEDDED_FORWARD_UNC = re.compile(r"(?:^|[\s'\"`(=\[,])//[^/\s]+/[^\s,;\"'`)\]}]+")
+_EMBEDDED_UNIX_PATH = re.compile(
+    r"(?:^|[\s'\"`(=:\[,])/(?!/)[^\s,;\"'`)\]}]+"
+)
+_EMBEDDED_TILDE_PATH = re.compile(r"(?:^|[\s'\"`(=:\[,])~[\\/][^\s,;\"'`)\]}]+")
+_SENSITIVE_VALUE = re.compile(
+    r"(?:"
+    r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}"
+    r"|\b(?:gh[opusr]_|github_pat_)[A-Za-z0-9_]{12,}"
+    r"|\b(?:sk-(?:proj-)?|sk_live_)[A-Za-z0-9_-]{20,}"
+    r"|\bglpat-[A-Za-z0-9_-]{20,}"
+    r"|\bxox[baprs]-[A-Za-z0-9-]{12,}"
+    r"|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"
+    r"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"
+    r"|\b[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@"
+    r"|\b(?:password|passwd|api[_ -]?key|client[_ -]?secret)\s*[:=]\s*[^\s,;]{4,}"
+    r")",
+    re.IGNORECASE,
+)
+_PORTABLE_POINT_FIELDS = (
+    "logical_point_id",
+    "name",
+    "route_id",
+    "unit_id",
+    "area",
+    "protocol_offset",
+    "datatype",
+    "word_span",
+    "word_count",
+    "byte_order",
+    "byte_order_confirmed",
+    "byte_order_status",
+    "scale",
+    "engineering_offset",
+    "engineering_unit",
+    "function_code",
+    "access",
+    "normalization_status",
+)
+_PORTABLE_HOLD_FIELDS = (
+    "code",
+    "severity",
+    "blocking",
+    "point_ids",
+    "field",
+)
+_PORTABLE_REQUEST_GROUPS = (
+    ("request_id", ("request_id", "block_id", "id")),
+    ("route_id", ("route_id", "route")),
+    ("unit_id", ("unit_id", "unitId", "slave_id")),
+    ("area", ("area", "object_type")),
+    ("function_code", ("function_code", "function")),
+    (
+        "start_offset",
+        ("start_offset", "start_address", "protocol_offset", "start"),
+    ),
+    ("quantity", ("quantity", "count", "size")),
+    ("poll_interval_ms", ("poll_interval_ms", "interval_ms")),
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +128,12 @@ class ToolPack:
             raise ExporterInputError("A tool pack cannot contain duplicate artifact paths")
         if self.status not in {"generated", "partial", "held"}:
             raise ExporterInputError(f"Invalid tool-pack status: {self.status!r}")
+        unsafe_paths = _find_unsafe_artifact_paths(self.artifacts)
+        if unsafe_paths:
+            raise ExporterInputError(
+                "Tool-pack artifacts contain sensitive values or absolute local "
+                "paths: " + ", ".join(unsafe_paths)
+            )
 
     def files(self) -> dict[str, bytes]:
         return {artifact.path: artifact.content for artifact in self.artifacts}
@@ -76,6 +156,12 @@ class ToolPack:
         if len(paths) != len(set(paths)):
             raise ExporterInputError(
                 "Additional ZIP artifacts must not duplicate pack paths"
+            )
+        unsafe_paths = _find_unsafe_artifact_paths(artifacts)
+        if unsafe_paths:
+            raise ExporterInputError(
+                "ZIP artifacts contain sensitive values or absolute local paths: "
+                + ", ".join(unsafe_paths)
             )
 
         buffer = BytesIO()
@@ -125,10 +211,20 @@ def build_tool_pack(
     plan_value = _as_mapping(read_plan, label="read_plan")
     selected = _normalize_targets(targets)
     target_options = dict(target_options or {})
+    map_digest = canonical_map_hash(map_value)
+    plan_digest = read_plan_hash(plan_value)
+    portable_map_value = _portable_runtime_map(map_value, map_digest=map_digest)
+    portable_plan_value = _portable_read_plan(
+        plan_value,
+        plan_digest=plan_digest,
+    )
     sensitive_paths = [
         *_find_sensitive_paths(map_value, path="canonical_map"),
+        *_find_sensitive_value_paths(portable_map_value, path="canonical_map"),
         *_find_sensitive_paths(plan_value, path="read_plan"),
+        *_find_sensitive_value_paths(plan_value, path="read_plan"),
         *_find_sensitive_paths(target_options, path="target_options"),
+        *_find_sensitive_value_paths(target_options, path="target_options"),
     ]
     if sensitive_paths:
         raise ExporterInputError(
@@ -139,6 +235,13 @@ def build_tool_pack(
         *_find_absolute_local_path_fields(map_value, path="canonical_map"),
         *_find_absolute_local_path_fields(plan_value, path="read_plan"),
         *_find_absolute_local_path_fields(target_options, path="target_options"),
+        *_find_embedded_local_path_fields(
+            portable_map_value, path="canonical_map"
+        ),
+        *_find_embedded_local_path_fields(plan_value, path="read_plan"),
+        *_find_embedded_local_path_fields(
+            target_options, path="target_options"
+        ),
     ]
     if absolute_local_path_fields:
         raise ExporterInputError(
@@ -163,8 +266,8 @@ def build_tool_pack(
             result = export_modscan(map_value, plan_value, mode=mode, options=options)
         results.append(result)
 
-    map_digest = canonical_map_hash(map_value)
-    plan_digest = read_plan_hash(plan_value)
+    portable_map_digest = canonical_map_hash(portable_map_value)
+    portable_plan_digest = read_plan_hash(portable_plan_value)
     for result in results:
         if result.map_hash != map_digest or result.read_plan_hash != plan_digest:
             raise ExporterInputError(
@@ -182,14 +285,14 @@ def build_tool_pack(
         Artifact.text(
             "canonical-map.json",
             "application/json",
-            stable_json(map_value),
-            "canonical-map",
+            stable_json(portable_map_value),
+            "portable-runtime-map",
         ),
         Artifact.text(
             "read-plan.json",
             "application/json",
-            stable_json(plan_value),
-            "read-plan",
+            stable_json(portable_plan_value),
+            "portable-read-plan",
         ),
     ]
     for result in results:
@@ -202,6 +305,12 @@ def build_tool_pack(
             "tool-pack-instructions",
         )
     )
+    unsafe_artifacts = _find_unsafe_artifact_paths(content_artifacts)
+    if unsafe_artifacts:
+        raise ExporterInputError(
+            "Generated tool-pack artifacts contain sensitive values or absolute "
+            "local paths: " + ", ".join(unsafe_artifacts)
+        )
     paths = [artifact.path for artifact in content_artifacts]
     if len(paths) != len(set(paths)):
         raise ExporterInputError("Target adapters produced duplicate tool-pack paths")
@@ -216,7 +325,9 @@ def build_tool_pack(
         "status": status,
         "mode": mode,
         "map_hash": map_digest,
+        "portable_map_hash": portable_map_digest,
         "read_plan_hash": plan_digest,
+        "portable_read_plan_hash": portable_plan_digest,
         "targets": [result.to_manifest() for result in results],
         "artifacts": [
             artifact.to_manifest()
@@ -237,11 +348,7 @@ def build_tool_pack(
         },
         assumptions=[],
         findings=finding_values,
-        holds=[
-            finding
-            for finding in finding_values
-            if str(finding.get("severity", "")).lower() in {"error", "hold"}
-        ],
+        holds=group_blocking_findings(finding_values),
     )
     manifest_artifact = Artifact.text(
         "manifest.json",
@@ -261,6 +368,12 @@ def build_tool_pack(
         "checksums",
     )
     artifacts = tuple([*content_artifacts, manifest_artifact, checksum_artifact])
+    unsafe_artifacts = _find_unsafe_artifact_paths(artifacts)
+    if unsafe_artifacts:
+        raise ExporterInputError(
+            "Generated tool-pack artifacts contain sensitive values or absolute "
+            "local paths: " + ", ".join(unsafe_artifacts)
+        )
     return ToolPack(
         status=status,
         mode=mode,
@@ -269,6 +382,43 @@ def build_tool_pack(
         target_results=tuple(results),
         artifacts=artifacts,
     )
+
+
+def group_blocking_findings(
+    findings: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Group the same blocking problem across target adapters.
+
+    Per-target findings remain available for audit. The top-level hold list is
+    a human review queue, so it reports one problem with all affected targets
+    instead of repeating the same text once per adapter.
+    """
+
+    grouped: dict[str, dict[str, Any]] = {}
+    targets_by_key: dict[str, list[str]] = {}
+    for finding in findings:
+        if str(finding.get("severity", "")).lower() not in {"error", "hold"}:
+            continue
+        common = {
+            str(key): value
+            for key, value in finding.items()
+            if key not in {"target", "targets"}
+        }
+        key = stable_json(common)
+        grouped.setdefault(key, common)
+        target = str(finding.get("target", "")).strip()
+        if target and target not in targets_by_key.setdefault(key, []):
+            targets_by_key[key].append(target)
+
+    result: list[dict[str, Any]] = []
+    target_order = {target: index for index, target in enumerate(SUPPORTED_TARGETS)}
+    for key, common in grouped.items():
+        targets = sorted(
+            targets_by_key.get(key, ()),
+            key=lambda target: (target_order.get(target, len(target_order)), target),
+        )
+        result.append({**common, **({"targets": targets} if targets else {})})
+    return result
 
 
 def _normalize_targets(targets: Sequence[str]) -> tuple[str, ...]:
@@ -298,6 +448,227 @@ def _as_mapping(value: Any, *, label: str) -> Mapping[str, Any]:
     raise ExporterInputError(f"{label} must be a mapping or provide to_dict()")
 
 
+def _portable_runtime_map(
+    canonical_map: Mapping[str, Any], *, map_digest: str
+) -> dict[str, Any]:
+    """Return the minimum reviewed map data needed with a portable tool pack."""
+
+    raw_points = canonical_map.get("points", canonical_map.get("registers", ()))
+    points = (
+        [_portable_point(point) for point in raw_points if isinstance(point, Mapping)]
+        if isinstance(raw_points, Sequence)
+        and not isinstance(raw_points, (str, bytes, bytearray))
+        else []
+    )
+
+    holds = _portable_holds(
+        canonical_map.get("holds", ()), invalid_code="map.hold-invalid"
+    )
+
+    return artifact_envelope(
+        {"points": points},
+        schema_version="modbus-runtime-map/v1",
+        artifact_type="modbus-runtime-map",
+        input_hashes={"canonical_map": map_digest},
+        assumptions=[],
+        findings=[],
+        holds=holds,
+    )
+
+
+def _portable_read_plan(
+    read_plan: Mapping[str, Any], *, plan_digest: str
+) -> dict[str, Any]:
+    """Return an allowlisted plan without caller-supplied audit metadata."""
+
+    raw_requests = read_plan.get(
+        "requests", read_plan.get("blocks", read_plan.get("read_blocks", ()))
+    )
+    requests: list[dict[str, Any]] = []
+    if isinstance(raw_requests, Sequence) and not isinstance(
+        raw_requests, (str, bytes, bytearray)
+    ):
+        for request in raw_requests:
+            if not isinstance(request, Mapping):
+                continue
+            projected: dict[str, Any] = {}
+            for canonical_field, aliases in _PORTABLE_REQUEST_GROUPS:
+                present, selected_value = _selected_alias(request, aliases)
+                if present:
+                    projected[canonical_field] = selected_value
+            if "end_offset" in request:
+                projected["end_offset"] = request["end_offset"]
+            if "point_ids" in request:
+                raw_point_ids = request.get("point_ids")
+                projected["point_ids"] = (
+                    _portable_point_ids(raw_point_ids)
+                    if isinstance(raw_point_ids, Sequence)
+                    and not isinstance(raw_point_ids, (str, bytes, bytearray))
+                    else []
+                )
+            elif "points" in request:
+                raw_points = request.get("points")
+                projected["points"] = (
+                    [_portable_trace(trace) for trace in raw_points]
+                    if isinstance(raw_points, Sequence)
+                    and not isinstance(raw_points, (str, bytes, bytearray))
+                    else []
+                )
+            requests.append(projected)
+
+    holds = _portable_holds(
+        read_plan.get("holds", ()), invalid_code="read-plan.hold-invalid"
+    )
+    payload: dict[str, Any] = {
+        "requests": requests,
+        "has_holds": bool(holds),
+        "source_read_plan_hash": plan_digest,
+    }
+    input_hashes = {"source_read_plan": plan_digest}
+    source_hashes = read_plan.get("input_hashes")
+    if isinstance(source_hashes, Mapping):
+        canonical_map_hash_value = source_hashes.get("canonical_map")
+        if isinstance(canonical_map_hash_value, str) and re.fullmatch(
+            r"[0-9a-fA-F]{64}", canonical_map_hash_value
+        ):
+            input_hashes["canonical_map"] = canonical_map_hash_value.lower()
+        planning_options_hash = source_hashes.get("planning_options")
+        if isinstance(planning_options_hash, str) and re.fullmatch(
+            r"[0-9a-fA-F]{64}", planning_options_hash
+        ):
+            input_hashes["planning_options"] = planning_options_hash.lower()
+    raw_options = read_plan.get("planning_options")
+    if isinstance(raw_options, Mapping):
+        portable_options = {
+            field: raw_options[field]
+            for field in ("max_gap", "max_quantities")
+            if field in raw_options
+        }
+        payload["planning_options"] = portable_options
+    return artifact_envelope(
+        payload,
+        schema_version="modbus-read-plan/v1",
+        artifact_type="modbus-read-plan",
+        input_hashes=input_hashes,
+        assumptions=[],
+        findings=[],
+        holds=holds,
+    )
+
+
+def _selected_alias(
+    value: Mapping[str, Any], aliases: Sequence[str]
+) -> tuple[bool, Any]:
+    for alias in aliases:
+        if alias in value:
+            return True, value[alias]
+    return False, None
+
+
+def _portable_trace(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return str(value) if value not in (None, "") else ""
+    result: dict[str, Any] = {}
+    present, identifier = _selected_alias(
+        value, ("point_id", "logical_point_id", "id")
+    )
+    if present:
+        result["logical_point_id"] = identifier
+    present, protocol_offset = _selected_alias(
+        value, ("protocol_offset", "pdu_offset")
+    )
+    if present:
+        result["protocol_offset"] = protocol_offset
+    present, span = _selected_alias(value, ("span", "word_span", "word_count"))
+    if present:
+        result["span"] = span
+    for field in ("relative_offset", "canonical_identity"):
+        if field in value:
+            result[field] = value[field]
+    return result
+
+
+def _portable_point_ids(values: Sequence[Any]) -> list[Any]:
+    """Preserve structured traces and filter unresolved scalar identifiers."""
+
+    result: list[Any] = []
+    for value in values:
+        if isinstance(value, Mapping):
+            result.append(_portable_trace(value))
+        else:
+            result.extend(block_point_ids({"point_ids": [value]}))
+    return result
+
+
+def _portable_holds(value: Any, *, invalid_code: str) -> list[dict[str, Any]]:
+    holds: list[dict[str, Any]] = []
+    if not isinstance(value, Sequence) or isinstance(
+        value, (str, bytes, bytearray)
+    ):
+        return holds
+    for hold in value:
+        if isinstance(hold, Mapping):
+            holds.append(
+                {
+                    field: hold[field]
+                    for field in _PORTABLE_HOLD_FIELDS
+                    if field in hold
+                }
+            )
+        else:
+            holds.append(
+                {
+                    "code": invalid_code,
+                    "severity": "hold",
+                    "blocking": True,
+                }
+            )
+    return holds
+
+
+def _portable_point(point: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize only fields that a target adapter can place in output."""
+
+    result = {
+        field: point[field]
+        for field in _PORTABLE_POINT_FIELDS
+        if field in point
+    }
+    identifier = point_id(point)
+    if identifier is not None:
+        result["logical_point_id"] = identifier
+        result["name"] = point_name(point, identifier)
+    route_value = point.get("route_id", point.get("route"))
+    if route_value not in (None, ""):
+        result["route_id"] = point_route_id(point)
+    unit_value = point_unit_id(point)
+    if unit_value is not None:
+        result["unit_id"] = unit_value
+    area_value = point_area(point)
+    if area_value is not None:
+        result["area"] = area_value
+    offset_value = point_protocol_offset(point)
+    if offset_value is not None:
+        result["protocol_offset"] = offset_value
+    datatype_value = point_datatype(point)
+    if datatype_value is not None:
+        result["datatype"] = datatype_value
+    word_count_value = point_word_count(point)
+    if word_count_value is not None:
+        result["word_span"] = word_count_value
+        result.pop("word_count", None)
+    byte_order_value = point_byte_order(point)
+    if byte_order_value is not None:
+        result["byte_order"] = byte_order_value
+    engineering_offset = point.get("engineering_offset", point.get("offset"))
+    if engineering_offset is not None:
+        result["engineering_offset"] = engineering_offset
+    engineering_unit = point.get("engineering_unit", point.get("unit"))
+    if engineering_unit is not None:
+        result["engineering_unit"] = engineering_unit
+    return result
+
+
 def _find_sensitive_paths(value: Any, *, path: str) -> list[str]:
     findings: list[str] = []
     if isinstance(value, Mapping):
@@ -314,6 +685,27 @@ def _find_sensitive_paths(value: Any, *, path: str) -> list[str]:
             findings.extend(_find_sensitive_paths(child, path=f"{path}[{index}]"))
         return findings
     if isinstance(value, str) and _PEM_KEY_BLOCK.search(value.upper()):
+        findings.append(path)
+    return findings
+
+
+def _find_sensitive_value_paths(value: Any, *, path: str) -> list[str]:
+    findings: list[str] = []
+    if isinstance(value, Mapping):
+        for raw_key, child in value.items():
+            findings.extend(
+                _find_sensitive_value_paths(child, path=f"{path}.{raw_key}")
+            )
+        return findings
+    if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ):
+        for index, child in enumerate(value):
+            findings.extend(
+                _find_sensitive_value_paths(child, path=f"{path}[{index}]")
+            )
+        return findings
+    if isinstance(value, str) and _SENSITIVE_VALUE.search(value):
         findings.append(path)
     return findings
 
@@ -343,6 +735,58 @@ def _find_absolute_local_path_fields(value: Any, *, path: str) -> list[str]:
     if isinstance(value, str) and _is_absolute_local_path(value):
         findings.append(path)
     return findings
+
+
+def _find_embedded_local_path_fields(value: Any, *, path: str) -> list[str]:
+    findings: list[str] = []
+    if isinstance(value, Mapping):
+        for raw_key, child in value.items():
+            findings.extend(
+                _find_embedded_local_path_fields(
+                    child, path=f"{path}.{raw_key}"
+                )
+            )
+        return findings
+    if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ):
+        for index, child in enumerate(value):
+            findings.extend(
+                _find_embedded_local_path_fields(
+                    child, path=f"{path}[{index}]"
+                )
+            )
+        return findings
+    if isinstance(value, str) and _contains_embedded_local_path(value):
+        findings.append(path)
+    return findings
+
+
+def _contains_embedded_local_path(value: str) -> bool:
+    lowered = value.lower()
+    return (
+        "file://" in lowered
+        or _EMBEDDED_WINDOWS_PATH.search(value) is not None
+        or _EMBEDDED_WINDOWS_UNC.search(value) is not None
+        or _EMBEDDED_FORWARD_UNC.search(value) is not None
+        or _EMBEDDED_UNIX_PATH.search(value) is not None
+        or _EMBEDDED_TILDE_PATH.search(value) is not None
+    )
+
+
+def _find_unsafe_artifact_paths(artifacts: Sequence[Artifact]) -> list[str]:
+    """Return paths of emitted text artifacts that violate export safety."""
+
+    findings: list[str] = []
+    for artifact in artifacts:
+        text = artifact.content.decode("utf-8", errors="ignore")
+        if (
+            _PEM_KEY_BLOCK.search(text.upper()) is not None
+            or _SENSITIVE_VALUE.search(text) is not None
+            or _contains_embedded_local_path(text)
+        ):
+            findings.append(artifact.path)
+    return sorted(set(findings))
 
 
 def _is_absolute_local_path(value: str) -> bool:
@@ -396,9 +840,11 @@ def _pack_readme(
 
 {target_lines}
 
-All selected targets were derived from `canonical-map.json` and
-`read-plan.json`. The hashes in `manifest.json` identify those exact inputs.
-Use `checksums.sha256` to detect changed files.
+`canonical-map.json` and `read-plan.json` are allowlisted portable runtime
+projections. They exclude review records, source evidence, and other local-only
+metadata. The source map and source read-plan hashes in `manifest.json` bind the
+pack to the exact reviewed inputs. Use `checksums.sha256` to detect changed
+portable files.
 
 Read each target README before use. Review endpoint values, unit IDs, areas,
 protocol offsets, quantities, poll intervals, datatypes, and byte orders.

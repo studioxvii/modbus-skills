@@ -141,6 +141,8 @@ _KNOWN_BYTE_ORDERS = {
     "little-endian",
     "word swap",
     "byte swap",
+    "big endian byte swap",
+    "little endian byte swap",
 }
 
 _XML_UNSAFE = re.compile(br"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
@@ -249,7 +251,10 @@ def _enum_warnings(record: Mapping[str, Any], source: Mapping[str, Any]) -> list
         value = record.get(field)
         if value in (None, ""):
             continue
-        if str(value).strip().lower() not in known:
+        normalized = re.sub(
+            r"\s+", " ", str(value).strip().lower().replace("_", " ")
+        )
+        if normalized not in known:
             warnings.append(
                 {
                     "code": code,

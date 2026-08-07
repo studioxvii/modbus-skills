@@ -17,6 +17,8 @@ Invoke only the selected target adapters. Keep every output tied to the same map
 6. Report each target as `generated`, `held`, `unsupported`, or `verification-failed`.
 7. Verify each selected target independently.
 
+For `final` mode, require the read plan to contain the SHA-256 hash of the exact supplied map. Rebuild the plan after any map decision. The portable pack contains allowlisted map and read-plan projections, not private review notes, arbitrary plan metadata, or source evidence.
+
 Support all seven non-empty combinations of Node-RED, Modpoll, and ModScan. A failed target must not hide successful outputs. Never generate a target that the user did not select.
 
 Read `references/tool-pack.md` for the request and manifest contracts.

@@ -13,6 +13,7 @@ RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
 FIXTURES = ROOT / "tests" / "fixtures" / "outputs"
 sys.path.insert(0, str(RUNTIME))
 
+from modbus_skills.artifacts import artifact_envelope  # noqa: E402
 from modbus_skills.modpoll import (  # noqa: E402
     WITTE_DESKTOP_MAX_ROUTE_READS_PER_SECOND,
     WITTE_DESKTOP_MIN_SCAN_INTERVAL_MS,
@@ -46,9 +47,14 @@ def point(**updates: object) -> dict[str, object]:
 
 def inputs(*points: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
     values = list(points or (point(),))
+    canonical_map = {"schema_version": "modbus-map/v1", "points": values}
     return (
-        {"schema_version": "modbus-map/v1", "points": values},
-        compile_read_plan(values).to_dict(),
+        canonical_map,
+        artifact_envelope(
+            compile_read_plan(values).to_dict(),
+            schema_version="modbus-read-plan/v1",
+            inputs={"canonical_map": canonical_map},
+        ),
     )
 
 
@@ -112,11 +118,31 @@ class ModpollExporterTests(unittest.TestCase):
         self.assertIn("raw_read_0001_word_001", config)
         self.assertNotIn("float32", config)
 
+    def test_gavinying_maps_fixed_length_strings_from_word_count(self) -> None:
+        string_point = point(
+            datatype="string",
+            word_span=8,
+            byte_order=None,
+            byte_order_confirmed=False,
+        )
+        canonical_map, read_plan = inputs(string_point)
+
+        result = export_modpoll(
+            canonical_map, read_plan, profile="gavinying-cli"
+        )
+
+        self.assertEqual("generated", result.status)
+        self.assertIn(",string16,r,", text(result, "default.csv"))
+
     def test_gavinying_holds_mixed_endian_points_in_one_block(self) -> None:
         first = point(logical_point_id="first", protocol_offset=100, byte_order="ABCD")
         second = point(logical_point_id="second", protocol_offset=102, byte_order="CDAB")
         canonical_map = {"points": [first, second]}
-        read_plan = compile_read_plan([first, second], max_gap=0).to_dict()
+        read_plan = artifact_envelope(
+            compile_read_plan([first, second], max_gap=0).to_dict(),
+            schema_version="modbus-read-plan/v1",
+            inputs={"canonical_map": canonical_map},
+        )
         result = export_modpoll(canonical_map, read_plan, profile="gavinying-cli")
         self.assertEqual("held", result.status)
         self.assertIn("MODPOLL_BLOCK_ENDIAN_CONFLICT", {finding.code for finding in result.findings})

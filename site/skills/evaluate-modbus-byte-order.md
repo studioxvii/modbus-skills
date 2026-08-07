@@ -13,7 +13,7 @@ Evaluate raw Modbus register words as explicit byte and word layouts, signed and
 ## Try it
 
 ```text
-Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words.
+Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words. Require the sampled point identity before a human records a decision.
 ```
 
 Source: `plugins/modbus-skills/skills/evaluate-modbus-byte-order/SKILL.md`

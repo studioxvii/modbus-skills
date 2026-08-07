@@ -1,0 +1,18 @@
+{
+  "schema_version": "modbus-human-workflow-corpus/v1",
+  "status": "public-synthetic-fixture",
+  "workflow_cases": {
+    "clean": "clean",
+    "byte_order": "byte-order",
+    "safety": "safety",
+    "compare_before": "compare-before",
+    "compare_after": "compare-after"
+  },
+  "maps": [
+    {"id": "clean", "file": "clean.csv", "expected_point_count": 2, "sha256": "c60bbd531fb3237e1da77cea18e6f721ebcc9e65349b0ce8bfa622d8423d7af4"},
+    {"id": "byte-order", "file": "byte-order.csv", "expected_point_count": 2, "sha256": "6d63b5916233959bbc5920630783e523d35d4d66af4f24bfcd8a61c68d86c447"},
+    {"id": "safety", "file": "safety.csv", "expected_point_count": 3, "sha256": "6c99e5e34c67aa3e5b80b70326fadbc0eb54df7be680b318046b6296a55701d8"},
+    {"id": "compare-before", "file": "compare-before.csv", "expected_point_count": 1, "sha256": "3dc6aa5e863a099ea3ff3868270781827b06882b3fe1ee40bfde754fb53c8d4c"},
+    {"id": "compare-after", "file": "compare-after.csv", "expected_point_count": 1, "sha256": "8a96eb0cf6bae1c9d6bdc018ba2056b90b02f3ef96d444c6963c7282df250b77"}
+  ]
+}

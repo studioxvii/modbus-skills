@@ -19,6 +19,7 @@ FIXTURES = ROOT / "tests" / "fixtures" / "workflows"
 sys.path.insert(0, str(RUNTIME))
 
 from modbus_skills.artifacts import assert_artifact_envelope  # noqa: E402
+from modbus_skills.artifacts import stable_input_hash  # noqa: E402
 from modbus_skills.cli import COMMANDS, run_cli  # noqa: E402
 
 
@@ -50,6 +51,9 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual(0, lint_receipt["blocking"])
         plan_receipt = self.run_command("compile-read-plan", "--input", canonical, "--output", plan)
         self.assertEqual("planned", plan_receipt["status"])
+        self.assertEqual(
+            "planned", json.loads(plan.read_text(encoding="utf-8"))["status"]
+        )
         return canonical, lint, plan
 
     def test_every_skill_wrapper_command_is_registered(self) -> None:
@@ -76,7 +80,7 @@ class CliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual("ready-for-human-review", diagnose_receipt["status"])
         self.assertTrue((diagnosis / "parsed.json").is_file())
-        self.assertTrue((diagnosis / "canonical-map.json").is_file())
+        self.assertTrue((diagnosis / "map-draft.json").is_file())
 
         for command, folder, extra in (
             ("generate-node-red", "node", ()),
@@ -112,6 +116,54 @@ class CliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual("generated", witte["status"])
         self.assertTrue(any((self.root / "witte-v12" / "modpoll" / "witte-v12-xml").glob("*.xml")))
+
+    def test_read_plan_preserves_map_holds_and_excludes_access_held_points(self) -> None:
+        source = self.root / "access-held-map.json"
+        source.write_text(
+            json.dumps(
+                {
+                    "points": [
+                        {
+                            "logical_point_id": "unknown-access",
+                            "route_id": "lab",
+                            "unit_id": 1,
+                            "area": "holding-register",
+                            "protocol_offset": 5,
+                            "source_address": {
+                                "raw": 5,
+                                "convention": "protocol-offset",
+                            },
+                            "datatype": "uint16",
+                            "word_span": 1,
+                        }
+                    ],
+                    "holds": [
+                        {
+                            "code": "point.access-unresolved",
+                            "severity": "hold",
+                            "blocking": True,
+                            "field": "access",
+                            "point_ids": ["unknown-access"],
+                            "message": "Review access.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        output = self.root / "access-held-plan.json"
+
+        receipt = self.run_command(
+            "compile-read-plan", "--input", source, "--output", output
+        )
+        result = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual("held", receipt["status"])
+        self.assertEqual([], result["requests"])
+        self.assertIn(
+            "point.access-unresolved",
+            {finding["code"] for finding in result["findings"]},
+        )
 
     def test_probe_and_final_combination_packs_are_deterministic(self) -> None:
         canonical, _, plan = self.prepare_map_and_plan()
@@ -182,6 +234,64 @@ class CliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual("generated", receipt["status"])
 
+    def test_capture_does_not_plan_excluded_unresolved_or_write_only_points(self) -> None:
+        def probe_point(identifier: str, offset: int, **updates: object) -> dict[str, object]:
+            value: dict[str, object] = {
+                "logical_point_id": identifier,
+                "route_id": "lab",
+                "unit_id": 1,
+                "area": "holding-register",
+                "protocol_offset": offset,
+                "datatype": "uint16",
+                "word_span": 1,
+                "access": "read-only",
+            }
+            value.update(updates)
+            return value
+
+        request = {
+            "canonical_map": {
+                "points": [
+                    probe_point("safe", 0),
+                    probe_point("source-excluded", 1, source_include=False),
+                    probe_point("unresolved-access", 2, access=None),
+                    probe_point("write-only", 3, access="write-only"),
+                ],
+                "holds": [
+                    {
+                        "code": "point.access-unresolved",
+                        "severity": "hold",
+                        "blocking": True,
+                        "field": "access",
+                        "point_ids": ["unresolved-access"],
+                        "message": "Review access.",
+                    }
+                ],
+            },
+            "targets": ["node-red"],
+        }
+        request_path = self.root / "unsafe-capture.json"
+        request_path.write_text(json.dumps(request), encoding="utf-8")
+        output = self.root / "unsafe-capture"
+
+        receipt = self.run_command(
+            "capture-sample",
+            "--request",
+            request_path,
+            "--output",
+            output,
+        )
+
+        self.assertEqual("held", receipt["status"])
+        plan = json.loads((output / "read-plan.json").read_text(encoding="utf-8"))
+        planned_ids = {
+            trace["logical_point_id"]
+            for block in plan["requests"]
+            for trace in block["points"]
+        }
+        self.assertEqual({"safe"}, planned_ids)
+        self.assertFalse((output / "node-red" / "flow.json").exists())
+
     def test_byte_order_analysis_comparison_remap_and_custom_format(self) -> None:
         canonical, _, _ = self.prepare_map_and_plan()
 
@@ -196,6 +306,12 @@ class CliIntegrationTests(unittest.TestCase):
             byte_evidence,
         )
         self.assertEqual(12, byte_receipt["candidates"])
+        incomplete_evidence = json.loads(byte_evidence.read_text(encoding="utf-8"))
+        self.assertIn(
+            "byte-order-sample-identity-incomplete",
+            {hold["code"] for hold in incomplete_evidence["holds"]},
+        )
+        self.assertNotIn("winner", incomplete_evidence)
 
         analysis = self.root / "analysis.json"
         analysis_receipt = self.run_command(
@@ -236,6 +352,145 @@ class CliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual("ready-for-human-review", custom_receipt["status"])
         self.assertIn("tank_level", (custom / "rendered-output.txt").read_text(encoding="utf-8"))
+
+    def test_byte_order_evidence_keeps_complete_sample_identity(self) -> None:
+        capture = self.root / "identified-capture.json"
+        capture.write_text(
+            json.dumps(
+                {
+                    "schema_version": "capture/v1",
+                    "points": [
+                        {
+                            "logical_point_id": "run-time",
+                            "route_id": "serial-a",
+                            "unit_id": 7,
+                            "area": "holding-register",
+                            "address": {"protocol_offset": 25},
+                        }
+                    ],
+                    "samples": [
+                        {
+                            "sample_id": "sample-identified-001",
+                            "point_id": "run-time",
+                            "timestamp": "2026-08-07T15:30:00-04:00",
+                            "raw_words": [0, 3600],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        output = self.root / "identified-byte-order.json"
+
+        receipt = self.run_command(
+            "evaluate-byte-order",
+            "--input",
+            capture,
+            "--types",
+            "uint32,int32,float32",
+            "--output",
+            output,
+        )
+
+        self.assertEqual(12, receipt["candidates"])
+        evidence = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(
+            {
+                "sample_id": "sample-identified-001",
+                "point_id": "run-time",
+                "route_id": "serial-a",
+                "unit_id": 7,
+                "area": "holding-register",
+                "protocol_offset": 25,
+                "timestamp": "2026-08-07T15:30:00-04:00",
+            },
+            evidence["sample_identity"],
+        )
+        self.assertEqual(
+            {"byte-order-human-confirmation-required"},
+            {hold["code"] for hold in evidence["holds"]},
+        )
+        self.assertEqual(
+            {"sample-identified-001"},
+            {candidate["sample_id"] for candidate in evidence["candidates"]},
+        )
+        self.assertNotIn("winner", evidence)
+
+    def test_byte_order_rejects_sample_id_relabeling(self) -> None:
+        capture = self.root / "sample-id-capture.json"
+        capture.write_text(
+            json.dumps(
+                {
+                    "sample_id": "actual-sample",
+                    "raw_words": [0, 3600],
+                    "point_id": "runtime",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "protocol_offset": 10,
+                    "timestamp": "2026-08-07T12:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            stderr
+        ):
+            code = run_cli(
+                "evaluate-byte-order",
+                [
+                    "--input",
+                    str(capture),
+                    "--sample-id",
+                    "relabelled-sample",
+                    "--output",
+                    str(self.root / "relabelled.json"),
+                ],
+            )
+        self.assertNotEqual(0, code)
+        self.assertIn("does not match", stderr.getvalue())
+
+    def test_capture_analysis_accepts_flat_csv_samples(self) -> None:
+        capture = self.root / "capture.csv"
+        capture.write_text(
+            "sample_id,point_id,timestamp,value,response_ms,raw_words\n"
+            "sample-1,runtime,2026-08-07T12:00:00Z,3600,8,0x0000 0x0E10\n"
+            "sample-2,runtime,2026-08-07T12:00:10Z,3590,9,0x0000 0x0E06\n",
+            encoding="utf-8",
+        )
+        output = self.root / "csv-analysis.json"
+
+        receipt = self.run_command(
+            "analyze-capture", "--input", capture, "--output", output
+        )
+        result = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual("analyzed", receipt["status"])
+        self.assertEqual(2, result["points"]["runtime"]["sample_count"])
+        self.assertEqual(
+            12,
+            result["points"]["runtime"]["byte_order_evidence"]["candidate_count"],
+        )
+
+    def test_capture_analysis_ignores_blank_csv_raw_word_cells(self) -> None:
+        capture = self.root / "capture-with-blank-raw-words.csv"
+        capture.write_text(
+            "sample_id,point_id,timestamp,value,raw_words\n"
+            "sample-1,voltage,2026-08-07T12:00:00Z,230,17254;0\n"
+            "sample-2,current,2026-08-07T12:00:00Z,5,\n",
+            encoding="utf-8",
+        )
+        output = self.root / "blank-raw-words-analysis.json"
+
+        self.run_command("analyze-capture", "--input", capture, "--output", output)
+        result = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertNotIn(
+            "BYTE_ORDER_EVIDENCE_INVALID",
+            {finding["code"] for finding in result["findings"]},
+        )
+        self.assertNotIn("byte_order_evidence", result["points"]["current"])
 
     def test_pdf_extraction_returns_a_clear_hold_without_extractor(self) -> None:
         source = self.root / "synthetic.pdf"
@@ -336,6 +591,35 @@ class CliIntegrationTests(unittest.TestCase):
             artifact=review,
             schema_version="modbus-map-evidence-review/v1",
         )
+        decisions = self.root / "contract-decisions.json"
+        decisions.write_text(
+            json.dumps(
+                {
+                    "schema_version": "modbus-review-decisions/v1",
+                    "canonical_map_hash": stable_input_hash(
+                        json.loads(canonical.read_text(encoding="utf-8"))
+                    ),
+                    "review_id": "contract-review-001",
+                    "reviewed_at": "2026-08-07T12:00:00Z",
+                    "reviewer": "test-reviewer",
+                    "approve_map": True,
+                    "decisions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        approved = self.root / "contract-approved-map.json"
+        run(
+            "apply-review-decisions",
+            "--map",
+            canonical,
+            "--decisions",
+            decisions,
+            "--output",
+            approved,
+            artifact=approved,
+            schema_version="modbus-map/v1",
+        )
         plan = self.root / "contract-plan.json"
         run(
             "compile-read-plan",
@@ -358,7 +642,7 @@ class CliIntegrationTests(unittest.TestCase):
         artifacts.extend(
             [
                 (diagnosis / "parsed.json", "candidate-map/v1"),
-                (diagnosis / "canonical-map.json", "modbus-map/v1"),
+                (diagnosis / "map-draft.json", "modbus-map/v1"),
                 (diagnosis / "lint.json", "modbus-map-lint/v1"),
                 (
                     diagnosis / "review.json",

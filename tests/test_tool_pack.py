@@ -13,10 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
 sys.path.insert(0, str(RUNTIME))
 
-from modbus_skills.artifacts import assert_artifact_envelope  # noqa: E402
-from modbus_skills.exporters import Artifact, ExporterInputError  # noqa: E402
+from modbus_skills.artifacts import (  # noqa: E402
+    artifact_envelope,
+    assert_artifact_envelope,
+    stable_input_hash,
+)
+from modbus_skills.exporters import (  # noqa: E402
+    Artifact,
+    ExporterInputError,
+    preflight_common,
+)
 from modbus_skills.read_plan import compile_read_plan  # noqa: E402
-from modbus_skills.tool_pack import SUPPORTED_TARGETS, build_tool_pack  # noqa: E402
+from modbus_skills.tool_pack import (  # noqa: E402
+    SUPPORTED_TARGETS,
+    _find_unsafe_artifact_paths,
+    build_tool_pack,
+)
 
 
 def point(**updates: object) -> dict[str, object]:
@@ -42,7 +54,13 @@ def point(**updates: object) -> dict[str, object]:
 
 def inputs(value: dict[str, object] | None = None) -> tuple[dict[str, object], object]:
     selected = value or point()
-    return {"schema_version": "modbus-map/v1", "points": [selected]}, compile_read_plan([selected])
+    canonical_map = {"schema_version": "modbus-map/v1", "points": [selected]}
+    read_plan = compile_read_plan([selected])
+    return canonical_map, artifact_envelope(
+        read_plan.to_dict(),
+        schema_version="modbus-read-plan/v1",
+        inputs={"canonical_map": canonical_map},
+    )
 
 
 class ToolPackTests(unittest.TestCase):
@@ -62,18 +80,25 @@ class ToolPackTests(unittest.TestCase):
                 self.assertTrue(all(result.map_hash == pack.map_hash for result in pack.target_results))
                 self.assertTrue(all(result.read_plan_hash == pack.read_plan_hash for result in pack.target_results))
 
-    def test_actual_compile_read_plan_object_is_accepted_end_to_end(self) -> None:
-        canonical_map, read_plan = inputs()
+    def test_actual_compile_read_plan_object_is_accepted_in_probe_mode(self) -> None:
+        canonical_map, _ = inputs()
+        read_plan = compile_read_plan(canonical_map["points"])
         pack = build_tool_pack(
             canonical_map,
             read_plan,
             targets=("node-red", "modpoll", "modscan"),
+            mode="probe",
         )
         self.assertEqual("generated", pack.status)
         flow = json.loads(pack.files()["node-red/flow.json"])
-        reads = [node for node in flow if node["type"] == "modbus-read"]
+        reads = [node for node in flow if node["type"] == "modbus-flex-getter"]
+        injects = [node for node in flow if node["type"] == "inject"]
         self.assertEqual(len(read_plan.requests), len(reads))
-        self.assertEqual(str(read_plan.requests[0].start_offset), reads[0]["adr"])
+        self.assertEqual(len(read_plan.requests), len(injects))
+        self.assertEqual(
+            read_plan.requests[0].start_offset,
+            json.loads(injects[0]["payload"])["address"],
+        )
 
     def test_checksums_cover_every_file_except_the_checksum_file(self) -> None:
         canonical_map, read_plan = inputs()
@@ -145,6 +170,19 @@ class ToolPackTests(unittest.TestCase):
                 )
             )
 
+    def test_additional_zip_artifact_cannot_bypass_export_scan(self) -> None:
+        canonical_map, read_plan = inputs()
+        pack = build_tool_pack(canonical_map, read_plan, targets=("modscan",))
+        unsafe = Artifact.text(
+            "result.json",
+            "application/json",
+            '{"source":"/etc/private/map.csv"}',
+            "workflow-result",
+        )
+
+        with self.assertRaises(ExporterInputError):
+            pack.to_zip_bytes((unsafe,))
+
     def test_empty_duplicate_and_unknown_target_selections_fail(self) -> None:
         canonical_map, read_plan = inputs()
         cases = ((), ("node-red", "node-red"), ("unknown",))
@@ -153,8 +191,8 @@ class ToolPackTests(unittest.TestCase):
                 build_tool_pack(canonical_map, read_plan, targets=selection)
 
     def test_sensitive_map_and_plan_fields_fail_closed(self) -> None:
-        canonical_map, read_plan_object = inputs()
-        base_plan = read_plan_object.to_dict()
+        canonical_map, read_plan = inputs()
+        base_plan = json.loads(json.dumps(read_plan))
         sensitive_keys = (
             "password",
             "api_key",
@@ -188,8 +226,8 @@ class ToolPackTests(unittest.TestCase):
             build_tool_pack(unsafe_map, read_plan, targets=("modscan",))
 
     def test_absolute_local_path_values_are_not_packaged(self) -> None:
-        canonical_map, read_plan_object = inputs()
-        base_plan = read_plan_object.to_dict()
+        canonical_map, read_plan = inputs()
+        base_plan = json.loads(json.dumps(read_plan))
         cases = (
             ("map", "/var/tmp/private-register-map.csv"),
             ("plan", r"D:\\Engineering\\private-register-map.csv"),
@@ -219,6 +257,394 @@ class ToolPackTests(unittest.TestCase):
                 self.assertIn("absolute local path", str(caught.exception))
                 self.assertNotIn(unsafe_value, str(caught.exception))
 
+    def test_portable_map_excludes_review_audit_and_source_evidence(self) -> None:
+        secret = "bearer-eyJhbGciOiJIUzI1NiJ9-private"
+        local_path = "/" + "Users/operator/Private/customer-map.csv"
+        selected = point(
+            review_decisions=[
+                {"reason": f"Use {secret} from local file {local_path}"}
+            ],
+            source_evidence=[{"source_value": f"Local source is {local_path}"}],
+            _source={"note": f"Imported from {local_path}"},
+        )
+        canonical_map = {
+            "schema_version": "modbus-map/v1",
+            "points": [selected],
+            "review_decisions": [
+                {"reviewer": secret, "reason": f"Reviewed file {local_path}"}
+            ],
+            "approval": {"reviewer": secret},
+            "source_evidence": [{"note": f"Evidence file is {local_path}"}],
+            "holds": [],
+        }
+        read_plan = artifact_envelope(
+            compile_read_plan([selected]).to_dict(),
+            schema_version="modbus-read-plan/v1",
+            inputs={"canonical_map": canonical_map},
+        )
+
+        pack = build_tool_pack(
+            canonical_map,
+            read_plan,
+            targets=("node-red", "modpoll", "modscan"),
+        )
+
+        self.assertEqual("generated", pack.status)
+        for path, content in pack.files().items():
+            with self.subTest(path=path):
+                text = content.decode("utf-8", errors="ignore")
+                self.assertNotIn(secret, text)
+                self.assertNotIn(local_path, text)
+        portable_map = json.loads(pack.files()["canonical-map.json"])
+        self.assertEqual("modbus-runtime-map/v1", portable_map["schema_version"])
+        self.assertEqual("modbus-runtime-map", portable_map["artifact_type"])
+        self.assertNotIn("review_decisions", portable_map)
+        self.assertNotIn("approval", portable_map)
+        self.assertNotIn("source_evidence", portable_map)
+        self.assertNotIn("review_decisions", portable_map["points"][0])
+        self.assertNotIn("source_evidence", portable_map["points"][0])
+        self.assertNotIn("_source", portable_map["points"][0])
+        self.assertEqual("pressure", portable_map["points"][0]["logical_point_id"])
+        self.assertEqual(
+            "Discharge Pressure", portable_map["points"][0]["name"]
+        )
+        manifest = json.loads(pack.files()["manifest.json"])
+        self.assertRegex(manifest["portable_map_hash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(
+            manifest["portable_read_plan_hash"], r"^[0-9a-f]{64}$"
+        )
+
+    def test_portable_read_plan_excludes_unapproved_metadata(self) -> None:
+        canonical_map, read_plan = inputs()
+        private_values = (
+            "Example customer",
+            "reviewer@example.invalid",
+            "Private register description",
+        )
+        read_plan["source_evidence"] = [
+            {
+                "customer": private_values[0],
+                "reviewer_email": private_values[1],
+                "source_excerpt": private_values[2],
+            }
+        ]
+
+        pack = build_tool_pack(
+            canonical_map,
+            read_plan,
+            targets=("node-red", "modpoll", "modscan"),
+        )
+
+        portable_plan = json.loads(pack.files()["read-plan.json"])
+        self.assertEqual("modbus-read-plan/v1", portable_plan["schema_version"])
+        self.assertNotIn("source_evidence", portable_plan)
+        self.assertEqual(
+            pack.read_plan_hash,
+            portable_plan["source_read_plan_hash"],
+        )
+        self.assertEqual(
+            pack.map_hash,
+            portable_plan["input_hashes"]["canonical_map"],
+        )
+        for path, content in pack.files().items():
+            with self.subTest(path=path):
+                text = content.decode("utf-8", errors="ignore")
+                for private_value in private_values:
+                    self.assertNotIn(private_value, text)
+
+    def test_portable_read_plan_preserves_stale_map_provenance(self) -> None:
+        original_map, read_plan = inputs()
+        changed_map = json.loads(json.dumps(original_map))
+        changed_map["points"][0]["name"] = "Changed display name"
+
+        pack = build_tool_pack(
+            changed_map,
+            read_plan,
+            targets=("modscan",),
+            mode="final",
+        )
+        portable_plan = json.loads(pack.files()["read-plan.json"])
+        codes = {
+            finding.code
+            for finding in preflight_common(
+                changed_map,
+                portable_plan,
+                mode="final",
+            )
+        }
+
+        self.assertEqual("held", pack.status)
+        self.assertEqual(
+            read_plan["input_hashes"]["canonical_map"],
+            portable_plan["input_hashes"]["canonical_map"],
+        )
+        self.assertIn("PLAN_MAP_HASH_MISMATCH", codes)
+
+    def test_portable_read_plan_preserves_missing_options_failure(self) -> None:
+        canonical_map, read_plan = inputs()
+        options = {"max_gap": 0, "max_quantities": {}}
+        read_plan["input_hashes"]["planning_options"] = stable_input_hash(
+            options
+        )
+
+        pack = build_tool_pack(
+            canonical_map,
+            read_plan,
+            targets=("modscan",),
+            mode="final",
+        )
+        portable_plan = json.loads(pack.files()["read-plan.json"])
+        codes = {
+            finding.code
+            for finding in preflight_common(
+                canonical_map,
+                portable_plan,
+                mode="final",
+            )
+        }
+
+        self.assertEqual("held", pack.status)
+        self.assertEqual(
+            read_plan["input_hashes"]["planning_options"],
+            portable_plan["input_hashes"]["planning_options"],
+        )
+        self.assertIn("PLAN_OPTIONS_MISSING", codes)
+
+    def test_portable_read_plan_preserves_supported_request_aliases(self) -> None:
+        canonical_map, _ = inputs()
+        requests = (
+            (
+                {
+                    "block_id": "alias-unit-id",
+                    "route": "default",
+                    "unitId": 1,
+                    "object_type": "holding-register",
+                    "function": 3,
+                    "start_address": 100,
+                    "count": 2,
+                    "poll_interval_ms": 2500,
+                    "points": ["pressure"],
+                },
+                {
+                    "request_id": "alias-unit-id",
+                    "route_id": "default",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "function_code": 3,
+                    "start_offset": 100,
+                    "quantity": 2,
+                    "poll_interval_ms": 2500,
+                    "points": ["pressure"],
+                },
+            ),
+            (
+                {
+                    "id": "alias-slave-id",
+                    "route": "default",
+                    "slave_id": 1,
+                    "object_type": "holding-register",
+                    "function": 3,
+                    "start": 100,
+                    "size": 2,
+                    "interval_ms": 3000,
+                    "point_ids": ["pressure"],
+                },
+                {
+                    "request_id": "alias-slave-id",
+                    "route_id": "default",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "function_code": 3,
+                    "start_offset": 100,
+                    "quantity": 2,
+                    "poll_interval_ms": 3000,
+                    "point_ids": ["pressure"],
+                },
+            ),
+        )
+        for request, expected in requests:
+            with self.subTest(request=request.get("block_id", request.get("id"))):
+                read_plan = {"requests": [request]}
+                pack = build_tool_pack(
+                    canonical_map,
+                    read_plan,
+                    targets=("modscan",),
+                    mode="probe",
+                )
+                projected = json.loads(pack.files()["read-plan.json"])[
+                    "requests"
+                ][0]
+
+                self.assertEqual("generated", pack.status)
+                self.assertEqual(expected, projected)
+
+    def test_portable_point_ids_use_adapter_id_resolution(self) -> None:
+        canonical_map, _ = inputs()
+        request = {
+            "request_id": "structured-point-ids",
+            "route_id": "default",
+            "unit_id": 1,
+            "area": "holding-register",
+            "function_code": 3,
+            "start_offset": 100,
+            "quantity": 2,
+            "point_ids": [
+                {
+                    "logical_point_id": "pressure",
+                    "protocol_offset": 100,
+                    "span": 2,
+                },
+                None,
+                "unknown",
+                "",
+            ],
+        }
+
+        pack = build_tool_pack(
+            canonical_map,
+            {"requests": [request]},
+            targets=("modscan",),
+            mode="probe",
+        )
+        portable_plan = json.loads(pack.files()["read-plan.json"])
+        projected = portable_plan["requests"][0]
+
+        self.assertEqual("generated", pack.status)
+        self.assertEqual(
+            [
+                {
+                    "logical_point_id": "pressure",
+                    "protocol_offset": 100,
+                    "span": 2,
+                }
+            ],
+            projected["point_ids"],
+        )
+        self.assertFalse(preflight_common(canonical_map, portable_plan, mode="probe"))
+
+    def test_portable_point_ids_preserve_trace_validation_failures(self) -> None:
+        canonical_map, read_plan = inputs()
+        request = read_plan["requests"][0]
+        request.pop("points")
+        request["point_ids"] = [
+            {
+                "logical_point_id": "pressure",
+                "protocol_offset": 99,
+                "span": 2,
+                "relative_offset": 99,
+            }
+        ]
+        source_codes = {
+            finding.code
+            for finding in preflight_common(canonical_map, read_plan, mode="final")
+        }
+
+        pack = build_tool_pack(
+            canonical_map,
+            read_plan,
+            targets=("modscan",),
+            mode="final",
+        )
+        portable_plan = json.loads(pack.files()["read-plan.json"])
+        portable_codes = {
+            finding.code
+            for finding in preflight_common(
+                canonical_map,
+                portable_plan,
+                mode="final",
+            )
+        }
+
+        self.assertEqual("held", pack.status)
+        self.assertIn("BLOCK_POINT_TRACE_MISMATCH", source_codes)
+        self.assertIn("BLOCK_POINT_TRACE_MISMATCH", portable_codes)
+
+    def test_portable_read_plan_drops_shadowed_alias_values(self) -> None:
+        canonical_map, _ = inputs()
+        private_text = "ACME Confidential Program Falcon"
+        read_plan = {
+            "requests": [
+                {
+                    "request_id": "read-0001",
+                    "id": private_text,
+                    "route_id": "default",
+                    "route": private_text,
+                    "unit_id": 1,
+                    "slave_id": 247,
+                    "area": "holding-register",
+                    "object_type": private_text,
+                    "function_code": 3,
+                    "function": 4,
+                    "start_offset": 100,
+                    "start": 60000,
+                    "quantity": 2,
+                    "size": 125,
+                    "points": [
+                        {
+                            "point_id": "pressure",
+                            "id": private_text,
+                        }
+                    ],
+                }
+            ]
+        }
+
+        pack = build_tool_pack(
+            canonical_map,
+            read_plan,
+            targets=("modscan",),
+            mode="probe",
+        )
+
+        self.assertEqual("generated", pack.status)
+        for path, content in pack.files().items():
+            with self.subTest(path=path):
+                self.assertNotIn(
+                    private_text,
+                    content.decode("utf-8", errors="ignore"),
+                )
+
+    def test_target_visible_secret_and_embedded_path_values_fail_closed(self) -> None:
+        cases = (
+            "Pressure from /" + "Users/operator/Private/customer-map.csv",
+            "Pressure from /var/tmp/customer-map.csv",
+            "Pressure from /etc/scada/customer-map.csv",
+            "Pressure from /opt/company/customer-map.csv",
+            "Pressure from /srv/maps/customer-map.csv",
+            "Pressure from /mnt/share/customer-map.csv",
+            "Pressure from //workstation/share/customer-map.csv",
+            "Pressure source `/etc/scada/customer-map.csv`",
+            "postgresql://engineer:correct-horse@db.invalid/scada",
+            "Bearer eyJhbGciOiJIUzI1NiJ9.customer.signature",
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJlbmdpbmVlciJ9.ZmFrZXNpZ25hdHVyZQ",
+            "AKIAIOSFODNN7EXAMPLE",
+            "github" + "_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
+            "s" + "k-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+        )
+        for unsafe_name in cases:
+            with self.subTest(value=unsafe_name):
+                canonical_map, read_plan = inputs(point(name=unsafe_name))
+                with self.assertRaises(ExporterInputError) as caught:
+                    build_tool_pack(
+                        canonical_map,
+                        read_plan,
+                        targets=("node-red", "modpoll", "modscan"),
+                    )
+                self.assertNotIn(unsafe_name, str(caught.exception))
+
+    def test_final_artifact_scan_detects_generated_unsafe_text(self) -> None:
+        unsafe = Artifact.text(
+            "target/generated.txt",
+            "text/plain",
+            "Connect with redis://operator:private-value@host.invalid/0",
+            "generated-target-output",
+        )
+
+        self.assertEqual(
+            ["target/generated.txt"],
+            _find_unsafe_artifact_paths((unsafe,)),
+        )
+
     def test_final_unresolved_value_holds_every_selected_target(self) -> None:
         unresolved = point(byte_order=None, byte_order_confirmed=False)
         canonical_map, read_plan = inputs(unresolved)
@@ -226,6 +652,9 @@ class ToolPackTests(unittest.TestCase):
         self.assertEqual("held", pack.status)
         self.assertTrue(all(result.status == "held" for result in pack.target_results))
         self.assertFalse(any(path.startswith(("node-red/", "modpoll/", "modscan/")) for path in pack.files()))
+        manifest = json.loads(pack.files()["manifest.json"])
+        self.assertEqual(1, len(manifest["holds"]))
+        self.assertEqual(list(SUPPORTED_TARGETS), manifest["holds"][0]["targets"])
 
     def test_each_modbus_write_function_is_rejected(self) -> None:
         canonical_map, _ = inputs()

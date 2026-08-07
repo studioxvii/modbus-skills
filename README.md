@@ -1,10 +1,12 @@
 # Modbus Skills
 
-Modbus Skills is a public-ready collection of read-only engineering workflows for ChatGPT and Codex.
+Modbus Skills is a pre-public collection of read-only engineering workflows for ChatGPT and Codex.
 
 The repository contains focused skills, a deterministic local runtime, synthetic test fixtures, and a repo-local OpenAI plugin marketplace. Every tracked file is intended to be safe for future public review.
 
 It solves common Modbus register-map, address, byte-order, polling, configuration, and capture-analysis problems. It does not contain product code or private customer data.
+
+The repository currently contains 19 focused skills.
 
 ## Main workflows
 
@@ -28,6 +30,7 @@ It solves common Modbus register-map, address, byte-order, polling, configuratio
 | Find map errors and blocking holds | `lint-modbus-map` |
 | Run the complete map review chain | `diagnose-modbus-map` |
 | Review confirmed, inferred, and rejected evidence | `review-modbus-evidence` |
+| Apply an explicit human review record to a map | `apply-modbus-review-decisions` |
 | Preview address-basis conversions | `remap-modbus-addresses` |
 | Compare device or firmware maps | `compare-modbus-maps` |
 | Build a bounded raw-word probe | `capture-modbus-sample` |
@@ -48,12 +51,13 @@ Byte order does not need to be known before the first tool artifact exists.
 2. Generate a `probe` artifact for Node-RED, Modpoll, ModScan, or a selected combination.
 3. Run one physical read and save the raw 16-bit words.
 4. Evaluate all supported byte and word layouts from the same immutable sample.
-5. Confirm the layout with engineering evidence.
-6. Regenerate the selected targets in `final` mode.
+5. Confirm the layout with engineering evidence and a sample identity: point, route, unit, area, and protocol offset.
+6. Apply the recorded human decision to create a new reviewed map.
+7. Rebuild the read plan and regenerate the selected targets in `final` mode.
 
-In a Node-RED probe, one physical read node feeds all four 32-bit layouts in real time: `ABCD`, `BADC`, `CDAB`, and `DCBA`. Each layout includes `uint32`, `int32`, and `float32` values from the same immutable raw words. This math does not create more Modbus traffic.
+In a Node-RED probe, one manual physical read feeds all four 32-bit layouts in real time: `ABCD`, `BADC`, `CDAB`, and `DCBA`. Each layout includes `uint32`, `int32`, and `float32` values from the same immutable raw words. This math does not create more Modbus traffic. Probe and final flows have no scheduled or deploy-time reads.
 
-Modpoll and ModScan probe artifacts collect the same raw words. The byte-order skill evaluates them after the one-read external gate. The evaluator reports candidates. It does not select a winner.
+Modpoll and ModScan probe artifacts collect the same raw words. The byte-order skill evaluates them after the one-read external gate. The evaluator reports candidates. Evidence never selects a winner. A human records the selected layout and the evidence before final generation.
 
 ## Install in Codex
 
@@ -70,7 +74,7 @@ After this repository becomes public, the marketplace can also be added from `st
 
 The project generates read-only artifacts. It does not generate Modbus writes, broadcast requests, network discovery scans, or unbounded polling.
 
-Unresolved engineering choices become holds. A final artifact requires confirmed address basis, register area, unit identifier, datatype, and applicable byte order.
+Unresolved engineering choices become holds. A source `include` or `reviewed` flag is retained as evidence, but it never becomes this repository's approval. A final artifact requires confirmed address basis, register area, unit identifier, datatype, and applicable byte order. Its read plan must contain the SHA-256 hash of the exact reviewed map. A plan must be rebuilt after any approved map change.
 
 ## Repository layout
 
@@ -95,6 +99,8 @@ site/                                  Generated public catalog source
 - `research/issues.json` maps researched Modbus problems to primary sources and skills.
 - `site/llms.txt` and `site/llms-full.txt` provide direct agent-readable indexes.
 - `site/sitemap.xml`, canonical links, JSON-LD, Markdown mirrors, and JSON mirrors support search indexing.
+
+See the [verification status](docs/verification-status.md) for the current automated, real-map, blind-user, and native-test status.
 
 ## Verify locally
 

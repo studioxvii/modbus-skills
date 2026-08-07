@@ -1,0 +1,2 @@
+Address,Address Convention,Area,Unit ID,Route ID,Point ID,Name,Data Type,Word Count,Byte Order,Scale,Engineering Unit,Access
+5,protocol-offset,holding register,1,fixture,comparison_point,Comparison Point,UINT16,1,,1,,read-only

@@ -120,6 +120,25 @@ class CanonicalModelsTests(unittest.TestCase):
         self.assertEqual(known.effective_span, 4)
         self.assertIsNone(unknown.effective_span)
 
+    def test_string_uses_an_explicit_register_span(self):
+        point = CanonicalPoint.from_mapping(
+            {
+                "logical_point_id": "label",
+                "route_id": "r",
+                "unit_id": 1,
+                "area": "holding-register",
+                "protocol_offset": 0,
+                "source_address": {"raw": 0, "convention": "protocol-offset"},
+                "datatype": "string",
+                "word_span": 8,
+                "access": "read-only",
+            }
+        )
+
+        self.assertEqual(DataType.STRING, point.datatype)
+        self.assertEqual(8, point.effective_span)
+        self.assertEqual("read-only", point.access)
+
     def test_nested_byte_layout_preserves_pending_evidence(self):
         point = CanonicalPoint.from_mapping(
             {

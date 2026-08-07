@@ -56,6 +56,7 @@ class DataType(_StringEnum):
     UINT64 = "uint64"
     INT64 = "int64"
     FLOAT64 = "float64"
+    STRING = "string"
     UNKNOWN = "unknown"
 
     @property
@@ -168,10 +169,17 @@ class CanonicalPoint:
     scale: float | None = None
     engineering_offset: float | None = None
     function_code: int | None = None
+    access: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "area", RegisterArea.coerce(self.area))
         object.__setattr__(self, "datatype", DataType.coerce(self.datatype))
+        normalized_access = (
+            str(self.access).strip().lower().replace("_", "-").replace(" ", "-")
+            if self.access not in (None, "")
+            else None
+        )
+        object.__setattr__(self, "access", normalized_access)
         if not isinstance(self.source_address, SourceAddress):
             object.__setattr__(
                 self,
@@ -297,6 +305,7 @@ class CanonicalPoint:
                 value.get("engineering_offset", value.get("offset"))
             ),
             function_code=_optional_int(value.get("function_code")),
+            access=(str(value["access"]) if value.get("access") is not None else None),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -317,6 +326,7 @@ class CanonicalPoint:
             "scale": self.scale,
             "engineering_offset": self.engineering_offset,
             "function_code": self.function_code,
+            "access": self.access,
         }
 
 

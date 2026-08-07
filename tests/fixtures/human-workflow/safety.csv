@@ -1,0 +1,4 @@
+Address,Address Convention,Area,Unit ID,Route ID,Point ID,Name,Data Type,Word Count,Byte Order,Scale,Engineering Unit,Access
+0,protocol-offset,holding register,1,fixture,read_only,Read Only,UINT16,1,,1,,read-only
+1,protocol-offset,holding register,1,fixture,read_write,Read Write,UINT16,1,,1,,read-write
+2,protocol-offset,holding register,1,fixture,write_only,Write Only,UINT16,1,,1,,write-only

@@ -17,4 +17,6 @@ Generate documented text and CSV artifacts only.
 6. Inspect the setup manifest.
 7. Load the output through the named licensed application before calling it verified.
 
+In `final` mode, use only a plan whose `input_hashes.canonical_map` value matches the exact map. Recompile the plan after any review decision.
+
 Do not invent undocumented `.tst` or `.cfg` binary formats. Do not claim native verification until the generated plan is checked in the named installed application. Do not generate writes, discovery scans, or unbounded polling.

@@ -3,6 +3,10 @@
     "positive_stems": ["analyze this Modbus capture for stale and missing samples", "find communication and signal-quality problems in this Modbus data"],
     "negative": ["generate a Node-RED flow from this register map", "convert 40001 to a protocol offset", "compare two register maps", "write a coil to test the device", "summarize this unrelated network packet capture"]
   },
+  "apply-modbus-review-decisions": {
+    "positive_stems": ["record my confirmed Modbus map decisions", "apply reviewed byte order and exclusion decisions to this map"],
+    "negative": ["review this map without making a decision", "silently approve every unresolved field", "generate a Modpoll configuration", "write a value to the device", "compare two map revisions"]
+  },
   "ask-modbus": {
     "positive_stems": ["help me choose the right Modbus workflow", "route this unclear Modbus problem to the correct skill", "stop this unsafe request to write a Modbus coil", "reject this Modbus network discovery scan"],
     "negative": ["format this Word document", "review this Python pull request", "create a calendar event", "find a restaurant", "summarize this non-industrial PDF"]
