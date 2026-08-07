@@ -7,6 +7,7 @@ Verification date: 2026-08-07.
 - The OpenAI plugin validator accepted the plugin manifest.
 - The skill validator accepted all 19 skills.
 - The dependency-free repository suite passed 247 tests.
+- A clean checkout passed the same 247-test repository suite.
 - The public synthetic human workflow passed 41 of 41 checks.
 - A local rights-restricted corpus of seven real register maps passed 45 of 45 workflow checks. The maps and local artifacts are not in this repository.
 - Three blind users completed the novice probe, commissioning-pack, and map-review scenarios without repository edits or live device traffic.
@@ -28,4 +29,4 @@ The real-map workflow confirmed these behaviors:
 
 Native application tests did not run because Node-RED, the supported Modpoll implementations, Witte Modbus Poll, and ModScan are not installed in the test environment. Generated target manifests correctly report `verification: "not-run"`.
 
-Do not publish the repository until the remaining items in `publication-checklist.md` are complete. The open-source license, publisher contact, final URLs, native target tests, clean-checkout test, and new-task plugin install are still release gates.
+Do not publish the repository until the remaining items in `publication-checklist.md` are complete. The open-source license, publisher contact, final URLs, native target tests, and new-task plugin install are still release gates.
