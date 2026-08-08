@@ -1,0 +1,6 @@
+interface:
+  display_name: "Build Custom Export"
+  short_description: "Build a declarative text or CSV export"
+  default_prompt: "Use $build-custom-export to reproduce this documented export format."
+policy:
+  allow_implicit_invocation: false

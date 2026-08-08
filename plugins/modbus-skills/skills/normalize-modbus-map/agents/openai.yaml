@@ -1,4 +1,0 @@
-interface:
-  display_name: "Normalize Modbus Map"
-  short_description: "Normalize addresses and register metadata"
-  default_prompt: "Use $normalize-modbus-map to normalize this map without guessing unresolved fields."

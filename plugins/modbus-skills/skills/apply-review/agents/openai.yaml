@@ -1,0 +1,6 @@
+interface:
+  display_name: "Apply Review"
+  short_description: "Apply confirmed map decisions safely"
+  default_prompt: "Use $apply-review to apply these confirmed map decisions."
+policy:
+  allow_implicit_invocation: false

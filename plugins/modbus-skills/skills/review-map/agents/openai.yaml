@@ -1,0 +1,6 @@
+interface:
+  display_name: "Review Map"
+  short_description: "Review a raw Modbus map end to end"
+  default_prompt: "Use $review-map to review this raw register map without guessing."
+policy:
+  allow_implicit_invocation: false

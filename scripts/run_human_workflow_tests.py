@@ -323,7 +323,7 @@ def _diagnose(runner: WrapperRunner, source: Path, output: Path, defaults: Path 
     args: list[object] = ["--input", source, "--output", output]
     if defaults:
         args.extend(["--defaults", defaults])
-    receipt = runner.run("diagnose-modbus-map", args)
+    receipt = runner.run("review-map", args)
     canonical = _json(output / "map-draft.json")
     if not isinstance(canonical, Mapping):
         raise WorkflowFailure("diagnose did not create a canonical map object")
@@ -331,7 +331,7 @@ def _diagnose(runner: WrapperRunner, source: Path, output: Path, defaults: Path 
 
 
 def _compile(runner: WrapperRunner, canonical: Path, output: Path) -> tuple[dict[str, Any], Mapping[str, Any]]:
-    receipt = runner.run("compile-modbus-read-plan", ["--input", canonical, "--output", output])
+    receipt = runner.run("plan-reads", ["--input", canonical, "--output", output])
     value = _json(output)
     if not isinstance(value, Mapping):
         raise WorkflowFailure("read plan is not an object")
@@ -360,7 +360,7 @@ def _run_pack(runner: WrapperRunner, map_path: Path, plan_path: Path, output: Pa
     plan_local = _copy_for_request(plan_path, request_dir, "read-plan.json")
     request = request_dir / "request.json"
     _write_json(request, _pack_request(map_local, plan_local, mode=mode))
-    receipt = runner.run("build-modbus-tool-pack", ["--request", request, "--output", output])
+    receipt = runner.run("build-tool-pack", ["--request", request, "--output", output])
     manifest = _json(output / "manifest.json")
     if not isinstance(manifest, Mapping):
         raise WorkflowFailure("tool pack manifest is not an object")
@@ -697,7 +697,7 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
     _write_json(capture, _capture_for_point(selected, byte_profile))
     evidence_path = work / "byte-order-evidence.json"
     byte_receipt = runner.run(
-        "evaluate-modbus-byte-order",
+        "check-byte-order",
         [
             "--input",
             capture,
@@ -759,7 +759,7 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
     decision_path = work / "review-decisions.json"
     approved_path = work / "approved-map.json"
     _write_json(decision_path, decisions)
-    decision_receipt = runner.run("apply-modbus-review-decisions", ["--map", byte_path, "--decisions", decision_path, "--evidence", evidence_path, "--output", approved_path])
+    decision_receipt = runner.run("apply-review", ["--map", byte_path, "--decisions", decision_path, "--evidence", evidence_path, "--output", approved_path])
     approved = _json(approved_path)
     check["review-decisions"].check("decision-applies-with-audit", decision_receipt.get("status") == "approved" and approved.get("approval"), details={"status": decision_receipt.get("status"), "excluded": decision_receipt.get("excluded"), "hold_codes": sorted(_codes(approved))})
 
@@ -773,7 +773,7 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
     before_path, before_map = diagnosed[roles["compare_before"]]
     after_path, after_map = diagnosed[roles["compare_after"]]
     compare_path = work / "comparison.json"
-    compare_receipt = runner.run("compare-modbus-maps", ["--before", before_path, "--after", after_path, "--output", compare_path])
+    compare_receipt = runner.run("compare-maps", ["--before", before_path, "--after", after_path, "--output", compare_path])
     comparison = _json(compare_path)
     check["map-comparison"].check("revision-comparison-runs", compare_receipt.get("status") == "compared", details={"summary": comparison.get("summary", {})})
     # Reordering a serialized map must not create semantic changes.
@@ -782,7 +782,7 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
     reordered["points"] = list(reversed(list(after_map.get("points", ()))))
     _write_json(reorder_path, reordered)
     reorder_output = work / "comparison-reordered.json"
-    runner.run("compare-modbus-maps", ["--before", after_path, "--after", reorder_path, "--output", reorder_output])
+    runner.run("compare-maps", ["--before", after_path, "--after", reorder_path, "--output", reorder_output])
     reordered_result = _json(reorder_output)
     check["map-comparison"].check("row-order-does-not-change-map", int(reordered_result.get("summary", {}).get("changed", 0)) == 0 and int(reordered_result.get("summary", {}).get("added", 0)) == 0 and int(reordered_result.get("summary", {}).get("removed", 0)) == 0, details={"summary": reordered_result.get("summary", {})})
     if after_map.get("points"):
@@ -793,7 +793,7 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
         moved_path = work / "moved-map.json"
         _write_json(moved_path, moved)
         moved_output = work / "comparison-moved.json"
-        runner.run("compare-modbus-maps", ["--before", after_path, "--after", moved_path, "--output", moved_output])
+        runner.run("compare-maps", ["--before", after_path, "--after", moved_path, "--output", moved_output])
         moved_result = _json(moved_output)
         check["map-comparison"].check("address-move-is-explicit", int(moved_result.get("summary", {}).get("moved", 0)) == 1, details={"summary": moved_result.get("summary", {})})
 
@@ -831,11 +831,11 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
     )
     csv_analysis = work / "capture-csv-analysis.json"
     json_receipt = runner.run(
-        "analyze-modbus-capture",
+        "analyze-capture",
         ["--input", live_capture_path, "--now", "2026-08-07T12:01:40Z", "--output", json_analysis],
     )
     csv_receipt = runner.run(
-        "analyze-modbus-capture",
+        "analyze-capture",
         ["--input", csv_capture, "--format", "csv", "--options", analysis_options, "--now", "2026-08-07T12:01:40Z", "--output", csv_analysis],
     )
     json_value, csv_value = _json(json_analysis), _json(csv_analysis)

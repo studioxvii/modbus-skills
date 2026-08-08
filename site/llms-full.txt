@@ -1,166 +1,166 @@
 # Modbus Skills
 
-- [Analyze Modbus Capture](skills/analyze-modbus-capture.html): Analyze bounded live or recorded Modbus samples for communication errors, response timing, missing or duplicate samples, stale and flat values, range and rate changes, counter resets or wraps, discrete transitions, and byte-order stability. Use for troubleshooting read-only captures.
-- [Apply Modbus Review Decisions](skills/apply-modbus-review-decisions.html): Apply explicit human review decisions to a normalized Modbus map, preserve the decision evidence, exclude out-of-scope points, and approve the map only when no blocking hold remains. Use after evidence review or byte-order evaluation when a user confirms values or dispositions.
-- [Ask Modbus](skills/ask-modbus.html): Route an unclear Modbus engineering goal to one focused workflow. Use when the request does not provide enough information to select a focused skill. Also use as the safety stop for requests that ask for Modbus writes, broadcasts, network discovery, or unbounded polling. Do not use as the primary skill when a safe request names a concrete input, conversion, check, analysis, or target output that matches another skill.
-- [Build Modbus Tool Pack](skills/build-modbus-tool-pack.html): Build Node-RED, Modpoll, ModScan, or any non-empty combination from one reviewed Modbus map and one compiled read plan. Use when a user wants several tool outputs, a portable device pack, or is unsure which target to choose.
-- [Capture Modbus Sample](skills/capture-modbus-sample.html): Create a bounded read-only probe for collecting raw Modbus words through Node-RED, Modpoll, or ModScan. Use for sample acquisition before byte-order or datatype review. Use a target generator when the request is only to render a named output from an existing canonical map and read plan.
-- [Compare Modbus Maps](skills/compare-modbus-maps.html): Compare two Modbus register maps using composite point identity and report added, removed, moved, and field-level changes. Use for firmware revisions, device variants, vendor-document updates, or project map drift.
-- [Compile Modbus Read Plan](skills/compile-modbus-read-plan.html): Compile reviewed Modbus points into deterministic, bounded read blocks for function codes 01 through 04 with route, unit, area, gap, interval, and target limits. Use before generating Node-RED, Modpoll, ModScan, or combined tool packs.
-- [Diagnose Modbus Map](skills/diagnose-modbus-map.html): Run the complete Modbus register-map workflow from parsing through normalization, linting, evidence review, and human confirmation. Use for raw, imported, or messy maps that need end-to-end cleanup. Use lint-modbus-map instead when an already normalized map only needs deterministic checks.
-- [Evaluate Byte Order](skills/evaluate-modbus-byte-order.html): Evaluate raw Modbus register words as explicit byte and word layouts, signed and unsigned integers, and IEEE floating-point values from one immutable sample. Use for ABCD, BADC, CDAB, DCBA, endian, word-swap, implausible-value, or unknown encoding questions.
-- [Extract Modbus PDF](skills/extract-modbus-map-from-pdf.html): Extract candidate Modbus register rows and page evidence from a PDF manual. Use for device manuals, register-table PDFs, page-range extraction, OCR review, or when the user needs traceable rows rather than an unsupported summary.
-- [Generate Modpoll Config](skills/generate-modpoll-config.html): Generate deterministic read-only artifacts for Witte Modbus Poll or the open-source gavinying/modpoll tool. Use when the user specifically requests a Modpoll or Modbus Poll artifact, saved poll setup, CLI configuration CSV, or raw probe.
-- [Generate ModScan Config](skills/generate-modscan-config.html): Generate deterministic, documented, read-only ModScan setup and poll-plan artifacts from a canonical map and read plan. Use when the user specifically requests a ModScan setup, probe, or reusable read plan.
-- [Generate Node-RED Flow](skills/generate-node-red-flow.html): Generate deterministic, read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan. Use when the user specifically requests a Node-RED import, reusable flow, or probe-mode flow. Use capture-modbus-sample first when sample acquisition is the goal and no probe request exists.
-- [Infer Modbus Export](skills/infer-custom-modbus-export-format.html): Define a safe declarative text or CSV export format from a documented example and render it deterministically from a canonical Modbus map. Use for simple custom tool formats that do not require graphs, opaque binaries, or several related collections.
-- [Lint Modbus Map](skills/lint-modbus-map.html): Validate a normalized Modbus map for duplicate identities, overlaps, invalid ranges, datatype-width conflicts, area and function-code conflicts, unresolved fields, unsafe writes, and scoped byte-order inconsistencies. Use when explicit map fields exist and the goal is deterministic validation only. Use diagnose-modbus-map for end-to-end cleanup of a raw or messy map.
-- [Normalize Modbus Map](skills/normalize-modbus-map.html): Normalize a candidate Modbus map into explicit protocol offsets, register areas, unit identifiers, datatypes, word counts, access values, and byte-order states. Use after parsing or to represent mixed or unresolved source conventions without a requested map-wide conversion. Use remap-modbus-addresses when the user asks to convert a map between known conventions.
-- [Parse Modbus Map](skills/parse-modbus-map.html): Parse Modbus register maps from CSV, JSON, XML, XLSX, or structured text into candidate-map artifacts with source values, rejected rows, warnings, assumptions, and holds. Use when a user supplies a register list or wants a machine-readable map without silent engineering guesses.
-- [Remap Modbus Addresses](skills/remap-modbus-addresses.html): Preview and apply a requested map-wide conversion between protocol offsets, one-based offsets, and Modicon reference notation, with explicit areas and collision checks. Use when the source and target conventions are known. Use normalize-modbus-map first when source conventions or engineering fields remain mixed or unresolved.
-- [Review Modbus Evidence](skills/review-modbus-evidence.html): Review Modbus parsing evidence, rejected rows, inferred values, assumptions, warnings, and blocking holds. Use before promoting a candidate map, after PDF extraction, or when a user needs to know which register-map fields are confirmed versus inferred.
+- [Analyze Capture](skills/analyze-capture.html): Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence.
+- [Apply Review](skills/apply-review.html): Apply explicit human decisions to a Modbus map while preserving evidence, exclusions, holds, and audit history.
+- [Build Custom Export](skills/build-custom-export.html): Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map.
+- [Build Modpoll](skills/build-modpoll.html): Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles.
+- [Build ModScan](skills/build-modscan.html): Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
+- [Build Node-RED](skills/build-node-red.html): Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.
+- [Build Tool Pack](skills/build-tool-pack.html): Build any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and read plan.
+- [Capture Sample](skills/capture-sample.html): Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
+- [Check Byte Order](skills/check-byte-order.html): Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
+- [Check Map](skills/check-map.html): Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
+- [Compare Maps](skills/compare-maps.html): Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
+- [Extract PDF Map](skills/extract-pdf-map.html): Extract traceable Modbus register candidates and page evidence from a bounded PDF manual or page range.
+- [Modbus Help](skills/modbus-help.html): Choose the next Modbus skill or short workflow from the user's goal and current artifact.
+- [Normalize Map](skills/normalize-map.html): Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
+- [Parse Map](skills/parse-map.html): Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds.
+- [Plan Reads](skills/plan-reads.html): Compile reviewed Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
+- [Remap Addresses](skills/remap-addresses.html): Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation.
+- [Review Evidence](skills/review-evidence.html): Review Modbus source evidence, rejected rows, inferences, warnings, and holds before a human map decision.
+- [Review Map](skills/review-map.html): Review a raw or messy Modbus register map through parsing, normalization, checks, evidence, and human decisions.
 
-## Analyze Modbus Capture
+## Analyze Capture
 
-Analyze bounded live or recorded Modbus samples for communication errors, response timing, missing or duplicate samples, stale and flat values, range and rate changes, counter resets or wraps, discrete transitions, and byte-order stability. Use for troubleshooting read-only captures.
+Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence.
 
-Example: Use $analyze-modbus-capture to find communication and signal-quality problems in this capture.
-## Apply Modbus Review Decisions
+Example: Use $analyze-capture to inspect this bounded Modbus capture.
+## Apply Review
 
-Apply explicit human review decisions to a normalized Modbus map, preserve the decision evidence, exclude out-of-scope points, and approve the map only when no blocking hold remains. Use after evidence review or byte-order evaluation when a user confirms values or dispositions.
+Apply explicit human decisions to a Modbus map while preserving evidence, exclusions, holds, and audit history.
 
-Example: Use $apply-modbus-review-decisions to record my confirmed Modbus map decisions.
-## Ask Modbus
+Example: Use $apply-review to apply these confirmed map decisions.
+## Build Custom Export
 
-Route an unclear Modbus engineering goal to one focused workflow. Use when the request does not provide enough information to select a focused skill. Also use as the safety stop for requests that ask for Modbus writes, broadcasts, network discovery, or unbounded polling. Do not use as the primary skill when a safe request names a concrete input, conversion, check, analysis, or target output that matches another skill.
+Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map.
 
-Example: Use $ask-modbus to route my Modbus question.
-## Build Modbus Tool Pack
+Example: Use $build-custom-export to reproduce this documented export format.
+## Build Modpoll
 
-Build Node-RED, Modpoll, ModScan, or any non-empty combination from one reviewed Modbus map and one compiled read plan. Use when a user wants several tool outputs, a portable device pack, or is unsure which target to choose.
+Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles.
 
-Example: Use $build-modbus-tool-pack to generate Node-RED, Modpoll, and ModScan outputs from one map.
-## Capture Modbus Sample
+Example: Use $build-modpoll to build artifacts for this Modpoll profile.
+## Build ModScan
 
-Create a bounded read-only probe for collecting raw Modbus words through Node-RED, Modpoll, or ModScan. Use for sample acquisition before byte-order or datatype review. Use a target generator when the request is only to render a named output from an existing canonical map and read plan.
+Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
 
-Example: Use $capture-modbus-sample to create a read-only probe for these raw registers.
-## Compare Modbus Maps
+Example: Use $build-modscan to build a read-only ModScan setup.
+## Build Node-RED
 
-Compare two Modbus register maps using composite point identity and report added, removed, moved, and field-level changes. Use for firmware revisions, device variants, vendor-document updates, or project map drift.
+Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.
 
-Example: Use $compare-modbus-maps to find added, removed, and changed register points.
-## Compile Modbus Read Plan
+Example: Use $build-node-red to build a disabled read-only Node-RED flow.
+## Build Tool Pack
 
-Compile reviewed Modbus points into deterministic, bounded read blocks for function codes 01 through 04 with route, unit, area, gap, interval, and target limits. Use before generating Node-RED, Modpoll, ModScan, or combined tool packs.
+Build any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and read plan.
 
-Example: Use $compile-modbus-read-plan to build a traceable read-only poll plan.
-## Diagnose Modbus Map
+Example: Use $build-tool-pack to build these selected target outputs.
+## Capture Sample
 
-Run the complete Modbus register-map workflow from parsing through normalization, linting, evidence review, and human confirmation. Use for raw, imported, or messy maps that need end-to-end cleanup. Use lint-modbus-map instead when an already normalized map only needs deterministic checks.
+Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
 
-Example: Use $diagnose-modbus-map to parse, normalize, lint, and review this map.
-## Evaluate Byte Order
+Example: Use $capture-sample to build a one-read probe for this point.
+## Check Byte Order
 
-Evaluate raw Modbus register words as explicit byte and word layouts, signed and unsigned integers, and IEEE floating-point values from one immutable sample. Use for ABCD, BADC, CDAB, DCBA, endian, word-swap, implausible-value, or unknown encoding questions.
+Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
 
-Example: Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words. Require the sampled point identity before a human records a decision.
-## Extract Modbus PDF
+Example: Use $check-byte-order to evaluate every layout for these raw words.
+## Check Map
 
-Extract candidate Modbus register rows and page evidence from a PDF manual. Use for device manuals, register-table PDFs, page-range extraction, OCR review, or when the user needs traceable rows rather than an unsupported summary.
+Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
 
-Example: Use $extract-modbus-map-from-pdf to extract the register tables in this manual.
-## Generate Modpoll Config
+Example: Use $check-map to validate this normalized Modbus map.
+## Compare Maps
 
-Generate deterministic read-only artifacts for Witte Modbus Poll or the open-source gavinying/modpoll tool. Use when the user specifically requests a Modpoll or Modbus Poll artifact, saved poll setup, CLI configuration CSV, or raw probe.
+Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
 
-Example: Use $generate-modpoll-config to create the correct Modpoll profile for this map.
-## Generate ModScan Config
+Example: Use $compare-maps to compare these reviewed register maps.
+## Extract PDF Map
 
-Generate deterministic, documented, read-only ModScan setup and poll-plan artifacts from a canonical map and read plan. Use when the user specifically requests a ModScan setup, probe, or reusable read plan.
+Extract traceable Modbus register candidates and page evidence from a bounded PDF manual or page range.
 
-Example: Use $generate-modscan-config to create a documented read-only ModScan plan.
-## Generate Node-RED Flow
+Example: Use $extract-pdf-map to extract register rows from these PDF pages.
+## Modbus Help
 
-Generate deterministic, read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan. Use when the user specifically requests a Node-RED import, reusable flow, or probe-mode flow. Use capture-modbus-sample first when sample acquisition is the goal and no probe request exists.
+Choose the next Modbus skill or short workflow from the user's goal and current artifact.
 
-Example: Use $generate-node-red-flow to create a read-only Node-RED flow from this reviewed map.
-## Infer Modbus Export
+Example: Use $modbus-help to choose the next skill for my goal.
+## Normalize Map
 
-Define a safe declarative text or CSV export format from a documented example and render it deterministically from a canonical Modbus map. Use for simple custom tool formats that do not require graphs, opaque binaries, or several related collections.
+Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
 
-Example: Use $infer-custom-modbus-export-format to define a safe reusable text export format.
-## Lint Modbus Map
+Example: Use $normalize-map to normalize these candidate register rows.
+## Parse Map
 
-Validate a normalized Modbus map for duplicate identities, overlaps, invalid ranges, datatype-width conflicts, area and function-code conflicts, unresolved fields, unsafe writes, and scoped byte-order inconsistencies. Use when explicit map fields exist and the goal is deterministic validation only. Use diagnose-modbus-map for end-to-end cleanup of a raw or messy map.
+Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds.
 
-Example: Use $lint-modbus-map to check this register map for conflicts and unsafe assumptions.
-## Normalize Modbus Map
+Example: Use $parse-map to parse this register list into traceable candidates.
+## Plan Reads
 
-Normalize a candidate Modbus map into explicit protocol offsets, register areas, unit identifiers, datatypes, word counts, access values, and byte-order states. Use after parsing or to represent mixed or unresolved source conventions without a requested map-wide conversion. Use remap-modbus-addresses when the user asks to convert a map between known conventions.
+Compile reviewed Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
 
-Example: Use $normalize-modbus-map to normalize this map without guessing unresolved fields.
-## Parse Modbus Map
+Example: Use $plan-reads to compile safe reads for this reviewed map.
+## Remap Addresses
 
-Parse Modbus register maps from CSV, JSON, XML, XLSX, or structured text into candidate-map artifacts with source values, rejected rows, warnings, assumptions, and holds. Use when a user supplies a register list or wants a machine-readable map without silent engineering guesses.
+Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation.
 
-Example: Use $parse-modbus-map to parse this register map into a reviewed artifact.
-## Remap Modbus Addresses
+Example: Use $remap-addresses to preview this address-convention change.
+## Review Evidence
 
-Preview and apply a requested map-wide conversion between protocol offsets, one-based offsets, and Modicon reference notation, with explicit areas and collision checks. Use when the source and target conventions are known. Use normalize-modbus-map first when source conventions or engineering fields remain mixed or unresolved.
+Review Modbus source evidence, rejected rows, inferences, warnings, and holds before a human map decision.
 
-Example: Use $remap-modbus-addresses to preview a safe address-convention conversion.
-## Review Modbus Evidence
+Example: Use $review-evidence to review these source findings and holds.
+## Review Map
 
-Review Modbus parsing evidence, rejected rows, inferred values, assumptions, warnings, and blocking holds. Use before promoting a candidate map, after PDF extraction, or when a user needs to know which register-map fields are confirmed versus inferred.
+Review a raw or messy Modbus register map through parsing, normalization, checks, evidence, and human decisions.
 
-Example: Use $review-modbus-evidence to show what is confirmed and what still needs review.
+Example: Use $review-map to review this raw register map without guessing.
 
 ## Workflow: Review a register map
 
 Produce a reviewed Modbus map without silent engineering guesses.
 
-1. parse-modbus-map: source-bundle/v1 -> candidate-map/v1
-2. normalize-modbus-map: candidate-map/v1 -> modbus-map/v1
-3. lint-modbus-map: modbus-map/v1 -> modbus-map-lint/v1
-4. review-modbus-evidence: modbus-map/v1, modbus-map-lint/v1 -> modbus-map-evidence-review/v1
+1. parse-map: source-bundle/v1 -> candidate-map/v1
+2. normalize-map: candidate-map/v1 -> modbus-map/v1
+3. check-map: modbus-map/v1 -> modbus-map-lint/v1
+4. review-evidence: modbus-map/v1, modbus-map-lint/v1 -> modbus-map-evidence-review/v1
 5. human-gate: modbus-map/v1, modbus-map-evidence-review/v1 -> modbus-review-decisions/v1
-6. apply-modbus-review-decisions: modbus-map/v1, modbus-review-decisions/v1 -> modbus-map/v1
+6. apply-review: modbus-map/v1, modbus-review-decisions/v1 -> modbus-map/v1
 
 ## Workflow: Determine byte order from supplied raw words
 
 Compare explicit layouts from one immutable raw sample and record human confirmation.
 
-1. evaluate-modbus-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
+1. check-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
 2. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-review-decisions/v1
-3. apply-modbus-review-decisions: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
+3. apply-review: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
 
 ## Workflow: Probe, resolve byte order, and finalize a tool pack
 
 Use a selected tool target to collect one raw sample, compare byte-order candidates, then regenerate all selected targets with the confirmed layout.
 
-1. compile-modbus-read-plan: modbus-map/v1 -> modbus-read-plan/v1
-2. build-modbus-tool-pack: modbus-map/v1, modbus-read-plan/v1, probe-tool-pack-request/v1 -> modbus-tool-pack/v1
+1. plan-reads: modbus-map/v1 -> modbus-read-plan/v1
+2. build-tool-pack: modbus-map/v1, modbus-read-plan/v1, probe-tool-pack-request/v1 -> modbus-tool-pack/v1
 3. external-gate: modbus-tool-pack/v1 -> capture/v1
-4. evaluate-modbus-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
+4. check-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
 5. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-review-decisions/v1
-6. apply-modbus-review-decisions: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
-7. compile-modbus-read-plan: modbus-map/v1 -> modbus-read-plan/v1
-8. build-modbus-tool-pack: modbus-map/v1, modbus-read-plan/v1, final-tool-pack-request/v1 -> modbus-tool-pack/v1
+6. apply-review: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
+7. plan-reads: modbus-map/v1 -> modbus-read-plan/v1
+8. build-tool-pack: modbus-map/v1, modbus-read-plan/v1, final-tool-pack-request/v1 -> modbus-tool-pack/v1
 
 ## Workflow: Build a multi-target tool pack
 
 Generate any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and one read plan.
 
-1. lint-modbus-map: modbus-map/v1 -> modbus-map-lint/v1
-2. compile-modbus-read-plan: modbus-map/v1 -> modbus-read-plan/v1
-3. build-modbus-tool-pack: modbus-map/v1, modbus-read-plan/v1, tool-pack-request/v1 -> modbus-tool-pack/v1
+1. check-map: modbus-map/v1 -> modbus-map-lint/v1
+2. plan-reads: modbus-map/v1 -> modbus-read-plan/v1
+3. build-tool-pack: modbus-map/v1, modbus-read-plan/v1, tool-pack-request/v1 -> modbus-tool-pack/v1
 
 ## Workflow: Analyze bounded read data
 
 Find communication and signal-quality problems without issuing control commands.
 
-1. analyze-modbus-capture: capture/v1 -> modbus-capture-analysis/v1
+1. analyze-capture: capture/v1 -> modbus-capture-analysis/v1
 2. human-gate: modbus-capture-analysis/v1 -> review-disposition/v1
 
 ## Workflow: Compare map revisions
@@ -169,7 +169,7 @@ Report stable field changes without collapsing points from different routes, are
 
 1. review-register-map: before-source-bundle/v1 -> before-modbus-map/v1
 2. review-register-map: after-source-bundle/v1 -> after-modbus-map/v1
-3. compare-modbus-maps: before-modbus-map/v1, after-modbus-map/v1 -> modbus-map-diff/v1
+3. compare-maps: before-modbus-map/v1, after-modbus-map/v1 -> modbus-map-diff/v1
 4. human-gate: modbus-map-diff/v1 -> review-disposition/v1
 
 ## Problem: Users and tools can mix zero-based protocol offsets with one-based or 3xxxx/4xxxx reference notation.

@@ -105,6 +105,20 @@ def main(argv: list[str] | None = None) -> int:
     check = "--check" in (argv or sys.argv[1:])
     files = render()
     stale: list[str] = []
+    generated_dirs = (SITE / "skills", SITE / "workflows", SITE / "problems")
+    expected = set(files)
+    obsolete = sorted(
+        path
+        for directory in generated_dirs
+        if directory.exists()
+        for path in directory.iterdir()
+        if path.is_file() and path not in expected
+    )
+    if check:
+        stale.extend(str(path.relative_to(ROOT)) for path in obsolete)
+    else:
+        for path in obsolete:
+            path.unlink()
     for path, content in files.items():
         if check:
             if not path.exists() or path.read_text(encoding="utf-8") != content:

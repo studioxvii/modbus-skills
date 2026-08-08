@@ -25,9 +25,10 @@
       "Read"
     ],
     "defaultPrompt": [
-      "Review this Modbus register map.",
-      "Evaluate byte order from these raw words.",
-      "Build a Modbus tool pack for these targets."
+      "$modbus-help Choose the next skill for my Modbus task.",
+      "$review-map Review this Modbus register map.",
+      "$check-byte-order Evaluate byte order from these raw words.",
+      "$build-tool-pack Build a Modbus tool pack for these targets."
     ],
     "brandColor": "#2563EB"
   }

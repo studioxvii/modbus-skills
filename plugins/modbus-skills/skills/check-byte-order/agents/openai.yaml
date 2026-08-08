@@ -1,0 +1,6 @@
+interface:
+  display_name: "Check Byte Order"
+  short_description: "Compare every supported byte layout"
+  default_prompt: "Use $check-byte-order to evaluate every layout for these raw words."
+policy:
+  allow_implicit_invocation: false

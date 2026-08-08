@@ -1,0 +1,6 @@
+interface:
+  display_name: "Extract PDF Map"
+  short_description: "Extract traceable rows from a PDF"
+  default_prompt: "Use $extract-pdf-map to extract register rows from these PDF pages."
+policy:
+  allow_implicit_invocation: false

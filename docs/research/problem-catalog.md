@@ -6,15 +6,15 @@ Machine-readable source records live in `research/issues.json`. These records us
 
 | Problem | Workflow |
 |---|---|
-| 0-based, 1-based, and 3xxxx/4xxxx address confusion | `remap-modbus-addresses` |
-| Register area omitted or mixed | `normalize-modbus-map` |
-| Duplicate and overlapping points | `lint-modbus-map` |
-| Unknown byte and word order | `evaluate-modbus-byte-order` |
-| Too many individual polls | `compile-modbus-read-plan` |
+| 0-based, 1-based, and 3xxxx/4xxxx address confusion | `remap-addresses` |
+| Register area omitted or mixed | `normalize-map` |
+| Duplicate and overlapping points | `check-map` |
+| Unknown byte and word order | `check-byte-order` |
+| Too many individual polls | `plan-reads` |
 | Recreating tool setup by hand | Target generator skills |
-| One map must feed several tools | `build-modbus-tool-pack` |
-| Stale, flat, missing, or implausible values | `analyze-modbus-capture` |
-| Register maps change between firmware revisions | `compare-modbus-maps` |
-| Manual tables lose source evidence | `parse-modbus-map` and `review-modbus-evidence` |
+| One map must feed several tools | `build-tool-pack` |
+| Stale, flat, missing, or implausible values | `analyze-capture` |
+| Register maps change between firmware revisions | `compare-maps` |
+| Manual tables lose source evidence | `parse-map` and `review-evidence` |
 
 Before adding a new skill, add the problem, common user phrasing, source links, a rights state, a synthetic fixture, and an observable acceptance test.

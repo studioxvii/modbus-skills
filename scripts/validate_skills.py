@@ -90,7 +90,11 @@ def validate() -> list[str]:
             errors.append(f"{skill_dir.name}: short_description must be 25-64 characters")
         if f"${name}" not in prompt:
             errors.append(f"{skill_dir.name}: default_prompt must mention ${name}")
-        if name != "ask-modbus" and not (skill_dir / "scripts" / "run.py").exists():
+        if metadata.get("allow_implicit_invocation") != "false":
+            errors.append(
+                f"{skill_dir.name}: policy.allow_implicit_invocation must be false"
+            )
+        if name != "modbus-help" and not (skill_dir / "scripts" / "run.py").exists():
             errors.append(f"{skill_dir.name}: missing deterministic script wrapper")
     return errors
 

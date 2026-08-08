@@ -1,0 +1,6 @@
+interface:
+  display_name: "Check Map"
+  short_description: "Run deterministic register-map checks"
+  default_prompt: "Use $check-map to validate this normalized Modbus map."
+policy:
+  allow_implicit_invocation: false

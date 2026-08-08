@@ -1,0 +1,6 @@
+interface:
+  display_name: "Compare Maps"
+  short_description: "Compare Modbus map revisions"
+  default_prompt: "Use $compare-maps to compare these reviewed register maps."
+policy:
+  allow_implicit_invocation: false

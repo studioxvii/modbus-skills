@@ -1,0 +1,6 @@
+interface:
+  display_name: "Parse Map"
+  short_description: "Parse a structured Modbus register map"
+  default_prompt: "Use $parse-map to parse this register list into traceable candidates."
+policy:
+  allow_implicit_invocation: false

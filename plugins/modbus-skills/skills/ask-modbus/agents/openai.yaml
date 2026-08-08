@@ -1,4 +1,0 @@
-interface:
-  display_name: "Ask Modbus"
-  short_description: "Route Modbus questions to tested workflows"
-  default_prompt: "Use $ask-modbus to route my Modbus question."
