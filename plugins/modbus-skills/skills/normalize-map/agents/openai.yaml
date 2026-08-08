@@ -1,0 +1,6 @@
+interface:
+  display_name: "Normalize Map"
+  short_description: "Make Modbus map fields explicit"
+  default_prompt: "Use $normalize-map to normalize these candidate register rows."
+policy:
+  allow_implicit_invocation: false

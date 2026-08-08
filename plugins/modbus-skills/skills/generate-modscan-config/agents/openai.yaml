@@ -1,4 +1,0 @@
-interface:
-  display_name: "Generate ModScan Config"
-  short_description: "Generate documented ModScan read artifacts"
-  default_prompt: "Use $generate-modscan-config to create a documented read-only ModScan plan."

@@ -6,8 +6,8 @@ Verification date: 2026-08-07.
 
 - The OpenAI plugin validator accepted the plugin manifest.
 - The skill validator accepted all 19 skills.
-- The dependency-free repository suite passed 247 tests.
-- A clean checkout passed the same 247-test repository suite.
+- The dependency-free repository suite passed 250 tests.
+- A clean checkout passed the same 250-test repository suite.
 - The public synthetic human workflow passed 41 of 41 checks.
 - A local rights-restricted corpus of seven real register maps passed 45 of 45 workflow checks. The maps and local artifacts are not in this repository.
 - Three blind users completed the novice probe, commissioning-pack, and map-review scenarios without repository edits or live device traffic.

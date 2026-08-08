@@ -45,27 +45,42 @@ codex plugin add modbus-skills@modbus-skills
 
 Private repository access is required during pre-release.
 
-### 2. Start with a plain-language request
+### 2. Choose a skill
 
 Try one of these prompts in Codex:
 
 ```text
-Review this Modbus register map. Preserve every source row and do not guess missing fields.
+$review-map Review this register map. Preserve every source row and do not guess missing fields.
 ```
 
 ```text
-Build a read-only Node-RED and Modpoll probe for this reviewed map.
+$build-tool-pack Build a read-only Node-RED and Modpoll probe for this reviewed map.
 ```
 
 ```text
-Evaluate every possible byte order for these raw words. Do not choose a winner for me.
+$check-byte-order Evaluate every possible byte order for these raw words. Do not choose a winner for me.
 ```
 
 ```text
-Compare these two firmware register maps and show moved, added, removed, and changed points.
+$compare-maps Compare these firmware maps and show moved, added, removed, and changed points.
 ```
 
-The `ask-modbus` skill routes an unclear request to the correct focused skill or workflow.
+Use `$modbus-help` when you do not know which skill to use. It recommends one next skill from your goal and current artifact.
+
+All skills require explicit invocation. This keeps unrelated skill instructions out of the agent context.
+
+## Choose your path
+
+| Starting point or goal | Start here | Typical next step |
+| --- | --- | --- |
+| Register map or device manual | `$review-map` | `$plan-reads` |
+| Polling-tool output | `$plan-reads` | One builder or `$build-tool-pack` |
+| Unknown byte order | `$capture-sample` | `$check-byte-order` |
+| Bad values or communication | `$analyze-capture` | Evidence review or map comparison |
+| Changed device or firmware | `$review-map` for each map | `$compare-maps` |
+| Custom text or CSV output | `$build-custom-export` | Human review of the inferred format |
+
+See the [user-path guide](plugins/modbus-skills/references/user-paths.md) for the full high-level map. Each skill gives at most a few relevant handoffs. It does not flood the user with every available skill.
 
 ## Core workflows
 
@@ -97,7 +112,7 @@ flowchart LR
 
 A Node-RED probe sends one manual read per compiled block. The returned raw words feed all layout calculations. The math does not create more Modbus traffic. The generated flow starts disabled and contains no scheduled, deploy-time, or write nodes.
 
-Modpoll and ModScan probes collect the same raw words. `evaluate-modbus-byte-order` then evaluates the saved sample. Evidence never selects a winner. `apply-modbus-review-decisions` verifies the sample identity and applies only the explicit human decision.
+Modpoll and ModScan probes collect the same raw words. `check-byte-order` then evaluates the saved sample. Evidence never selects a winner. `apply-review` verifies the sample identity and applies only the explicit human decision.
 
 ## Generated targets
 
@@ -129,25 +144,25 @@ Source `include` and `reviewed` flags remain evidence. They never become reposit
 
 | Goal | Skill |
 | --- | --- |
-| Route an unclear request | `ask-modbus` |
-| Parse CSV, JSON, XML, XLSX, or delimited text | `parse-modbus-map` |
-| Extract traceable candidates from a PDF | `extract-modbus-map-from-pdf` |
-| Normalize explicit map fields | `normalize-modbus-map` |
-| Find map errors and blocking holds | `lint-modbus-map` |
-| Run the complete map review chain | `diagnose-modbus-map` |
-| Review confirmed, inferred, and rejected evidence | `review-modbus-evidence` |
-| Apply an explicit human review record | `apply-modbus-review-decisions` |
-| Preview address-basis conversions | `remap-modbus-addresses` |
-| Compare device or firmware maps | `compare-modbus-maps` |
-| Build a bounded raw-word probe | `capture-modbus-sample` |
-| Evaluate byte and word layouts from one sample | `evaluate-modbus-byte-order` |
-| Compile bounded FC01–FC04 read blocks | `compile-modbus-read-plan` |
-| Generate a disabled Node-RED read flow | `generate-node-red-flow` |
-| Generate `gavinying/modpoll` or Witte artifacts | `generate-modpoll-config` |
-| Generate an auditable ModScan read plan | `generate-modscan-config` |
-| Build any selected target combination | `build-modbus-tool-pack` |
-| Analyze communication and signal behavior | `analyze-modbus-capture` |
-| Infer a declarative custom text or CSV format | `infer-custom-modbus-export-format` |
+| Route an unclear request | `modbus-help` |
+| Parse CSV, JSON, XML, XLSX, or delimited text | `parse-map` |
+| Extract traceable candidates from a PDF | `extract-pdf-map` |
+| Normalize explicit map fields | `normalize-map` |
+| Find map errors and blocking holds | `check-map` |
+| Run the complete map review chain | `review-map` |
+| Review confirmed, inferred, and rejected evidence | `review-evidence` |
+| Apply an explicit human review record | `apply-review` |
+| Preview address-basis conversions | `remap-addresses` |
+| Compare device or firmware maps | `compare-maps` |
+| Build a bounded raw-word probe | `capture-sample` |
+| Evaluate byte and word layouts from one sample | `check-byte-order` |
+| Compile bounded FC01–FC04 read blocks | `plan-reads` |
+| Generate a disabled Node-RED read flow | `build-node-red` |
+| Generate `gavinying/modpoll` or Witte artifacts | `build-modpoll` |
+| Generate an auditable ModScan read plan | `build-modscan` |
+| Build any selected target combination | `build-tool-pack` |
+| Analyze communication and signal behavior | `analyze-capture` |
+| Infer a declarative custom text or CSV format | `build-custom-export` |
 
 ## Repository structure
 
@@ -169,7 +184,7 @@ site/                                  Generated agent-search catalog
 
 The repository provides several search and activation surfaces:
 
-- `catalog/skills.json` contains stable skill IDs, descriptions, and prompts.
+- `catalog/skills.json` contains skill IDs, descriptions, and prompts.
 - `catalog/workflows.json` defines skill chains, artifacts, human gates, and stop conditions.
 - `catalog/activation-cases.json` contains positive and close-negative activation cases.
 - `research/issues.json` maps researched Modbus problems to primary sources and skills.
@@ -188,7 +203,7 @@ Current evidence:
 
 - 19 skills pass the official skill validator.
 - The plugin passes the official OpenAI plugin validator.
-- 247 repository tests pass from a clean checkout.
+- 250 repository tests pass from a clean checkout.
 - The public synthetic human workflow passes 41 of 41 checks.
 - Seven local real-world register maps pass 45 of 45 workflow checks across 31 skill calls.
 - Blind novice, commissioning, and reviewer trials pass.

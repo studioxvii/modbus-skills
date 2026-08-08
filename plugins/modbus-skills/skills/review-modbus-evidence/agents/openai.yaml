@@ -1,4 +1,0 @@
-interface:
-  display_name: "Review Modbus Evidence"
-  short_description: "Review source evidence, assumptions, and holds"
-  default_prompt: "Use $review-modbus-evidence to show what is confirmed and what still needs review."

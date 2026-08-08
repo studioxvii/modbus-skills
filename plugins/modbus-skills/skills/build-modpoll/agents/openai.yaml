@@ -1,0 +1,6 @@
+interface:
+  display_name: "Build Modpoll"
+  short_description: "Build read-only Modpoll artifacts"
+  default_prompt: "Use $build-modpoll to build artifacts for this Modpoll profile."
+policy:
+  allow_implicit_invocation: false

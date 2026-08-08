@@ -1,0 +1,6 @@
+interface:
+  display_name: "Modbus Help"
+  short_description: "Choose the next Modbus skill or path"
+  default_prompt: "Use $modbus-help to choose the next skill for my goal."
+policy:
+  allow_implicit_invocation: false

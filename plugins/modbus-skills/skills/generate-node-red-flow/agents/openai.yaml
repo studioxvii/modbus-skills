@@ -1,4 +1,0 @@
-interface:
-  display_name: "Generate Node-RED Flow"
-  short_description: "Generate a safe deterministic Modbus flow"
-  default_prompt: "Use $generate-node-red-flow to create a read-only Node-RED flow from this reviewed map."

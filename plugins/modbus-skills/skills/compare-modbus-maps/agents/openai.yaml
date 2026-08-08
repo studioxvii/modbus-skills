@@ -1,4 +1,0 @@
-interface:
-  display_name: "Compare Modbus Maps"
-  short_description: "Compare maps with composite register identity"
-  default_prompt: "Use $compare-modbus-maps to find added, removed, and changed register points."

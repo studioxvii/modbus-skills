@@ -1,0 +1,25 @@
+---
+name: build-modpoll
+description: Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles.
+---
+
+# Build Modpoll
+
+Generate artifacts for one explicit Modpoll product profile.
+
+## Process
+
+1. Read `references/profiles.md` and select `gavinying-cli`, `witte-desktop`, or `witte-v12-xml`.
+2. Require a canonical map, read plan, profile, and `probe` or `final` mode.
+3. Run `python3 <skill-dir>/scripts/run.py --map <map.json> --plan <read-plan.json> --profile <profile> --mode <mode> --output <directory>`.
+4. Inspect the setup manifest, decision report, polling limits, and generated files.
+5. Verify with the pinned target implementation.
+
+Completion requires a generated or held status with visible native-verification state.
+
+## Handoff
+
+- No read plan exists: suggest `$plan-reads`.
+- The user also needs Node-RED or ModScan: suggest `$build-tool-pack`.
+
+Keep Witte output readable and documented. Let the installed application create opaque project files.

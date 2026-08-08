@@ -17,9 +17,9 @@
         }
       ],
       "skills": [
-        "normalize-modbus-map",
-        "remap-modbus-addresses",
-        "lint-modbus-map"
+        "normalize-map",
+        "remap-addresses",
+        "check-map"
       ]
     },
     {
@@ -33,9 +33,9 @@
         }
       ],
       "skills": [
-        "normalize-modbus-map",
-        "lint-modbus-map",
-        "compare-modbus-maps"
+        "normalize-map",
+        "check-map",
+        "compare-maps"
       ]
     },
     {
@@ -53,8 +53,8 @@
         }
       ],
       "skills": [
-        "capture-modbus-sample",
-        "evaluate-modbus-byte-order"
+        "capture-sample",
+        "check-byte-order"
       ]
     },
     {
@@ -68,9 +68,9 @@
         }
       ],
       "skills": [
-        "parse-modbus-map",
-        "evaluate-modbus-byte-order",
-        "analyze-modbus-capture"
+        "parse-map",
+        "check-byte-order",
+        "analyze-capture"
       ]
     },
     {
@@ -88,9 +88,9 @@
         }
       ],
       "skills": [
-        "compile-modbus-read-plan",
-        "generate-node-red-flow",
-        "analyze-modbus-capture"
+        "plan-reads",
+        "build-node-red",
+        "analyze-capture"
       ]
     },
     {
@@ -104,8 +104,8 @@
         }
       ],
       "skills": [
-        "compile-modbus-read-plan",
-        "analyze-modbus-capture"
+        "plan-reads",
+        "analyze-capture"
       ]
     },
     {
@@ -123,9 +123,9 @@
         }
       ],
       "skills": [
-        "lint-modbus-map",
-        "capture-modbus-sample",
-        "compile-modbus-read-plan"
+        "check-map",
+        "capture-sample",
+        "plan-reads"
       ]
     },
     {
@@ -143,9 +143,9 @@
         }
       ],
       "skills": [
-        "lint-modbus-map",
-        "compile-modbus-read-plan",
-        "analyze-modbus-capture"
+        "check-map",
+        "plan-reads",
+        "analyze-capture"
       ]
     },
     {
@@ -159,8 +159,8 @@
         }
       ],
       "skills": [
-        "analyze-modbus-capture",
-        "review-modbus-evidence"
+        "analyze-capture",
+        "review-evidence"
       ]
     },
     {
@@ -174,8 +174,8 @@
         }
       ],
       "skills": [
-        "generate-modpoll-config",
-        "build-modbus-tool-pack"
+        "build-modpoll",
+        "build-tool-pack"
       ]
     },
     {
@@ -189,8 +189,8 @@
         }
       ],
       "skills": [
-        "generate-modscan-config",
-        "build-modbus-tool-pack"
+        "build-modscan",
+        "build-tool-pack"
       ]
     },
     {
@@ -208,8 +208,8 @@
         }
       ],
       "skills": [
-        "generate-modpoll-config",
-        "build-modbus-tool-pack"
+        "build-modpoll",
+        "build-tool-pack"
       ]
     }
   ]

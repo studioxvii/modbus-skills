@@ -257,7 +257,7 @@ class HumanWorkflowRunnerTests(unittest.TestCase):
                 / "plugins"
                 / "modbus-skills"
                 / "skills"
-                / "evaluate-modbus-byte-order"
+                / "check-byte-order"
                 / "scripts"
                 / "run.py"
             )

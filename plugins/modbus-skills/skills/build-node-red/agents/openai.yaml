@@ -1,0 +1,6 @@
+interface:
+  display_name: "Build Node-RED"
+  short_description: "Build a disabled Modbus read flow"
+  default_prompt: "Use $build-node-red to build a disabled read-only Node-RED flow."
+policy:
+  allow_implicit_invocation: false

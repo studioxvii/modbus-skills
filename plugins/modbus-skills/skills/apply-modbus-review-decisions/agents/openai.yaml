@@ -1,4 +1,0 @@
-interface:
-  display_name: "Apply Modbus Review Decisions"
-  short_description: "Record reviewed map values and exclusions"
-  default_prompt: "Use $apply-modbus-review-decisions to record my confirmed Modbus map decisions."

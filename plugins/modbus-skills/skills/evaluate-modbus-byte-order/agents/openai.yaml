@@ -1,4 +1,0 @@
-interface:
-  display_name: "Evaluate Byte Order"
-  short_description: "Evaluate byte and word layouts from one read"
-  default_prompt: "Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words. Require the sampled point identity before a human records a decision."

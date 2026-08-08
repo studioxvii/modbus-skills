@@ -108,7 +108,7 @@ The evaluator reports candidates. It does not select a winner or update a map.
 
 A byte-order decision references one supplied `modbus-byte-order-evidence/v1` artifact by semantic SHA-256. The apply command verifies that the evidence sample identity matches the map point and that the selected layout and datatype exist in the candidate set.
 
-`apply-modbus-review-decisions` creates a new map. It retains an audit record and excluded-point dispositions. It approves the result only when the human requested approval and no blocking hold remains. A map change invalidates the previous read plan, so the workflow must compile a new plan before final tool generation.
+`apply-review` creates a new map. It retains an audit record and excluded-point dispositions. It approves the result only when the human requested approval and no blocking hold remains. A map change invalidates the previous read plan, so the workflow must compile a new plan before final tool generation.
 
 ## Tool pack
 

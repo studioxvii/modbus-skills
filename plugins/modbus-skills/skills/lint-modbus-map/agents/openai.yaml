@@ -1,4 +1,0 @@
-interface:
-  display_name: "Lint Modbus Map"
-  short_description: "Find unsafe or inconsistent map entries"
-  default_prompt: "Use $lint-modbus-map to check this register map for conflicts and unsafe assumptions."

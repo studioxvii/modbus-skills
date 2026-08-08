@@ -1,0 +1,6 @@
+interface:
+  display_name: "Remap Addresses"
+  short_description: "Convert known Modbus address notation"
+  default_prompt: "Use $remap-addresses to preview this address-convention change."
+policy:
+  allow_implicit_invocation: false

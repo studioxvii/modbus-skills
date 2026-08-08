@@ -1,4 +1,0 @@
-interface:
-  display_name: "Capture Modbus Sample"
-  short_description: "Prepare a safe read-only raw sample probe"
-  default_prompt: "Use $capture-modbus-sample to create a read-only probe for these raw registers."
