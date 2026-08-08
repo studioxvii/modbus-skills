@@ -18,4 +18,13 @@ Generate either a raw probe or a final reviewed flow.
 
 Use one physical read per compiled block. Use environment placeholders. Start the generated tab disabled. Include catch, status, queue, and watchdog paths. Use unique IDs across route, unit, area, and offset.
 
+In both modes, generate one manual `inject` node and one
+`modbus-flex-getter` for each block. Set `repeat` empty and `once` false. Do
+not generate `modbus-read` nodes, scheduled polling, or a poll-interval
+environment value. In `final` mode, decode only confirmed layouts.
+
+Start each watchdog from the manual inject. Reset it from the successful response. Do not start a new watchdog interval from a successful one-shot response. In `final` mode, require a plan bound to the exact map hash.
+
+Tell the user to run one inject at a time and wait for the response or watchdog result before the next read.
+
 Do not generate write nodes. Final mode must stop when required decoding fields are unresolved.

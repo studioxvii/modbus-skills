@@ -26,6 +26,8 @@ DEFAULT_COMPARE_FIELDS = (
     "engineering_offset",
     "engineering_unit",
     "access",
+    "source_include",
+    "source_reviewed",
     "minimum",
     "maximum",
     "expected_interval_seconds",
@@ -90,6 +92,12 @@ def _sort_key(identity: tuple[Any, ...]) -> tuple[str, ...]:
     return tuple("" if value is None else str(value) for value in identity)
 
 
+def _move_identity(identity: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Return the stable logical identity used to pair physical moves."""
+
+    return (identity.get("logical_point_id"),)
+
+
 def _index(points: Iterable[Mapping[str, Any]]) -> dict[tuple[Any, ...], list[Mapping[str, Any]]]:
     output: dict[tuple[Any, ...], list[Mapping[str, Any]]] = defaultdict(list)
     for point in points:
@@ -120,6 +128,7 @@ def compare_maps(
     removed: list[dict[str, Any]] = []
     changed: list[dict[str, Any]] = []
     unchanged: list[dict[str, Any]] = []
+    moved: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
 
     for identity in all_identities:
@@ -156,6 +165,57 @@ def compare_maps(
         else:
             unchanged.append({"identity": identity_value})
 
+    removed_by_move: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    added_by_move: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for item in removed:
+        removed_by_move[_move_identity(item["identity"])].append(item)
+    for item in added:
+        added_by_move[_move_identity(item["identity"])].append(item)
+
+    paired_removed: set[int] = set()
+    paired_added: set[int] = set()
+    for key in sorted(set(removed_by_move) & set(added_by_move), key=_sort_key):
+        old_matches = removed_by_move[key]
+        new_matches = added_by_move[key]
+        if any(value in (None, "") for value in key) or len(old_matches) != 1 or len(new_matches) != 1:
+            continue
+        old_item = old_matches[0]
+        new_item = new_matches[0]
+        old_point = old_item["point"]
+        new_point = new_item["point"]
+        field_changes = []
+        for field in IDENTITY_FIELDS:
+            if field == "logical_point_id":
+                continue
+            old_value = old_item["identity"][field]
+            new_value = new_item["identity"][field]
+            if old_value != new_value:
+                field_changes.append(
+                    {"field": field, "before": old_value, "after": new_value}
+                )
+        for field in fields:
+            if field in IDENTITY_FIELDS:
+                continue
+            old_value = _value(old_point, field)
+            new_value = _value(new_point, field)
+            if old_value != new_value:
+                field_changes.append(
+                    {"field": field, "before": old_value, "after": new_value}
+                )
+        moved.append(
+            {
+                "logical_point_id": key[0],
+                "before_identity": old_item["identity"],
+                "after_identity": new_item["identity"],
+                "changes": field_changes,
+            }
+        )
+        paired_removed.add(id(old_item))
+        paired_added.add(id(new_item))
+
+    removed = [item for item in removed if id(item) not in paired_removed]
+    added = [item for item in added if id(item) not in paired_added]
+
     return {
         "contract": "modbus-map-diff/v1",
         "identity_fields": list(IDENTITY_FIELDS),
@@ -164,12 +224,14 @@ def compare_maps(
             "added": len(added),
             "removed": len(removed),
             "changed": len(changed),
+            "moved": len(moved),
             "unchanged": len(unchanged),
             "ambiguous": len(duplicates),
         },
         "added": added,
         "removed": removed,
         "changed": changed,
+        "moved": moved,
         "unchanged": unchanged,
         "duplicates": duplicates,
     }

@@ -11,9 +11,10 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import PurePosixPath
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
-from .artifacts import artifact_envelope
+from .artifacts import artifact_envelope, stable_input_hash
 
 
 TARGET_MANIFEST_SCHEMA_VERSION = "modbus-target-manifest/v1"
@@ -448,6 +449,367 @@ def points_for_block(
     return tuple(matches)
 
 
+def _normalized_access(point: Mapping[str, Any]) -> str | None:
+    value = point.get("access")
+    if not is_resolved(value):
+        return None
+    return str(value).strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def _validate_map_bound_plan(
+    canonical_map: Mapping[str, Any],
+    read_plan: Mapping[str, Any],
+    *,
+    max_gap: int,
+    max_quantities: Mapping[str, int],
+) -> list[Finding]:
+    """Require each map-bound request to have one exact canonical purpose."""
+
+    points = points_from_map(canonical_map)
+    blocks = blocks_from_plan(read_plan)
+    point_by_id: dict[str, Mapping[str, Any]] = {}
+    for point_index, point in enumerate(points):
+        identifier = point_id(point, point_index)
+        if identifier is not None and identifier not in point_by_id:
+            point_by_id[identifier] = point
+
+    findings: list[Finding] = []
+    point_uses: dict[str, list[int]] = {}
+    intervals: dict[tuple[str, int, str], list[tuple[int, int, int, str]]] = {}
+
+    for block_index, block in enumerate(blocks):
+        path = f"blocks[{block_index}]"
+        identifier = block_id(block, block_index)
+        route = block_route_id(block)
+        unit = block_unit_id(block)
+        area = block_area(block)
+        start = block_start(block)
+        quantity = block_quantity(block)
+        if unit is None or area is None or start is None or quantity is None:
+            continue
+
+        stop = start + quantity
+        scope = (route, unit, area)
+        approved_quantity = max_quantities.get(area)
+        if approved_quantity is not None and quantity > approved_quantity:
+            findings.append(
+                Finding(
+                    "error",
+                    "BLOCK_QUANTITY_EXCEEDS_PLAN_OPTION",
+                    f"Read block {identifier!r} has quantity {quantity}; the visible plan option permits {approved_quantity} for {area}.",
+                    f"{path}.quantity",
+                )
+            )
+        scoped_intervals = intervals.setdefault(scope, [])
+        for other_start, other_stop, other_index, other_id in scoped_intervals:
+            if start == other_start and stop == other_stop:
+                findings.append(
+                    Finding(
+                        "error",
+                        "BLOCK_RANGE_DUPLICATE",
+                        f"Read block {identifier!r} duplicates block {other_id!r}.",
+                        path,
+                    )
+                )
+            elif start < other_stop and other_start < stop:
+                findings.append(
+                    Finding(
+                        "error",
+                        "BLOCK_RANGE_OVERLAP",
+                        f"Read block {identifier!r} overlaps block {other_id!r}.",
+                        path,
+                    )
+                )
+        scoped_intervals.append((start, stop, block_index, identifier))
+
+        requested_ids = block_point_ids(block)
+        if len(requested_ids) != len(set(requested_ids)):
+            findings.append(
+                Finding(
+                    "error",
+                    "BLOCK_POINT_DUPLICATE",
+                    f"Read block {identifier!r} lists a point more than once.",
+                    f"{path}.point_ids",
+                )
+            )
+
+        selected: list[tuple[str, Mapping[str, Any]]] = []
+        if requested_ids:
+            for requested_id in dict.fromkeys(requested_ids):
+                point = point_by_id.get(requested_id)
+                if point is not None:
+                    selected.append((requested_id, point))
+        else:
+            for point in points_for_block(canonical_map, block, block_index):
+                selected_id = point_id(point)
+                if selected_id is not None:
+                    selected.append((selected_id, point))
+
+        exact_points: list[tuple[str, Mapping[str, Any], int, int]] = []
+        for selected_id, point in selected:
+            point_start = point_protocol_offset(point)
+            width = point_word_count(point)
+            if (
+                point_route_id(point) == route
+                and point_unit_id(point) == unit
+                and point_area(point) == area
+                and point_start is not None
+                and width is not None
+            ):
+                exact_points.append((selected_id, point, point_start, width))
+                point_uses.setdefault(selected_id, []).append(block_index)
+
+        if not exact_points:
+            findings.append(
+                Finding(
+                    "error",
+                    "BLOCK_UNJUSTIFIED",
+                    f"Read block {identifier!r} is not justified by a canonical point in the same route, unit, and area.",
+                    path,
+                )
+            )
+            continue
+
+        expected_start = min(item[2] for item in exact_points)
+        expected_stop = max(item[2] + item[3] for item in exact_points)
+        if start != expected_start or stop != expected_stop:
+            findings.append(
+                Finding(
+                    "error",
+                    "BLOCK_RANGE_NOT_EXACT",
+                    f"Read block {identifier!r} must exactly bound its canonical points at offsets {expected_start} through {expected_stop - 1}.",
+                    path,
+                )
+            )
+
+        ordered_ranges = sorted(
+            (point_start, point_start + width)
+            for _, _, point_start, width in exact_points
+        )
+        prior_stop = ordered_ranges[0][1]
+        for point_start, point_stop in ordered_ranges[1:]:
+            gap = max(0, point_start - prior_stop)
+            if gap > max_gap:
+                findings.append(
+                    Finding(
+                        "error",
+                        "BLOCK_GAP_EXCEEDS_PLAN_OPTION",
+                        f"Read block {identifier!r} contains an unapproved gap of {gap} addresses; the plan permits {max_gap}.",
+                        path,
+                    )
+                )
+                break
+            prior_stop = max(prior_stop, point_stop)
+
+        selected_ids = {item[0] for item in exact_points}
+        for point_index, point in enumerate(points):
+            candidate_id = point_id(point, point_index)
+            candidate_start = point_protocol_offset(point)
+            candidate_width = point_word_count(point)
+            if (
+                candidate_id is not None
+                and candidate_id not in selected_ids
+                and point_route_id(point) == route
+                and point_unit_id(point) == unit
+                and point_area(point) == area
+                and candidate_start is not None
+                and candidate_width is not None
+                and candidate_start < stop
+                and start < candidate_start + candidate_width
+            ):
+                findings.append(
+                    Finding(
+                        "error",
+                        "BLOCK_COVERS_UNREFERENCED_POINT",
+                        f"Read block {identifier!r} covers canonical point {candidate_id!r} without tracing it.",
+                        path,
+                    )
+                )
+
+        raw_traces = block.get("point_ids", block.get("points", ()))
+        if isinstance(raw_traces, Sequence) and not isinstance(
+            raw_traces, (str, bytes, bytearray)
+        ):
+            for trace_index, trace in enumerate(raw_traces):
+                if not isinstance(trace, Mapping):
+                    continue
+                trace_id = point_id(trace)
+                point = point_by_id.get(trace_id or "")
+                point_start = point_protocol_offset(point) if point is not None else None
+                point_width = point_word_count(point) if point is not None else None
+                if point is None or point_start is None or point_width is None:
+                    continue
+                expected_identity = [route, unit, area, point_start, trace_id]
+                identity = trace.get("canonical_identity")
+                identity_matches = (
+                    isinstance(identity, Sequence)
+                    and not isinstance(identity, (str, bytes, bytearray))
+                    and list(identity) == expected_identity
+                )
+                mismatched = (
+                    ("protocol_offset" in trace and trace.get("protocol_offset") != point_start)
+                    or ("span" in trace and trace.get("span") != point_width)
+                    or ("relative_offset" in trace and trace.get("relative_offset") != point_start - start)
+                    or (
+                        "canonical_identity" in trace
+                        and not identity_matches
+                    )
+                )
+                if mismatched:
+                    findings.append(
+                        Finding(
+                            "error",
+                            "BLOCK_POINT_TRACE_MISMATCH",
+                            f"Read block {identifier!r} has a trace that does not match canonical point {trace_id!r}.",
+                            f"{path}.points[{trace_index}]",
+                        )
+                    )
+
+    for identifier, uses in point_uses.items():
+        if len(uses) > 1:
+            findings.append(
+                Finding(
+                    "error",
+                    "POINT_PLANNED_MULTIPLE_TIMES",
+                    f"Canonical point {identifier!r} is read by more than one block.",
+                    f"points.{identifier}",
+                )
+            )
+    return findings
+
+
+def _bound_plan_options(
+    read_plan: Mapping[str, Any],
+) -> tuple[int, dict[str, int], list[Finding]]:
+    """Validate and return visible gap and per-area quantity limits."""
+
+    findings: list[Finding] = []
+    raw_options = read_plan.get("planning_options")
+    input_hashes = read_plan.get("input_hashes")
+    recorded_hash = (
+        input_hashes.get("planning_options")
+        if isinstance(input_hashes, Mapping)
+        else None
+    )
+    if raw_options is None:
+        if recorded_hash is not None:
+            findings.append(
+                Finding(
+                    "error",
+                    "PLAN_OPTIONS_MISSING",
+                    "The plan hashes planning options but does not show them. Rebuild the plan.",
+                    "planning_options",
+                )
+            )
+        return 0, {}, findings
+    if not isinstance(raw_options, Mapping):
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_INVALID",
+                "planning_options must be an object.",
+                "planning_options",
+            )
+        )
+        return 0, {}, findings
+    unknown = set(raw_options) - {"max_gap", "max_quantities"}
+    if unknown:
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_INVALID",
+                "planning_options contains unsupported fields.",
+                "planning_options",
+            )
+        )
+    max_gap_value = raw_options.get("max_gap", 0)
+    if (
+        isinstance(max_gap_value, bool)
+        or not isinstance(max_gap_value, int)
+        or not 0 <= max_gap_value <= 65_535
+    ):
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_INVALID",
+                "planning_options.max_gap must be an integer from 0 through 65535.",
+                "planning_options.max_gap",
+            )
+        )
+        max_gap = 0
+    else:
+        max_gap = max_gap_value
+    max_quantities = raw_options.get("max_quantities", {})
+    normalized_quantities: dict[str, int] = {}
+    if not isinstance(max_quantities, Mapping):
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_INVALID",
+                "planning_options.max_quantities must be an object.",
+                "planning_options.max_quantities",
+            )
+        )
+    else:
+        for raw_area, raw_limit in max_quantities.items():
+            area = normalize_area(raw_area)
+            limit = (
+                FUNCTION_LIMITS[AREA_FUNCTION_CODES[area]]
+                if area is not None
+                else None
+            )
+            if (
+                area is None
+                or area in normalized_quantities
+                or isinstance(raw_limit, bool)
+                or not isinstance(raw_limit, int)
+                or raw_limit <= 0
+                or limit is None
+                or raw_limit > limit
+            ):
+                findings.append(
+                    Finding(
+                        "error",
+                        "PLAN_OPTIONS_INVALID",
+                        "Each planning_options.max_quantities entry must name one area and use a positive value within its protocol limit.",
+                        "planning_options.max_quantities",
+                    )
+                )
+                continue
+            normalized_quantities[area] = raw_limit
+    if recorded_hash is None:
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_HASH_MISSING",
+                "The plan must hash its visible planning options. Rebuild the plan.",
+                "input_hashes.planning_options",
+            )
+        )
+    elif (
+        not isinstance(recorded_hash, str)
+        or re.fullmatch(r"[0-9a-fA-F]{64}", recorded_hash) is None
+    ):
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_HASH_INVALID",
+                "The planning-options hash must be a SHA-256 hex value.",
+                "input_hashes.planning_options",
+            )
+        )
+    elif recorded_hash.lower() != stable_input_hash(dict(raw_options)):
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_HASH_MISMATCH",
+                "Visible planning options do not match their plan hash. Rebuild the plan.",
+                "input_hashes.planning_options",
+            )
+        )
+    return max_gap, normalized_quantities, findings
+
+
 def preflight_common(
     canonical_map: Mapping[str, Any],
     read_plan: Mapping[str, Any],
@@ -460,6 +822,48 @@ def preflight_common(
     findings: list[Finding] = []
     points = points_from_map(canonical_map)
     blocks = blocks_from_plan(read_plan)
+
+    plan_input_hashes = read_plan.get("input_hashes")
+    planned_map_hash = (
+        plan_input_hashes.get("canonical_map")
+        if isinstance(plan_input_hashes, Mapping)
+        else None
+    )
+    plan_is_bound = False
+    if mode == "final" and planned_map_hash is None:
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_MAP_HASH_MISSING",
+                "The final read plan must identify the exact canonical map used to compile it. Rebuild the plan from the reviewed map.",
+                "input_hashes.canonical_map",
+            )
+        )
+    elif planned_map_hash is not None and (
+        not isinstance(planned_map_hash, str)
+        or re.fullmatch(r"[0-9a-fA-F]{64}", planned_map_hash) is None
+    ):
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_MAP_HASH_INVALID",
+                "The read plan canonical-map hash must be a SHA-256 hex value.",
+                "input_hashes.canonical_map",
+            )
+        )
+    elif isinstance(planned_map_hash, str) and (
+        planned_map_hash.lower() != canonical_map_hash(canonical_map)
+    ):
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_MAP_HASH_MISMATCH",
+                "The read plan was compiled from a different canonical map. Rebuild the plan after map changes.",
+                "input_hashes.canonical_map",
+            )
+        )
+    elif isinstance(planned_map_hash, str):
+        plan_is_bound = True
 
     if not points:
         findings.append(Finding("error", "MAP_HAS_NO_POINTS", "The canonical map has no points.", "points"))
@@ -479,6 +883,30 @@ def preflight_common(
                             f"holds[{hold_index}]",
                         )
                     )
+
+    raw_holds = canonical_map.get("holds", ())
+    if isinstance(raw_holds, Sequence) and not isinstance(
+        raw_holds, (str, bytes, bytearray)
+    ):
+        for hold_index, hold in enumerate(raw_holds):
+            if not isinstance(hold, Mapping) or hold.get("blocking", True) is False:
+                continue
+            hold_code = str(hold.get("code", "")).lower()
+            hold_field = str(hold.get("field", "")).lower()
+            if (
+                hold_field in {"access", "access_readable", "access_writable"}
+                or "access" in hold_code
+                or "not-readable" in hold_code
+                or "write-only" in hold_code
+            ):
+                findings.append(
+                    Finding(
+                        "error",
+                        "MAP_HAS_ACCESS_HOLD",
+                        "Resolve point read access before a capture or export.",
+                        f"holds[{hold_index}]",
+                    )
+                )
 
     seen_point_ids: set[str] = set()
     point_by_id: dict[str, Mapping[str, Any]] = {}
@@ -503,6 +931,38 @@ def preflight_common(
         if point_unit_id(point) is None:
             findings.append(Finding("error", "POINT_UNIT_UNRESOLVED", "Unit ID is unresolved.", f"{path}.unit_id"))
 
+        access = _normalized_access(point)
+        if access == "write-only":
+            findings.append(
+                Finding(
+                    "error",
+                    "POINT_WRITE_ONLY_ACTIVE",
+                    "A write-only point cannot remain in the active read map.",
+                    f"{path}.access",
+                )
+            )
+        elif point.get("access") not in (None, "") and access not in {
+            "read-only",
+            "read-write",
+        }:
+            findings.append(
+                Finding(
+                    "error",
+                    "POINT_ACCESS_UNRESOLVED",
+                    "Point read access is unresolved.",
+                    f"{path}.access",
+                )
+            )
+        if point.get("source_include") is False:
+            findings.append(
+                Finding(
+                    "error",
+                    "POINT_SOURCE_EXCLUDED_ACTIVE",
+                    "A source-excluded point cannot remain in the active read map.",
+                    f"{path}.source_include",
+                )
+            )
+
         status = point.get("normalization_status")
         if mode == "final" and status is not None and not is_resolved(status):
             findings.append(Finding("error", "POINT_NOT_CONFIRMED", "Point normalization is not confirmed.", f"{path}.normalization_status"))
@@ -514,7 +974,7 @@ def preflight_common(
             width = point_word_count(point)
             if width is None:
                 findings.append(Finding("error", "POINT_WIDTH_UNRESOLVED", "Word count is unresolved.", f"{path}.word_count"))
-            elif width > 1:
+            elif width > 1 and not (datatype or "").startswith("string"):
                 order = point_byte_order(point)
                 confirmed = point.get("byte_order_confirmed", point.get("byte_layout_confirmed", True))
                 order_status = point.get("byte_order_status", point.get("byte_layout_status"))
@@ -614,6 +1074,18 @@ def preflight_common(
             identifier = point_id(point, index)
             if identifier is not None and identifier not in planned_point_ids:
                 findings.append(Finding("error", "POINT_NOT_PLANNED", f"Point {identifier!r} is not covered by the read plan.", f"points[{index}]"))
+
+    if plan_is_bound:
+        max_gap, max_quantities, option_findings = _bound_plan_options(read_plan)
+        findings.extend(option_findings)
+        findings.extend(
+            _validate_map_bound_plan(
+                canonical_map,
+                read_plan,
+                max_gap=max_gap,
+                max_quantities=max_quantities,
+            )
+        )
 
     return tuple(sorted(set(findings)))
 

@@ -24,6 +24,28 @@
       ]
     },
     {
+      "skill_id": "apply-modbus-review-decisions",
+      "positive": [
+        "Record my confirmed Modbus map decisions.",
+        "Please record my confirmed Modbus map decisions.",
+        "Can you record my confirmed Modbus map decisions.",
+        "I need you to record my confirmed Modbus map decisions.",
+        "Help me record my confirmed Modbus map decisions.",
+        "Apply reviewed byte order and exclusion decisions to this map.",
+        "Please apply reviewed byte order and exclusion decisions to this map.",
+        "Can you apply reviewed byte order and exclusion decisions to this map.",
+        "I need you to apply reviewed byte order and exclusion decisions to this map.",
+        "Help me apply reviewed byte order and exclusion decisions to this map."
+      ],
+      "negative": [
+        "review this map without making a decision",
+        "silently approve every unresolved field",
+        "generate a Modpoll configuration",
+        "write a value to the device",
+        "compare two map revisions"
+      ]
+    },
+    {
       "skill_id": "ask-modbus",
       "positive": [
         "Help me choose the right Modbus workflow.",

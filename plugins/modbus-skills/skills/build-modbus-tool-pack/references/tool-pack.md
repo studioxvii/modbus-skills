@@ -30,4 +30,6 @@ modpoll/
 modscan/
 ```
 
-The manifest records adapter versions, assumptions, holds, generated paths, and input hashes. Deterministic files must not contain timestamps or local absolute paths.
+The manifest records adapter versions, assumptions, holds, generated paths, the exact source-map hash, the read-plan hash, and hashes for both portable projections. In `final` mode, the plan must be bound to the exact source-map hash.
+
+The output file named `canonical-map.json` is a `modbus-runtime-map/v1` projection. It contains only target-visible runtime fields. The output `read-plan.json` contains only request, point-trace, original provenance, visible planning-option, and sanitized hold fields. It does not repair or replace stale provenance. Both files exclude review audit data, approval identities, source evidence, arbitrary plan metadata, and local source metadata. Deterministic files must not contain timestamps, credentials, or local absolute paths.

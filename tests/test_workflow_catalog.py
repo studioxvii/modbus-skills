@@ -48,6 +48,8 @@ class WorkflowCatalogTests(unittest.TestCase):
                 "external-gate",
                 "evaluate-modbus-byte-order",
                 "human-gate",
+                "apply-modbus-review-decisions",
+                "compile-modbus-read-plan",
                 "build-modbus-tool-pack",
             ],
         )

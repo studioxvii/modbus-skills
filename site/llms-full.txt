@@ -1,6 +1,7 @@
 # Modbus Skills
 
 - [Analyze Modbus Capture](skills/analyze-modbus-capture.html): Analyze bounded live or recorded Modbus samples for communication errors, response timing, missing or duplicate samples, stale and flat values, range and rate changes, counter resets or wraps, discrete transitions, and byte-order stability. Use for troubleshooting read-only captures.
+- [Apply Modbus Review Decisions](skills/apply-modbus-review-decisions.html): Apply explicit human review decisions to a normalized Modbus map, preserve the decision evidence, exclude out-of-scope points, and approve the map only when no blocking hold remains. Use after evidence review or byte-order evaluation when a user confirms values or dispositions.
 - [Ask Modbus](skills/ask-modbus.html): Route an unclear Modbus engineering goal to one focused workflow. Use when the request does not provide enough information to select a focused skill. Also use as the safety stop for requests that ask for Modbus writes, broadcasts, network discovery, or unbounded polling. Do not use as the primary skill when a safe request names a concrete input, conversion, check, analysis, or target output that matches another skill.
 - [Build Modbus Tool Pack](skills/build-modbus-tool-pack.html): Build Node-RED, Modpoll, ModScan, or any non-empty combination from one reviewed Modbus map and one compiled read plan. Use when a user wants several tool outputs, a portable device pack, or is unsure which target to choose.
 - [Capture Modbus Sample](skills/capture-modbus-sample.html): Create a bounded read-only probe for collecting raw Modbus words through Node-RED, Modpoll, or ModScan. Use for sample acquisition before byte-order or datatype review. Use a target generator when the request is only to render a named output from an existing canonical map and read plan.
@@ -24,6 +25,11 @@
 Analyze bounded live or recorded Modbus samples for communication errors, response timing, missing or duplicate samples, stale and flat values, range and rate changes, counter resets or wraps, discrete transitions, and byte-order stability. Use for troubleshooting read-only captures.
 
 Example: Use $analyze-modbus-capture to find communication and signal-quality problems in this capture.
+## Apply Modbus Review Decisions
+
+Apply explicit human review decisions to a normalized Modbus map, preserve the decision evidence, exclude out-of-scope points, and approve the map only when no blocking hold remains. Use after evidence review or byte-order evaluation when a user confirms values or dispositions.
+
+Example: Use $apply-modbus-review-decisions to record my confirmed Modbus map decisions.
 ## Ask Modbus
 
 Route an unclear Modbus engineering goal to one focused workflow. Use when the request does not provide enough information to select a focused skill. Also use as the safety stop for requests that ask for Modbus writes, broadcasts, network discovery, or unbounded polling. Do not use as the primary skill when a safe request names a concrete input, conversion, check, analysis, or target output that matches another skill.
@@ -58,7 +64,7 @@ Example: Use $diagnose-modbus-map to parse, normalize, lint, and review this map
 
 Evaluate raw Modbus register words as explicit byte and word layouts, signed and unsigned integers, and IEEE floating-point values from one immutable sample. Use for ABCD, BADC, CDAB, DCBA, endian, word-swap, implausible-value, or unknown encoding questions.
 
-Example: Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words.
+Example: Use $evaluate-modbus-byte-order to compare all valid interpretations of these raw words. Require the sampled point identity before a human records a decision.
 ## Extract Modbus PDF
 
 Extract candidate Modbus register rows and page evidence from a PDF manual. Use for device manuals, register-table PDFs, page-range extraction, OCR review, or when the user needs traceable rows rather than an unsupported summary.
@@ -118,14 +124,16 @@ Produce a reviewed Modbus map without silent engineering guesses.
 2. normalize-modbus-map: candidate-map/v1 -> modbus-map/v1
 3. lint-modbus-map: modbus-map/v1 -> modbus-map-lint/v1
 4. review-modbus-evidence: modbus-map/v1, modbus-map-lint/v1 -> modbus-map-evidence-review/v1
-5. human-gate: modbus-map/v1, modbus-map-evidence-review/v1 -> modbus-map/v1
+5. human-gate: modbus-map/v1, modbus-map-evidence-review/v1 -> modbus-review-decisions/v1
+6. apply-modbus-review-decisions: modbus-map/v1, modbus-review-decisions/v1 -> modbus-map/v1
 
 ## Workflow: Determine byte order from supplied raw words
 
 Compare explicit layouts from one immutable raw sample and record human confirmation.
 
 1. evaluate-modbus-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
-2. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
+2. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-review-decisions/v1
+3. apply-modbus-review-decisions: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
 
 ## Workflow: Probe, resolve byte order, and finalize a tool pack
 
@@ -135,8 +143,10 @@ Use a selected tool target to collect one raw sample, compare byte-order candida
 2. build-modbus-tool-pack: modbus-map/v1, modbus-read-plan/v1, probe-tool-pack-request/v1 -> modbus-tool-pack/v1
 3. external-gate: modbus-tool-pack/v1 -> capture/v1
 4. evaluate-modbus-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
-5. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
-6. build-modbus-tool-pack: modbus-map/v1, modbus-read-plan/v1, final-tool-pack-request/v1 -> modbus-tool-pack/v1
+5. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-review-decisions/v1
+6. apply-modbus-review-decisions: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
+7. compile-modbus-read-plan: modbus-map/v1 -> modbus-read-plan/v1
+8. build-modbus-tool-pack: modbus-map/v1, modbus-read-plan/v1, final-tool-pack-request/v1 -> modbus-tool-pack/v1
 
 ## Workflow: Build a multi-target tool pack
 

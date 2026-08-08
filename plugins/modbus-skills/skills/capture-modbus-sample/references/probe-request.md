@@ -30,6 +30,8 @@ Use this minimum request shape:
 
 - Default to one contiguous point, one target, and `max_gap` 0.
 - Treat the generated files as a disabled or operator-controlled probe plan.
+- In a Node-RED probe, enable the tab only after review. Then click each `Run one
+  read` control once. The flow has no scheduled polling.
 - At the external gate, issue one physical read and stop.
 - For Witte desktop automation, use an interval of at least 1000 ms and no more than five aggregate requests per second on one route.
 - Stop on repeated timeouts, exception responses, or an unexpected unit response.

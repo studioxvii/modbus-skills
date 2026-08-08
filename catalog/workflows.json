@@ -10,7 +10,8 @@
         {"id": "normalize", "kind": "skill", "skill": "normalize-modbus-map", "inputs": ["candidate-map/v1"], "output": "modbus-map/v1"},
         {"id": "lint", "kind": "skill", "skill": "lint-modbus-map", "inputs": ["modbus-map/v1"], "output": "modbus-map-lint/v1"},
         {"id": "review", "kind": "skill", "skill": "review-modbus-evidence", "inputs": ["modbus-map/v1", "modbus-map-lint/v1"], "output": "modbus-map-evidence-review/v1"},
-        {"id": "confirm-map", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-map-evidence-review/v1"], "output": "modbus-map/v1", "instruction": "Resolve every blocking hold and record each decision as new evidence before the map is used for final generation."}
+        {"id": "confirm-map", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-map-evidence-review/v1"], "output": "modbus-review-decisions/v1", "instruction": "Resolve every blocking hold and state each value or exclusion with a reason and evidence reference."},
+        {"id": "apply-decisions", "kind": "skill", "skill": "apply-modbus-review-decisions", "inputs": ["modbus-map/v1", "modbus-review-decisions/v1"], "output": "modbus-map/v1"}
       ],
       "stop_conditions": ["unresolved route or address convention", "unresolved register area", "unresolved unit identifier", "unreviewed rejected rows", "unconfirmed multi-register byte order"]
     },
@@ -20,7 +21,8 @@
       "goal": "Compare explicit layouts from one immutable raw sample and record human confirmation.",
       "steps": [
         {"id": "evaluate", "kind": "skill", "skill": "evaluate-modbus-byte-order", "inputs": ["capture/v1"], "output": "modbus-byte-order-evidence/v1"},
-        {"id": "confirm-layout", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-map/v1", "instruction": "Confirm one explicit layout with engineering evidence. Keep the raw sample and all candidates."}
+        {"id": "confirm-layout", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-review-decisions/v1", "instruction": "Confirm one explicit layout with engineering evidence. Keep the raw sample and all candidates."},
+        {"id": "apply-layout", "kind": "skill", "skill": "apply-modbus-review-decisions", "inputs": ["modbus-map/v1", "modbus-review-decisions/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-map/v1"}
       ],
       "stop_conditions": ["no raw words", "ambiguous sample identity", "no human confirmation"]
     },
@@ -33,7 +35,9 @@
         {"id": "build-probe", "kind": "skill", "skill": "build-modbus-tool-pack", "inputs": ["modbus-map/v1", "modbus-read-plan/v1", "probe-tool-pack-request/v1"], "output": "modbus-tool-pack/v1"},
         {"id": "run-probe", "kind": "external-gate", "inputs": ["modbus-tool-pack/v1"], "output": "capture/v1", "instruction": "Run one bounded read against the reviewed endpoint and save the returned raw 16-bit words. Do not scan or write."},
         {"id": "evaluate", "kind": "skill", "skill": "evaluate-modbus-byte-order", "inputs": ["capture/v1"], "output": "modbus-byte-order-evidence/v1"},
-        {"id": "confirm-layout", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-map/v1", "instruction": "Confirm the explicit layout and record the sample as evidence."},
+        {"id": "confirm-layout", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-review-decisions/v1", "instruction": "Confirm the explicit layout and record the sample as evidence."},
+        {"id": "apply-layout", "kind": "skill", "skill": "apply-modbus-review-decisions", "inputs": ["modbus-map/v1", "modbus-review-decisions/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-map/v1"},
+        {"id": "plan-final", "kind": "skill", "skill": "compile-modbus-read-plan", "inputs": ["modbus-map/v1"], "output": "modbus-read-plan/v1"},
         {"id": "build-final", "kind": "skill", "skill": "build-modbus-tool-pack", "inputs": ["modbus-map/v1", "modbus-read-plan/v1", "final-tool-pack-request/v1"], "output": "modbus-tool-pack/v1"}
       ],
       "stop_conditions": ["no selected target", "unresolved route or unit identifier", "no raw words", "no human byte-order confirmation", "write request detected"]

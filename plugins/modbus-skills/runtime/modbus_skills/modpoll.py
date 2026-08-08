@@ -269,7 +269,9 @@ def _gavinying_preflight(
             point_path = f"{block_path}.points[{point_index}]"
             if mode == "final":
                 datatype = point_datatype(point)
-                if datatype is None or _gavinying_dtype(datatype) is None:
+                if datatype is None or _gavinying_dtype(
+                    datatype, point_word_count(point)
+                ) is None:
                     findings.append(
                         Finding(
                             "error",
@@ -290,7 +292,10 @@ def _gavinying_preflight(
                             f"{point_path}.engineering_offset",
                         )
                     )
-                if (point_word_count(point) or 1) > 1:
+                if (
+                    (point_word_count(point) or 1) > 1
+                    and not (datatype or "").startswith("string")
+                ):
                     order = point_byte_order(point)
                     mapped = _GAVINYING_BYTE_ORDER.get(order or "")
                     if mapped is None:
@@ -350,6 +355,7 @@ def _gavinying_csv(
                     _GAVINYING_BYTE_ORDER[point_byte_order(point) or "ABCD"]
                     for point in points
                     if (point_word_count(point) or 1) > 1
+                    and not (point_datatype(point) or "").startswith("string")
                 }
                 if orders:
                     endian = sorted(orders)[0]
@@ -380,7 +386,9 @@ def _gavinying_csv(
                     identifier = point_id(point, point_index) or f"point-{point_index + 1}"
                     point_start = point_protocol_offset(point)
                     assert point_start is not None
-                    datatype = _gavinying_dtype(point_datatype(point) or "")
+                    datatype = _gavinying_dtype(
+                        point_datatype(point) or "", point_word_count(point)
+                    )
                     assert datatype is not None
                     unit_text = point.get(
                         "engineering_unit", point.get("unit", "")
@@ -441,8 +449,10 @@ def _write_probe_refs(
         )
 
 
-def _gavinying_dtype(datatype: str) -> str | None:
+def _gavinying_dtype(datatype: str, word_count: int | None = None) -> str | None:
     normalized = datatype.strip().lower()
+    if normalized in {"string", "ascii"}:
+        return f"string{word_count * 2}" if word_count else None
     if normalized.startswith("string") and normalized.removeprefix("string").isdigit():
         return normalized
     return _GAVINYING_DTYPES.get(normalized)

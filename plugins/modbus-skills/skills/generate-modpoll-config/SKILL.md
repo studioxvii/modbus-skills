@@ -22,6 +22,8 @@ Resolve the product profile before generation.
 4. Inspect the generated setup manifest and decision report.
 5. Verify with the pinned target implementation.
 
+In `final` mode, use only a plan whose `input_hashes.canonical_map` value matches the exact map. Recompile the plan after any review decision.
+
 For Witte, generate documented automation and readable plan files. Let the installed application create native project files. Do not synthesize opaque `.mbp` or `.mbw` data.
 
 Do not generate writes or scans.

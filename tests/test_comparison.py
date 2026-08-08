@@ -39,7 +39,7 @@ class MapComparisonTests(unittest.TestCase):
         after = [point("kept", name="New"), point("added", offset=3)]
         result = compare_maps(before, after)
         self.assertEqual(
-            {"added": 1, "removed": 1, "changed": 1, "unchanged": 0, "ambiguous": 0},
+            {"added": 1, "removed": 1, "changed": 1, "moved": 0, "unchanged": 0, "ambiguous": 0},
             result["summary"],
         )
         self.assertEqual(
@@ -52,6 +52,53 @@ class MapComparisonTests(unittest.TestCase):
         self.assertEqual(1, result["summary"]["added"])
         self.assertEqual(1, result["summary"]["removed"])
         self.assertEqual(0, result["summary"]["changed"])
+
+    def test_reports_each_physical_identity_change_as_a_move(self) -> None:
+        cases = (
+            ("route_id", "lab-b"),
+            ("unit_id", 2),
+            ("area", "input-register"),
+            ("protocol_offset", 20),
+        )
+        before = point("shifted", offset=10)
+
+        for field, new_value in cases:
+            with self.subTest(field=field):
+                after = dict(before)
+                after[field] = new_value
+                result = compare_maps([before], [after])
+
+                self.assertEqual(1, result["summary"]["moved"])
+                self.assertEqual(0, result["summary"]["added"])
+                self.assertEqual(0, result["summary"]["removed"])
+                self.assertEqual(
+                    [
+                        {
+                            "field": field,
+                            "before": before[field],
+                            "after": new_value,
+                        }
+                    ],
+                    result["moved"][0]["changes"],
+                )
+
+    def test_reports_source_review_state_without_treating_it_as_identity(self) -> None:
+        before = point("reviewed", source_reviewed=False)
+        after = point("reviewed", source_reviewed=True)
+
+        result = compare_maps([before], [after])
+
+        self.assertEqual(1, result["summary"]["changed"])
+        self.assertEqual(
+            [
+                {
+                    "field": "source_reviewed",
+                    "before": False,
+                    "after": True,
+                }
+            ],
+            result["changed"][0]["changes"],
+        )
 
     def test_duplicate_identity_is_ambiguous_and_not_collapsed(self) -> None:
         duplicate = point("same")

@@ -13,6 +13,7 @@ RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
 FIXTURES = ROOT / "tests" / "fixtures" / "outputs"
 sys.path.insert(0, str(RUNTIME))
 
+from modbus_skills.artifacts import artifact_envelope  # noqa: E402
 from modbus_skills.modscan import export_modscan  # noqa: E402
 from modbus_skills.read_plan import compile_read_plan  # noqa: E402
 
@@ -41,7 +42,12 @@ def point(**updates: object) -> dict[str, object]:
 
 def inputs() -> tuple[dict[str, object], dict[str, object]]:
     value = point()
-    return {"points": [value]}, compile_read_plan([value]).to_dict()
+    canonical_map = {"points": [value]}
+    return canonical_map, artifact_envelope(
+        compile_read_plan([value]).to_dict(),
+        schema_version="modbus-read-plan/v1",
+        inputs={"canonical_map": canonical_map},
+    )
 
 
 def text(result: object, suffix: str) -> str:
@@ -129,6 +135,11 @@ class ModscanExporterTests(unittest.TestCase):
         canonical_map = {"points": [malicious]}
         read_plan = compile_read_plan([malicious]).to_dict()
         read_plan["requests"][0]["request_id"] = "-REQUEST"
+        read_plan = artifact_envelope(
+            read_plan,
+            schema_version="modbus-read-plan/v1",
+            inputs={"canonical_map": canonical_map},
+        )
         result = export_modscan(canonical_map, read_plan)
         self.assertEqual("generated", result.status)
         for artifact in result.artifacts:

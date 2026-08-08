@@ -22,10 +22,12 @@ from .artifacts import (
     ArtifactContractError,
     artifact_envelope,
     assert_artifact_envelope,
+    stable_input_hash,
 )
 from .byte_order import RawSample, evaluate_byte_orders
 from .comparison import compare_maps
 from .custom_format import render_custom_format, validate_custom_format
+from .decisions import apply_review_decisions
 from .exporters import Artifact, ExportResult, stable_json
 from .map_workflows import (
     diagnose_map,
@@ -38,7 +40,7 @@ from .modscan import export_modscan
 from .node_red import export_node_red
 from .parsers import parse_source
 from .read_plan import compile_read_plan
-from .tool_pack import ToolPack, build_tool_pack
+from .tool_pack import ToolPack, build_tool_pack, group_blocking_findings
 
 
 COMMANDS = (
@@ -48,6 +50,7 @@ COMMANDS = (
     "lint-map",
     "diagnose-map",
     "review-evidence",
+    "apply-review-decisions",
     "remap-addresses",
     "compare-maps",
     "capture-sample",
@@ -102,6 +105,11 @@ def _parser(command: str) -> argparse.ArgumentParser:
         parser.add_argument("--format", choices=("csv", "tsv", "psv", "json", "xml", "xlsx"))
         parser.add_argument("--delimiter")
         parser.add_argument("--defaults")
+    elif command == "apply-review-decisions":
+        parser.add_argument("--map", required=True)
+        parser.add_argument("--decisions", required=True)
+        parser.add_argument("--evidence", action="append", default=[])
+        parser.add_argument("--output", required=True)
     elif command == "remap-addresses":
         parser.add_argument("--input", required=True)
         parser.add_argument("--from", dest="source_convention", required=True, choices=("protocol-offset", "one-based-offset", "modicon-reference"))
@@ -140,6 +148,7 @@ def _parser(command: str) -> argparse.ArgumentParser:
         parser.add_argument("--request", required=True)
         parser.add_argument("--output", required=True)
     elif command == "analyze-capture":
+        parser.add_argument("--format", choices=("json", "csv"))
         parser.add_argument("--options")
         parser.add_argument("--now")
     elif command == "infer-custom-format":
@@ -287,7 +296,7 @@ def _write_pack(pack: ToolPack, root_value: str, *, overwrite: bool) -> None:
         },
         assumptions=[],
         findings=findings,
-        holds=_blocking_findings(findings),
+        holds=group_blocking_findings(findings),
     )
     result_artifact = Artifact.text(
         "tool-pack-result.json",
@@ -737,7 +746,7 @@ def _handle_diagnose(args: argparse.Namespace) -> dict[str, Any]:
     )
     artifacts = [
         Artifact.text("parsed.json", "application/json", stable_json(parsed), "parsed-map"),
-        Artifact.text("canonical-map.json", "application/json", stable_json(canonical), "canonical-map-draft"),
+        Artifact.text("map-draft.json", "application/json", stable_json(canonical), "canonical-map-draft"),
         Artifact.text("lint.json", "application/json", stable_json(lint), "map-lint"),
         Artifact.text("review.json", "application/json", stable_json(review), "evidence-review"),
     ]
@@ -766,6 +775,42 @@ def _handle_review(args: argparse.Namespace) -> dict[str, Any]:
     )
     _write_json(args.output, result, overwrite=args.overwrite)
     return {"status": result["review_status"], "items": len(result["items"]), "output": Path(args.output).name}
+
+
+def _handle_decisions(args: argparse.Namespace) -> dict[str, Any]:
+    canonical = _mapping(_read_json(args.map, label="map"), "map")
+    decisions = _mapping(
+        _read_json(args.decisions, label="review decisions"),
+        "review decisions",
+    )
+    evidence_artifacts: dict[str, Mapping[str, Any]] = {}
+    for path in args.evidence:
+        evidence = _mapping(
+            _read_json(path, label="review evidence"), "review evidence"
+        )
+        evidence_artifacts[stable_input_hash(evidence)] = evidence
+    raw_result = apply_review_decisions(
+        canonical,
+        decisions,
+        evidence_artifacts=evidence_artifacts,
+    )
+    result = artifact_envelope(
+        raw_result,
+        schema_version="modbus-map/v1",
+        artifact_type="modbus-map",
+        inputs={"canonical_map_draft": canonical, "review_decisions": decisions},
+        assumptions=list(raw_result.get("assumptions", ())),
+        findings=list(raw_result.get("findings", ())),
+        holds=list(raw_result.get("holds", ())),
+    )
+    _write_json(args.output, result, overwrite=args.overwrite)
+    return {
+        "status": result["review_status"],
+        "points": len(result["points"]),
+        "excluded": len(result.get("excluded_points", ())),
+        "holds": len(result["holds"]),
+        "output": Path(args.output).name,
+    }
 
 
 def _map_points(value: Any) -> list[Mapping[str, Any]]:
@@ -922,6 +967,74 @@ def _probe_map(request: Mapping[str, Any], base: Path) -> Mapping[str, Any]:
     return normalize_map({"records": points}, defaults=_mapping(request.get("defaults", {}), "defaults"))
 
 
+def _capture_plannable_points(
+    canonical_map: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    """Exclude points whose source evidence does not permit a read probe."""
+
+    points = _map_points(canonical_map)
+    blocked_ids: set[str] = set()
+    global_access_hold = False
+    raw_holds = canonical_map.get("holds", ())
+    if isinstance(raw_holds, Sequence) and not isinstance(
+        raw_holds, (str, bytes, bytearray)
+    ):
+        for hold in raw_holds:
+            if not isinstance(hold, Mapping) or hold.get("blocking", True) is False:
+                continue
+            code = str(hold.get("code", "")).lower()
+            field = str(hold.get("field", "")).lower()
+            access_hold = (
+                field in {"access", "access_readable", "access_writable"}
+                or "access" in code
+                or "not-readable" in code
+                or "write-only" in code
+            )
+            if not access_hold:
+                continue
+            point_ids = hold.get("point_ids", ())
+            if isinstance(point_ids, Sequence) and not isinstance(
+                point_ids, (str, bytes, bytearray)
+            ) and point_ids:
+                blocked_ids.update(str(value) for value in point_ids)
+            else:
+                global_access_hold = True
+
+    if global_access_hold:
+        return []
+
+    plannable: list[Mapping[str, Any]] = []
+    for index, point in enumerate(points):
+        identifier = str(
+            point.get(
+                "logical_point_id",
+                point.get("point_id", point.get("id", f"point-{index + 1}")),
+            )
+        )
+        access_value = point.get("access")
+        access = (
+            str(access_value)
+            .strip()
+            .lower()
+            .replace("_", "-")
+            .replace(" ", "-")
+            if access_value not in (None, "")
+            else None
+        )
+        if (
+            identifier in blocked_ids
+            or point.get("source_include") is False
+            or access == "write-only"
+            or (
+                access_value not in (None, "")
+                and access not in {"read-only", "read-write"}
+            )
+        ):
+            continue
+        plannable.append(point)
+    return plannable
+
+
 def _ensure_workflow_envelope(
     value: Mapping[str, Any], schema_version: str
 ) -> Mapping[str, Any]:
@@ -952,9 +1065,27 @@ def _handle_capture(args: argparse.Namespace) -> dict[str, Any]:
     plan_value = request.get("read_plan", request.get("plan"))
     if plan_value is not None:
         plan = _request_value(plan_value, request_path.parent, "read plan")
+        plan = _ensure_workflow_envelope(plan, "modbus-read-plan/v1")
     else:
-        plan = compile_read_plan(_map_points(canonical), max_gap=int(request.get("max_gap", 0))).to_dict()
-    plan = _ensure_workflow_envelope(plan, "modbus-read-plan/v1")
+        max_gap = int(request.get("max_gap", 0))
+        raw_plan = compile_read_plan(
+            _capture_plannable_points(canonical),
+            max_gap=max_gap,
+        ).to_dict()
+        planning_options = {"max_gap": max_gap, "max_quantities": {}}
+        raw_plan["planning_options"] = planning_options
+        plan_findings = list(raw_plan.get("findings", ()))
+        plan = artifact_envelope(
+            raw_plan,
+            schema_version="modbus-read-plan/v1",
+            inputs={
+                "canonical_map": canonical,
+                "planning_options": planning_options,
+            },
+            assumptions=[],
+            findings=plan_findings,
+            holds=_blocking_findings(plan_findings),
+        )
     raw_targets = request.get("targets", [request.get("target")])
     if isinstance(raw_targets, str):
         raw_targets = [raw_targets]
@@ -987,7 +1118,9 @@ def _parse_word(value: Any) -> int:
         raise CliError(f"invalid sample word: {value!r}") from exc
 
 
-def _raw_sample(value: Any, requested_id: str | None) -> RawSample:
+def _raw_sample(
+    value: Any, requested_id: str | None
+) -> tuple[RawSample, Mapping[str, Any]]:
     candidate: Any = value
     if isinstance(value, Mapping) and isinstance(value.get("sample"), Mapping):
         candidate = value["sample"]
@@ -1001,14 +1134,83 @@ def _raw_sample(value: Any, requested_id: str | None) -> RawSample:
     if isinstance(candidate, Sequence) and not isinstance(candidate, (str, bytes, bytearray)):
         words = candidate
         sample_id = requested_id or "sample-001"
+        candidate_mapping: Mapping[str, Any] = {}
     elif isinstance(candidate, Mapping):
         words = candidate.get("words", candidate.get("raw_words", candidate.get("registers")))
-        sample_id = requested_id or str(candidate.get("sample_id", candidate.get("id", "sample-001")))
+        declared_id_value = candidate.get("sample_id", candidate.get("id"))
+        declared_id = (
+            str(declared_id_value).strip()
+            if declared_id_value not in (None, "")
+            else None
+        )
+        if requested_id and declared_id and requested_id != declared_id:
+            raise CliError(
+                "--sample-id does not match the sample_id in the capture"
+            )
+        sample_id = requested_id or declared_id or "sample-001"
+        candidate_mapping = candidate
     else:
         raise CliError("input must contain raw words")
     if not isinstance(words, Sequence) or isinstance(words, (str, bytes, bytearray)):
         raise CliError("sample words must be an array")
-    return RawSample(sample_id, tuple(_parse_word(word) for word in words))
+    sample = RawSample(sample_id, tuple(_parse_word(word) for word in words))
+    identity = _raw_sample_identity(value, candidate_mapping, sample.sample_id)
+    return sample, identity
+
+
+def _raw_sample_identity(
+    capture: Any,
+    candidate: Mapping[str, Any],
+    sample_id: str,
+) -> Mapping[str, Any]:
+    point_id_value = candidate.get(
+        "point_id", candidate.get("logical_point_id", candidate.get("tag_id"))
+    )
+    point_id = str(point_id_value).strip() if point_id_value not in (None, "") else None
+    point_config: Mapping[str, Any] = {}
+    if point_id and isinstance(capture, Mapping):
+        raw_points = capture.get("points", ())
+        if isinstance(raw_points, Sequence) and not isinstance(
+            raw_points, (str, bytes, bytearray)
+        ):
+            matches = [
+                point
+                for point in raw_points
+                if isinstance(point, Mapping)
+                and str(
+                    point.get(
+                        "point_id",
+                        point.get("logical_point_id", point.get("tag_id", "")),
+                    )
+                )
+                == point_id
+            ]
+            if len(matches) == 1:
+                point_config = matches[0]
+
+    def value(*keys: str) -> Any:
+        for source in (candidate, point_config, capture if isinstance(capture, Mapping) else {}):
+            for key in keys:
+                if source.get(key) not in (None, ""):
+                    return source.get(key)
+        return None
+
+    protocol_offset = value("protocol_offset", "pdu_offset")
+    if protocol_offset is None:
+        for source in (candidate, point_config):
+            address = source.get("address")
+            if isinstance(address, Mapping) and address.get("protocol_offset") not in (None, ""):
+                protocol_offset = address.get("protocol_offset")
+                break
+    return {
+        "sample_id": sample_id,
+        "point_id": point_id,
+        "route_id": value("route_id", "route"),
+        "unit_id": value("unit_id", "slave_id"),
+        "area": value("area", "register_area"),
+        "protocol_offset": protocol_offset,
+        "timestamp": value("timestamp", "captured_at"),
+    }
 
 
 def _split_values(value: str | None) -> tuple[str, ...]:
@@ -1017,7 +1219,7 @@ def _split_values(value: str | None) -> tuple[str, ...]:
 
 def _handle_byte_order(args: argparse.Namespace) -> dict[str, Any]:
     capture = _read_json(args.input)
-    sample = _raw_sample(capture, args.sample_id)
+    sample, sample_identity = _raw_sample(capture, args.sample_id)
     raw_result = evaluate_byte_orders(
         sample,
         datatypes=_split_values(args.types) or None,
@@ -1025,6 +1227,38 @@ def _handle_byte_order(args: argparse.Namespace) -> dict[str, Any]:
         scale=args.scale,
         engineering_offset=args.engineering_offset,
     ).to_dict()
+    raw_result["sample_identity"] = dict(sample_identity)
+    missing_identity = [
+        field
+        for field in (
+            "point_id",
+            "route_id",
+            "unit_id",
+            "area",
+            "protocol_offset",
+            "timestamp",
+        )
+        if sample_identity.get(field) in (None, "")
+    ]
+    holds = []
+    if missing_identity:
+        holds.append(
+            {
+                "code": "byte-order-sample-identity-incomplete",
+                "severity": "hold",
+                "blocking": True,
+                "message": "Identify the sampled point before applying a byte-order decision.",
+                "details": {"missing_fields": missing_identity},
+            }
+        )
+    holds.append(
+        {
+            "code": "byte-order-human-confirmation-required",
+            "severity": "hold",
+            "blocking": True,
+            "message": "The candidates are evidence. A human must confirm one layout before final generation.",
+        }
+    )
     result = artifact_envelope(
         raw_result,
         schema_version="modbus-byte-order-evidence/v1",
@@ -1040,14 +1274,7 @@ def _handle_byte_order(args: argparse.Namespace) -> dict[str, Any]:
         },
         assumptions=[],
         findings=[],
-        holds=[
-            {
-                "code": "byte-order-human-confirmation-required",
-                "severity": "hold",
-                "blocking": True,
-                "message": "The candidates are evidence. A human must confirm one layout before final generation.",
-            }
-        ],
+        holds=holds,
     )
     _write_json(args.output, result, overwrite=args.overwrite)
     return {"status": "evaluated", "candidates": len(result["candidates"]), "output": Path(args.output).name}
@@ -1071,28 +1298,93 @@ def _max_quantities(values: Sequence[str]) -> Mapping[str, int] | None:
 def _handle_plan(args: argparse.Namespace) -> dict[str, Any]:
     canonical = _read_json(args.input)
     max_quantities = _max_quantities(args.max_quantity)
+    points = _map_points(canonical)
+    source_holds = canonical.get("holds", ()) if isinstance(canonical, Mapping) else ()
+    if not isinstance(source_holds, Sequence) or isinstance(
+        source_holds, (str, bytes, bytearray)
+    ):
+        source_holds = ()
+    probe_safe_fields = {"datatype", "byte_order", "byte_order_confirmed"}
+    blocked_point_ids: set[str] = set()
+    global_blocking = False
+    for hold in source_holds:
+        if not isinstance(hold, Mapping) or hold.get("blocking", True) is False:
+            continue
+        if hold.get("field") in probe_safe_fields:
+            continue
+        point_ids = hold.get("point_ids", ())
+        if isinstance(point_ids, Sequence) and not isinstance(
+            point_ids, (str, bytes, bytearray)
+        ) and point_ids:
+            blocked_point_ids.update(str(value) for value in point_ids)
+        else:
+            global_blocking = True
+    if global_blocking:
+        plannable_points: list[Mapping[str, Any]] = []
+    else:
+        plannable_points = [
+            point
+            for index, point in enumerate(points)
+            if str(
+                point.get(
+                    "logical_point_id",
+                    point.get("point_id", point.get("id", f"point-{index + 1}")),
+                )
+            )
+            not in blocked_point_ids
+        ]
     raw_result = compile_read_plan(
-        _map_points(canonical),
+        plannable_points,
         max_gap=args.max_gap,
         max_quantities=max_quantities,
     ).to_dict()
+    planning_options = {
+        "max_gap": args.max_gap,
+        "max_quantities": dict(max_quantities or {}),
+    }
+    raw_result["planning_options"] = planning_options
     findings = list(raw_result.get("findings", ()))
+    for hold in source_holds:
+        if isinstance(hold, Mapping) and hold.get("blocking", True) is not False:
+            candidate = dict(hold)
+            key = (
+                candidate.get("code"),
+                candidate.get("field"),
+                tuple(str(value) for value in candidate.get("point_ids", ()))
+                if isinstance(candidate.get("point_ids", ()), Sequence)
+                and not isinstance(candidate.get("point_ids", ()), (str, bytes, bytearray))
+                else (),
+            )
+            existing_keys = {
+                (
+                    item.get("code"),
+                    item.get("field"),
+                    tuple(str(value) for value in item.get("point_ids", ()))
+                    if isinstance(item.get("point_ids", ()), Sequence)
+                    and not isinstance(item.get("point_ids", ()), (str, bytes, bytearray))
+                    else (),
+                )
+                for item in findings
+                if isinstance(item, Mapping)
+            }
+            if key not in existing_keys:
+                findings.append(candidate)
+    raw_result["findings"] = findings
+    raw_result["has_holds"] = bool(_blocking_findings(findings))
+    raw_result["status"] = "held" if raw_result["has_holds"] else "planned"
     result = artifact_envelope(
         raw_result,
         schema_version="modbus-read-plan/v1",
         inputs={
             "canonical_map": canonical,
-            "planning_options": {
-                "max_gap": args.max_gap,
-                "max_quantities": max_quantities,
-            },
+            "planning_options": planning_options,
         },
         assumptions=[],
         findings=findings,
         holds=_blocking_findings(findings),
     )
     _write_json(args.output, result, overwrite=args.overwrite)
-    return {"status": "held" if result["has_holds"] else "planned", "requests": len(result["requests"]), "output": Path(args.output).name}
+    return {"status": result["status"], "requests": len(result["requests"]), "output": Path(args.output).name}
 
 
 def _export_inputs(args: argparse.Namespace) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]]:
@@ -1214,12 +1506,81 @@ def _target_request(
     return identifiers, merged
 
 
+def _capture_csv(data: bytes) -> Mapping[str, Any]:
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise CliError("capture CSV must use UTF-8") from exc
+    try:
+        dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t|")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(text, newline=""), dialect=dialect)
+    if not reader.fieldnames:
+        raise CliError("capture CSV must contain a header row")
+    raw_headers = list(reader.fieldnames)
+    headers = [_normalize_header(value or "") for value in raw_headers]
+    if any(not header for header in headers):
+        raise CliError("capture CSV headers must be non-empty")
+    if len(headers) != len(set(headers)):
+        raise CliError("capture CSV headers must be unique after normalization")
+    samples: list[dict[str, Any]] = []
+    for row in reader:
+        if not row or all(value in (None, "") for value in row.values()):
+            continue
+        sample = {
+            header: (
+                row.get(raw_header).strip()
+                if isinstance(row.get(raw_header), str)
+                else row.get(raw_header)
+            )
+            for raw_header, header in zip(raw_headers, headers, strict=True)
+        }
+        if sample.get("raw_words") not in (None, ""):
+            raw_words = str(sample["raw_words"]).strip()
+            if raw_words.startswith("["):
+                try:
+                    parsed_words = json.loads(raw_words)
+                except json.JSONDecodeError as exc:
+                    raise CliError(
+                        f"capture CSV raw_words is invalid on row {reader.line_num}"
+                    ) from exc
+                if not isinstance(parsed_words, list):
+                    raise CliError(
+                        f"capture CSV raw_words must be an array on row {reader.line_num}"
+                    )
+                sample["raw_words"] = [_parse_word(value) for value in parsed_words]
+            else:
+                sample["raw_words"] = [
+                    _parse_word(value)
+                    for value in re.split(r"[\s;|]+", raw_words)
+                    if value
+                ]
+        else:
+            sample.pop("raw_words", None)
+        if sample.get("success") not in (None, ""):
+            normalized = str(sample["success"]).strip().lower()
+            if normalized not in {"true", "false"}:
+                raise CliError(
+                    f"capture CSV success must be true or false on row {reader.line_num}"
+                )
+            sample["success"] = normalized == "true"
+        sample["_source"] = {"format": "csv", "row": reader.line_num}
+        samples.append(sample)
+    return {"schema_version": "capture/v1", "samples": samples}
+
+
 def _handle_analysis(args: argparse.Namespace) -> dict[str, Any]:
-    capture = _mapping(_read_json(args.input, label="capture"), "capture")
+    path, data = _read_bytes(args.input)
+    source_format = args.format or ("csv" if path.suffix.lower() == ".csv" else "json")
+    if source_format == "csv":
+        capture = _capture_csv(data)
+    else:
+        capture = _mapping(_read_json(args.input, label="capture"), "capture")
     options = dict(_json_options(args.options, "analysis options"))
     if args.now is not None:
         options["now"] = args.now
-    allowed = {"now", "max_samples", "stale_after_seconds", "flatline_min_samples", "ranges", "rate_limits", "counter_specs"}
+    allowed = {"now", "max_samples", "expected_interval_seconds", "stale_after_seconds", "flatline_min_samples", "ranges", "rate_limits", "counter_specs"}
     unknown = set(options) - allowed
     if unknown:
         raise CliError("unknown analysis options: " + ", ".join(sorted(unknown)))
@@ -1330,6 +1691,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
     "lint-map": _handle_lint,
     "diagnose-map": _handle_diagnose,
     "review-evidence": _handle_review,
+    "apply-review-decisions": _handle_decisions,
     "remap-addresses": _handle_remap,
     "compare-maps": _handle_compare,
     "capture-sample": _handle_capture,

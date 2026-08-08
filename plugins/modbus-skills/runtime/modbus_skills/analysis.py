@@ -312,6 +312,7 @@ def analyze_capture(
     *,
     now: datetime | str | int | float | None = None,
     max_samples: int = _HARD_MAX_SAMPLES,
+    expected_interval_seconds: float | Mapping[str, float] | None = None,
     stale_after_seconds: float | Mapping[str, float] | None = None,
     flatline_min_samples: int = 3,
     ranges: Mapping[str, Mapping[str, Any]] | None = None,
@@ -511,8 +512,20 @@ def analyze_capture(
                 }
             )
 
+        if isinstance(expected_interval_seconds, Mapping):
+            interval_value = expected_interval_seconds.get(identifier)
+        elif expected_interval_seconds is not None:
+            interval_value = expected_interval_seconds
+        else:
+            interval_value = _setting(
+                identifier,
+                config,
+                None,
+                "expected_interval_seconds",
+                "poll_interval_seconds",
+            )
         interval = _numeric_setting(
-            _setting(identifier, config, None, "expected_interval_seconds", "poll_interval_seconds"),
+            interval_value,
             f"Expected interval for {identifier}",
             minimum=0.001,
         )

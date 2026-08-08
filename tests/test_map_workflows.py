@@ -16,6 +16,7 @@ from modbus_skills.map_workflows import (  # noqa: E402
     review_parse_evidence,
 )
 from modbus_skills.parsers import parse_csv, parse_json  # noqa: E402
+from modbus_skills.read_plan import compile_read_plan  # noqa: E402
 
 
 FIXTURES = ROOT / "tests" / "fixtures" / "maps"
@@ -132,6 +133,184 @@ class NormalizeMapTests(unittest.TestCase):
             any(item["code"] == "generated-logical-point-id" for item in first["assumptions"])
         )
 
+    def test_generated_point_id_does_not_change_when_source_row_moves(self) -> None:
+        base = {
+            "protocol_offset": 10,
+            "area": "holding-register",
+            "unit_id": 1,
+            "route_id": "lab-line-a",
+            "datatype": "uint16",
+            "name": "Stable point",
+        }
+        first = normalize_map([{**base, "_source": {"format": "csv", "row": 2}}])
+        second = normalize_map([{**base, "_source": {"format": "csv", "row": 200}}])
+
+        self.assertEqual(
+            first["points"][0]["logical_point_id"],
+            second["points"][0]["logical_point_id"],
+        )
+
+    def test_generated_point_id_collision_requires_explicit_unique_ids(self) -> None:
+        base = {
+            "area": "holding-register",
+            "unit_id": 1,
+            "route_id": "lab-line-a",
+            "datatype": "uint16",
+            "name": "Duplicate label",
+        }
+
+        result = normalize_map(
+            [
+                {**base, "protocol_offset": 10},
+                {**base, "protocol_offset": 20},
+            ]
+        )
+
+        self.assertEqual(
+            result["points"][0]["logical_point_id"],
+            result["points"][1]["logical_point_id"],
+        )
+        matching = [
+            hold
+            for hold in result["holds"]
+            if hold["code"] == "point.generated-logical-id-collision"
+        ]
+        self.assertEqual(1, len(matching))
+        self.assertEqual(2, matching[0]["details"]["record_count"])
+        self.assertEqual(0, result["summary"]["confirmed_points"])
+        self.assertEqual(2, result["summary"]["pending_points"])
+
+    def test_string_and_access_flags_from_review_csv_are_normalized(self) -> None:
+        result = normalize_map(
+            [
+                {
+                    "address": 40001,
+                    "address_convention": "modicon-reference",
+                    "area": "holding_register",
+                    "unit_id": 1,
+                    "route_id": "lab",
+                    "name": "Device label",
+                    "datatype": "STRING",
+                    "word_count": 8,
+                    "access_readable": "true",
+                    "access_writable": "false",
+                    "function_read_codes": "03; 04",
+                }
+            ]
+        )
+
+        self.assertEqual([], result["holds"])
+        point = result["points"][0]
+        self.assertEqual("string", point["datatype"])
+        self.assertEqual(8, point["word_span"])
+        self.assertIsNone(point["byte_order"])
+        self.assertEqual("read-only", point["access"])
+        self.assertEqual([3, 4], point["read_function_codes"])
+        self.assertEqual(3, point["function_code"])
+
+    def test_source_include_and_review_flags_are_retained_without_implied_approval(self) -> None:
+        base = {
+            "address": 40001,
+            "address_convention": "modicon-reference",
+            "area": "holding-register",
+            "unit_id": 1,
+            "route_id": "lab",
+            "name": "Review state",
+            "datatype": "uint16",
+            "access": "read-only",
+        }
+        reviewed = normalize_map([{**base, "include": "yes", "reviewed": "yes"}])
+        pending = normalize_map([{**base, "include": "yes", "reviewed": "no"}])
+        excluded = normalize_map([{**base, "include": "no", "reviewed": "yes"}])
+
+        self.assertTrue(reviewed["points"][0]["source_include"])
+        self.assertTrue(reviewed["points"][0]["source_reviewed"])
+        self.assertNotEqual("approved", reviewed.get("review_status"))
+        self.assertFalse(pending["points"][0]["source_reviewed"])
+        self.assertIn(
+            "point.source-review-incomplete",
+            {hold["code"] for hold in pending["holds"]},
+        )
+        self.assertFalse(excluded["points"][0]["source_include"])
+        self.assertIn(
+            "point.source-excluded",
+            {hold["code"] for hold in excluded["holds"]},
+        )
+
+    def test_write_only_source_is_held_and_not_given_a_read_function(self) -> None:
+        result = normalize_map(
+            [
+                {
+                    "protocol_offset": 12,
+                    "area": "holding-register",
+                    "unit_id": 1,
+                    "route_id": "lab",
+                    "name": "Reset command",
+                    "datatype": "uint16",
+                    "access_readable": "false",
+                    "access_writable": "true",
+                    "function_write_codes": "06",
+                }
+            ]
+        )
+
+        self.assertIn(
+            "point.write-only-not-readable",
+            {hold["code"] for hold in result["holds"]},
+        )
+        self.assertEqual("write-only", result["points"][0]["access"])
+        self.assertIsNone(result["points"][0]["function_code"])
+        self.assertEqual([6], result["points"][0]["write_function_codes"])
+
+    def test_partial_access_flags_without_proven_readability_are_held(self) -> None:
+        base = {
+            "protocol_offset": 12,
+            "area": "holding-register",
+            "unit_id": 1,
+            "route_id": "lab",
+            "name": "Partial access",
+            "datatype": "uint16",
+        }
+        cases = (
+            ({"access_readable": "false"}, "point.not-readable"),
+            ({"access_writable": "true"}, "point.access-unresolved"),
+        )
+
+        for access_fields, expected_hold in cases:
+            with self.subTest(access_fields=access_fields):
+                result = normalize_map([{**base, **access_fields}])
+
+                self.assertIn(
+                    expected_hold,
+                    {hold["code"] for hold in result["holds"]},
+                )
+                self.assertEqual("pending", result["points"][0]["normalization_status"])
+                self.assertIsNone(result["points"][0]["function_code"])
+                self.assertEqual(
+                    (),
+                    compile_read_plan(result["points"]).requests,
+                )
+
+    def test_vendor_hex_function_code_suffixes_are_parsed(self) -> None:
+        result = normalize_map(
+            [
+                {
+                    "protocol_offset": 0,
+                    "area": "holding-register",
+                    "unit_id": 1,
+                    "route_id": "lab",
+                    "datatype": "uint16",
+                    "function_read_codes": "FC03h; 04h",
+                    "function_write_codes": "06h",
+                }
+            ]
+        )
+
+        self.assertEqual([], result["holds"])
+        self.assertEqual([3, 4], result["points"][0]["read_function_codes"])
+        self.assertEqual([6], result["points"][0]["write_function_codes"])
+        self.assertEqual(3, result["points"][0]["function_code"])
+
     def test_pending_byte_order_keeps_layout_as_blocked_evidence(self) -> None:
         base = {
             "protocol_offset": 0,
@@ -243,6 +422,56 @@ class NormalizeMapTests(unittest.TestCase):
 
 
 class LintAndReviewTests(unittest.TestCase):
+    def test_lint_deduplicates_the_same_workflow_and_core_hold(self) -> None:
+        normalized = normalize_map(
+            [
+                {
+                    "logical_point_id": "multiword",
+                    "protocol_offset": 0,
+                    "area": "holding-register",
+                    "unit_id": 1,
+                    "route_id": "lab",
+                    "datatype": "uint32",
+                }
+            ]
+        )
+
+        lint = lint_map(normalized)
+
+        matching = [
+            finding
+            for finding in lint["findings"]
+            if finding["code"] == "point.byte-order-unresolved"
+        ]
+        self.assertEqual(1, len(matching))
+
+    def test_lint_preserves_distinct_workflow_holds_with_the_same_code(self) -> None:
+        holds = [
+            {
+                "code": "point.address-secondary-unverifiable",
+                "severity": "hold",
+                "blocking": True,
+                "message": "Review this address representation.",
+                "field": "address",
+                "point_ids": ["point-a"],
+                "details": {"source_field": source_field},
+            }
+            for source_field in ("display_address", "source_address")
+        ]
+
+        lint = lint_map({"points": [], "holds": holds})
+        matching = [
+            finding
+            for finding in lint["findings"]
+            if finding["code"] == "point.address-secondary-unverifiable"
+        ]
+
+        self.assertEqual(2, len(matching))
+        self.assertEqual(
+            {"display_address", "source_address"},
+            {finding["details"]["source_field"] for finding in matching},
+        )
+
     def test_pdf_candidate_review_and_normalization_preserve_ocr_hold(self) -> None:
         ocr_hold = {
             "code": "pdf-ocr-human-review-required",

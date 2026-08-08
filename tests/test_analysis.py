@@ -92,6 +92,20 @@ class CaptureAnalysisTests(unittest.TestCase):
         result = analyze_capture(capture, counter_specs={"count": {"modulus": 256}})
         self.assertEqual(1, result["points"]["count"]["counter"]["wraps"])
 
+    def test_expected_intervals_can_be_supplied_outside_capture(self) -> None:
+        capture = {
+            "samples": [
+                {"point_id": "voltage", "timestamp": 0, "value": 230},
+                {"point_id": "voltage", "timestamp": 30, "value": 231},
+            ]
+        }
+
+        result = analyze_capture(
+            capture, expected_interval_seconds={"voltage": 10}
+        )
+
+        self.assertEqual(2, result["summary"]["estimated_missing_intervals"])
+
     def test_naive_timestamps_are_rejected_not_assigned_utc(self) -> None:
         result = analyze_capture(
             {

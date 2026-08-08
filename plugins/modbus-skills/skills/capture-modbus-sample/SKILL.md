@@ -18,4 +18,9 @@ Generate a probe artifact. Do not generate a final decoded configuration.
 7. Save raw words as `capture/v1`.
 8. Route the capture to `evaluate-modbus-byte-order`.
 
-The command generates disabled or operator-controlled artifacts. It does not run the probe. At the external gate, run one physical read and stop. Do not discover addresses. Do not write. Do not store credentials or private endpoint values. Do not select a byte-order winner inside the probe.
+The command generates disabled or operator-controlled artifacts. It does not run
+the probe. A Node-RED probe has one manual inject control and one flex getter
+per compiled block. It has no scheduled polling. At the external gate, run one
+physical read and stop. Do not discover addresses. Do not write. Do not store
+credentials or private endpoint values. Do not select a byte-order winner
+inside the probe.

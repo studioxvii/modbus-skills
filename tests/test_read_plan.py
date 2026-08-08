@@ -22,6 +22,7 @@ def point(
     word_span=None,
     byte_order=None,
     function_code=None,
+    access=None,
 ):
     return CanonicalPoint(
         logical_point_id=logical_id,
@@ -34,6 +35,7 @@ def point(
         word_span=word_span,
         byte_order=byte_order,
         function_code=function_code,
+        access=access,
     )
 
 
@@ -145,6 +147,14 @@ class ReadPlanTests(unittest.TestCase):
 
         self.assertEqual(plan.requests, ())
         self.assertIn("read-plan.write-forbidden", {item.code for item in plan.findings})
+
+    def test_write_only_point_is_excluded(self):
+        plan = compile_read_plan((point("write-only", 1, access="write-only"),))
+
+        self.assertEqual(plan.requests, ())
+        self.assertIn(
+            "read-plan.write-only-point", {item.code for item in plan.findings}
+        )
 
     def test_broadcast_unit_is_excluded(self):
         plan = compile_read_plan((point("broadcast", 1, unit=0),))

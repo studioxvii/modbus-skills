@@ -86,6 +86,16 @@ class CsvParserTests(unittest.TestCase):
             {warning["code"] for warning in result["warnings"]},
         )
 
+    def test_common_underscore_enum_names_do_not_create_false_warnings(self) -> None:
+        result = parse_csv(
+            "Address,Area,Data Type,Byte Order\n"
+            "1,input_register,FLOAT32,BIG_ENDIAN\n"
+            "3,holding_register,INT32,LITTLE_ENDIAN_BYTE_SWAP\n",
+            delimiter=",",
+        )
+
+        self.assertEqual([], result["warnings"])
+
     def test_missing_address_is_rejected_with_source_record(self) -> None:
         result = parse_csv("Name,Data Type\nNo Address,uint16\n", delimiter=",")
         self.assertEqual([], result["records"])

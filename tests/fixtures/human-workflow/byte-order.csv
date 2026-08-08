@@ -1,0 +1,3 @@
+Address,Address Convention,Area,Unit ID,Route ID,Point ID,Name,Data Type,Word Count,Byte Order,Scale,Engineering Unit,Access
+10,protocol-offset,holding register,1,fixture,runtime_hours,Runtime Hours,FLOAT32,2,,1,h,read-only
+20,protocol-offset,holding register,1,fixture,diagnostic_word,Diagnostic Word,UINT32,2,,1,,read-only

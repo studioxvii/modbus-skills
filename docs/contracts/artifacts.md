@@ -12,6 +12,8 @@ Every top-level JSON workflow artifact must contain:
 
 A derived artifact must also contain `input_hashes` when its inputs have stable serialized forms. Empty collections stay present. This makes the stop state and the absence of findings explicit.
 
+A final target requires `input_hashes.canonical_map` in its read plan. The value must be a valid SHA-256 hash and must match the exact map supplied to the target. A compiled plan also shows its `planning_options`. The options hash must match `input_hashes.planning_options`. This makes every approved sparse-read gap visible and testable. Missing, malformed, and stale hashes stop generation. Probe mode can use an unbound raw plan, but it rejects malformed or mismatched provenance when provenance is present.
+
 Hash canonical JSON with sorted keys and compact separators. Exclude clocks and local paths from deterministic content.
 
 Target-native JSON is exempt from this envelope when adding fields would break
@@ -96,9 +98,17 @@ Do not infer an unknown area, unit identifier, datatype, or address convention.
 
 ## Byte-order evidence
 
-One immutable sample contains raw 16-bit words. Each candidate interpretation keeps the same `sample_id`.
+One immutable sample contains raw 16-bit words. Each candidate interpretation keeps the same `sample_id`. The sample also records `point_id`, `route_id`, `unit_id`, `area`, and `protocol_offset`. A byte-order decision cannot use evidence without this complete identity.
 
-The evaluator reports candidates. It does not select a winner.
+The evaluator reports candidates. It does not select a winner or update a map.
+
+## Review decisions
+
+`modbus-review-decisions/v1` records a human review before a map can change. It contains the exact canonical-map semantic hash, a stable `review_id`, timezone-qualified `reviewed_at`, `reviewer`, `approve_map`, and a decision array. Each decision names a point and either sets one permitted field or excludes that point. Each set decision includes a reason and at least one evidence reference.
+
+A byte-order decision references one supplied `modbus-byte-order-evidence/v1` artifact by semantic SHA-256. The apply command verifies that the evidence sample identity matches the map point and that the selected layout and datatype exist in the candidate set.
+
+`apply-modbus-review-decisions` creates a new map. It retains an audit record and excluded-point dispositions. It approves the result only when the human requested approval and no blocking hold remains. A map change invalidates the previous read plan, so the workflow must compile a new plan before final tool generation.
 
 ## Tool pack
 
@@ -111,5 +121,7 @@ A tool pack records:
 - Adapter versions.
 - File paths and SHA-256 values.
 - Assumptions, warnings, and holds.
+
+The pack file named `canonical-map.json` uses the portable `modbus-runtime-map/v1` schema. It contains an allowlist of runtime point fields and the source-map hash. The pack file named `read-plan.json` is also an allowlisted projection. It contains only request, point-trace, original map-provenance, visible planning-option, and sanitized hold fields. Projection never rebinds a missing, malformed, or stale plan to the supplied map. Both projections exclude review audit records, approval identities, source evidence, and local source metadata. `portable_map_hash` and `portable_read_plan_hash` identify the projected files. `map_hash` and `read_plan_hash` identify the exact reviewed source inputs.
 
 Allowed status values are `generated`, `held`, `unsupported`, and `verification-failed`.

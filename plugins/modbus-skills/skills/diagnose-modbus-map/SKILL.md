@@ -18,4 +18,6 @@ Chain focused stages through versioned artifacts.
 
 Run `python3 <skill-dir>/scripts/run.py --input <path> --output <directory>` for the deterministic chain.
 
+The chain writes the normalized candidate as `map-draft.json`. It is not an approved map while any blocking hold remains.
+
 Do not hide stage artifacts. Do not call a candidate map canonical. Do not continue to final tool generation while required engineering values remain unresolved.

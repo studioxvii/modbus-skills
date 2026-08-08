@@ -6,14 +6,13 @@
   "environment": [
     "MODBUS_HOST",
     "MODBUS_PORT",
-    "MODBUS_POLL_INTERVAL_MS",
     "MODBUS_WATCHDOG_MS"
   ],
   "findings": [],
   "holds": [],
   "input_hashes": {
     "canonical_map": "79ad30a6abca4292ebe85a97d692b70ba6b1a11395c12d8090d219aa9d8f6bbd",
-    "read_plan": "414130988319418b5c8c1ebafdc809cdb3adeea0806751ad1b655299172ee3ec"
+    "read_plan": "5bb2a23239ff620c524eea2daad1cfbd3675038718dd2acae06242c383d64e93"
   },
   "map_hash": "79ad30a6abca4292ebe85a97d692b70ba6b1a11395c12d8090d219aa9d8f6bbd",
   "mode": "final",
@@ -21,7 +20,8 @@
   "read_block_ids": [
     "read-0001"
   ],
-  "read_plan_hash": "414130988319418b5c8c1ebafdc809cdb3adeea0806751ad1b655299172ee3ec",
+  "read_node_type": "modbus-flex-getter",
+  "read_plan_hash": "5bb2a23239ff620c524eea2daad1cfbd3675038718dd2acae06242c383d64e93",
   "required_node_module": "node-red-contrib-modbus",
   "safety": {
     "allowed_function_codes": [
@@ -33,7 +33,10 @@
     "network_discovery": false,
     "read_only": true
   },
+  "scheduled_polling": false,
   "schema_version": "modbus-target-manifest/v1",
   "target": "node-red",
+  "trigger_nodes": 1,
+  "trigger_type": "manual-inject",
   "verification": "not-run"
 }

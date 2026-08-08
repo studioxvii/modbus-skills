@@ -213,7 +213,12 @@ def _validate_point(point: CanonicalPoint) -> list[Finding]:
             expected=expected_span,
         )
 
-    if span_is_valid and span > 1 and not point.byte_order:
+    if (
+        span_is_valid
+        and span > 1
+        and point.datatype is not DataType.STRING
+        and not point.byte_order
+    ):
         add(
             "point.byte-order-unresolved",
             FindingSeverity.HOLD,
