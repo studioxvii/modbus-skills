@@ -12,10 +12,15 @@ Use this contract in every Modbus skill.
 - Ask once, with all necessary context, only when a missing choice materially changes
   the result, low-confidence evidence must be accepted, a live device action is next,
   or an external/native application must be operated.
+- Do not ask about the actor, file location, output folder, or test structure when the
+  request or repository already answers it. Use the repository's existing layout and
+  the smallest safe default.
 - Apply a user's clearly scoped confirmation to every item in that scope. Record one
   decision with the source hash, selection, item count, and any exceptions.
 - Keep unresolved engineering fields as holds and keep unsupported writes, broadcasts,
   discovery, and unbounded polling stopped. Efficiency never weakens those boundaries.
+- Use short, plain-English labels in user-facing output. Put schema names, hashes, and
+  internal mechanics in the audit artifact unless they change the user's next action.
 
 The default handoff is a completed artifact plus a compact exception list. A long
 approval queue is a workflow defect unless each item genuinely requires a different
@@ -31,15 +36,17 @@ artifacts just produced:
 2. Inspect artifact holds, target statuses, and missing inputs before declaring the
    outcome done. A runtime `next_action: none` value alone is not proof that the user's
    outcome is usable.
-3. When the requested outcome is complete, lead with `Done:` and name the artifact.
+3. When a runtime command returns a receipt, include one structured `next_action` that
+   matches the human recommendation. Do not make agents reconstruct the handoff from prose.
+4. When the requested outcome is complete, lead with `Done:` and name the artifact.
    Offer no next skill unless another goal is materially useful; label such routes
    `Optional:`.
-4. When more work is required, choose exactly one `Recommended next:` skill, or
+5. When more work is required, choose exactly one `Recommended next:` skill, or
    `Continue:` the current skill when it owns the remaining work. State why, pass the
    exact artifact paths or case reference it needs, and name what it will produce.
-5. Show at most two `Other options:` and only when they represent genuine user-goal
+6. Show at most two `Other options:` and only when they represent genuine user-goal
    branches. Never print the full skill catalog or every handoff rule.
-6. End an actionable recommendation with `Reply \`proceed\` to continue.` A reply of
+7. End an actionable recommendation with `Reply \`proceed\` to continue.` A reply of
    `proceed` authorizes only the named safe next skill; live-device and native-app gates
    remain explicit.
 

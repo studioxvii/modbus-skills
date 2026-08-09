@@ -17,14 +17,14 @@ Follow `../../references/interaction-contract.md`.
 4. Confirm the artifact uses only function codes 01 through 04.
 5. Generate and validate the complete probe before asking once for the live physical
    read against the intended device, then stop.
-6. Save the returned raw words as `capture/v1` with the complete sample identity.
+6. For Node-RED, use the generated `MODBUS_CAPTURE_PATH` output directly. For other tools, save the returned raw words as `capture/v1` with the complete sample identity.
 
 ## Output files
 
 - `README.md` and the selected tool folder - Start here. These files describe and perform one bounded manual read; they do not connect automatically.
 - `tool-pack.zip` - The portable copy of the probe files.
 - `manifest.json`, `checksums.sha256`, and `tool-pack-result.json` - Normally ignore these. They verify the probe contents and safety limits.
-- `capture.json` - Create this only after the operator performs the read. It stores the returned raw words and exact sample identity for later analysis.
+- `capture.json` - Node-RED creates this automatically. Other tools create it after the operator performs the read. It stores the returned raw words and exact sample identity for later analysis.
 
 Completion requires one immutable sample and no generated final decoding.
 

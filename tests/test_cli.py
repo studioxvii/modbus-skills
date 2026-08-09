@@ -159,6 +159,8 @@ class CliIntegrationTests(unittest.TestCase):
                 self.root / folder,
             )
             self.assertEqual("generated", receipt["status"])
+            if command == "generate-node-red":
+                self.assertEqual("run-bounded-read-plan", receipt["next_action"]["action"])
 
         self.assertTrue((self.root / "node" / "node-red" / "flow.json").is_file())
         self.assertTrue((self.root / "modpoll" / "modpoll" / "gavinying-cli" / "synthetic-loop.csv").is_file())
@@ -412,6 +414,7 @@ class CliIntegrationTests(unittest.TestCase):
             byte_evidence,
         )
         self.assertEqual(12, byte_receipt["candidates"])
+        self.assertEqual("apply-review", byte_receipt["next_action"]["skill"])
         incomplete_evidence = json.loads(byte_evidence.read_text(encoding="utf-8"))
         self.assertIn(
             "byte-order-sample-identity-incomplete",
@@ -424,6 +427,7 @@ class CliIntegrationTests(unittest.TestCase):
             "analyze-capture", "--input", FIXTURES / "capture.json", "--output", analysis
         )
         self.assertEqual("analyzed", analysis_receipt["status"])
+        self.assertIn("next_action", analysis_receipt)
         self.assertTrue(json.loads(analysis.read_text(encoding="utf-8"))["read_only"])
 
         comparison = self.root / "comparison.json"
@@ -556,6 +560,29 @@ class CliIntegrationTests(unittest.TestCase):
             )
         self.assertNotEqual(0, code)
         self.assertIn("does not match", stderr.getvalue())
+
+    def test_single_register_byte_order_marks_word_order_not_applicable(self) -> None:
+        capture = self.root / "single-word-capture.json"
+        capture.write_text(
+            json.dumps(
+                {
+                    "sample_id": "single-word",
+                    "raw_words": [0x1234],
+                    "point_id": "status",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "protocol_offset": 10,
+                    "timestamp": "2026-08-07T12:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+        output = self.root / "single-word-byte-order.json"
+        self.run_command("evaluate-byte-order", "--input", capture, "--output", output)
+        evidence = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual("not-applicable", evidence["applicability"]["word_order"])
+        self.assertEqual("byte-swap-only", evidence["applicability"]["evaluation"])
 
     def test_capture_analysis_accepts_flat_csv_samples(self) -> None:
         capture = self.root / "capture.csv"

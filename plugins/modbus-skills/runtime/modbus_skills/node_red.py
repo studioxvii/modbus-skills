@@ -327,7 +327,11 @@ def export_node_red(
                 "type": "function",
                 "z": flow_id,
                 "name": "Build capture/v1",
-                "func": _capture_function(map_digest, plan_digest),
+                "func": _capture_function(
+                    map_digest,
+                    plan_digest,
+                    [block["block_id"] for block in block_specs],
+                ),
                 "outputs": 2,
                 "timeout": 0,
                 "noerr": 0,
@@ -696,25 +700,32 @@ def _derive_function() -> str:
     )
 
 
-def _capture_function(map_digest: str, plan_digest: str) -> str:
+def _capture_function(
+    map_digest: str,
+    plan_digest: str,
+    block_ids: list[str],
+) -> str:
     return (
         f"const mapHash = {stable_json(map_digest, pretty=False)};\n"
         f"const planHash = {stable_json(plan_digest, pretty=False)};\n"
+        f"const expectedBlockIds = {stable_json(block_ids, pretty=False)};\n"
         "const request = msg.modbusSkillsRequest || {};\n"
+        "const runId = flow.get('modbusSkillsRunId');\n"
+        "const requestId = `${runId}:${request.block_id}`;\n"
         "const timestamp = new Date().toISOString();\n"
         "const elapsed = Number.isFinite(request.started_at_ms) ? Date.now() - request.started_at_ms : null;\n"
         "const derived = Array.isArray(msg.payload) ? msg.payload : [];\n"
         "const successful = derived.length > 0 && !msg.error && !msg.modbusError && !msg.modbusSkillsReadError;\n"
         "const points = Array.isArray(request.point_specs) ? request.point_specs : [];\n"
         "const samples = successful ? derived.map((point) => ({\n"
-        "  sample_id: `${flow.get('modbusSkillsRunId')}:${request.block_id}:${point.point_id}`,\n"
+        "  sample_id: `${requestId}:${point.point_id}`, request_id: requestId,\n"
         "  point_id: point.point_id, block_id: request.block_id, route_id: request.route_id,\n"
         "  unit_id: request.unit_id, area: request.area,\n"
         "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
         "  timestamp, response_time_ms: elapsed, success: true, raw_words: point.raw_values || [],\n"
         "  derived_values: point\n"
         "})) : points.map((point) => ({\n"
-        "  sample_id: `${flow.get('modbusSkillsRunId')}:${request.block_id}:${point.point_id}:error`,\n"
+        "  sample_id: `${requestId}:${point.point_id}:error`, request_id: requestId,\n"
         "  point_id: point.point_id, block_id: request.block_id, route_id: request.route_id,\n"
         "  unit_id: request.unit_id, area: request.area,\n"
         "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
@@ -726,8 +737,9 @@ def _capture_function(map_digest: str, plan_digest: str) -> str:
         "const combined = existing.concat(samples);\n"
         "flow.set('modbusSkillsCapture', combined);\n"
         "const capture = {\n"
-        "  schema_version: \"capture/v1\", capture_id: flow.get('modbusSkillsRunId'),\n"
-        "  canonical_map_hash: mapHash, read_plan_hash: planHash, samples: combined\n"
+        "  schema_version: \"capture/v1\", capture_id: runId,\n"
+        "  canonical_map_hash: mapHash, read_plan_hash: planHash,\n"
+        "  expected_request_ids: expectedBlockIds.map((id) => `${runId}:${id}`), samples: combined\n"
         "};\n"
         "const fileMsg = {\n"
         "  filename: env.get('MODBUS_CAPTURE_PATH') || 'modbus-capture.json',\n"

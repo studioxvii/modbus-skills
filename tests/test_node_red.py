@@ -127,6 +127,8 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertIn("flow.set('modbusSkillsQueue'", sequencer["func"])
         self.assertIn("modbusSkillsContinue", sequencer["func"])
         self.assertIn('schema_version: "capture/v1"', capture["func"])
+        self.assertIn("expected_request_ids", capture["func"])
+        self.assertIn("request_id", capture["func"])
         self.assertIn("MODBUS_CAPTURE_PATH", capture["func"])
         self.assertIn(sequencer["id"], capture["wires"][1])
         self.assertEqual(sink["id"], capture["wires"][0][0])

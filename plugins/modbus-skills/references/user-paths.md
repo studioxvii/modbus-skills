@@ -39,6 +39,9 @@ several or undecided targets -> $build-tool-pack
 Use `probe` mode while required byte order is unresolved. Use `final` mode only with a
 plan bound to the exact validated map.
 
+The Node-RED target uses one start button, runs the plan one request at a time, and
+writes `capture.json` directly. Send that file to `$analyze-capture`.
+
 ## I do not know the byte order
 
 ```text
