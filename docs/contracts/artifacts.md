@@ -16,6 +16,50 @@ A final target requires `input_hashes.canonical_map` in its read plan. The value
 
 Hash canonical JSON with sorted keys and compact separators. Exclude clocks and local paths from deterministic content.
 
+## OEM compiler artifacts
+
+The OEM-to-user-map compiler separates source meaning, user intent, and device
+deployment facts. It does not add route or unit placeholders merely to make an
+offline map look complete.
+
+- `modbus-oem-map/v1` contains source-backed OEM points. Each point has a unique
+  `oem_point_id` and one or more bounded `source_refs`. A paginated reference
+  carries page and row indexes; a structured source uses a stable `record_id`.
+  Its identity excludes route, unit, endpoint, and transport data. Exact
+  duplicate IDs are rejected as duplicates; reuse of an ID for different
+  content is rejected as a collision.
+- `modbus-user-selection/v1` contains the requested measurements and one
+  reasoned disposition per referenced OEM point: `included`, `suggested`, or
+  `excluded`. Its `input_hashes.oem_map` must match the exact OEM map.
+- `modbus-device-binding/v1` supplies a route, unit identifier, transport kind,
+  read constraints, and optional point overrides only when a target needs them.
+  Its `input_hashes.oem_map` must match the exact OEM map. A bound target requires
+  a non-empty route and a unit identifier from 1 through 247.
+- `modbus-user-map/v1` is the portable selected map. Its OEM-map and selection
+  hashes must both match, and every delivered point must be included exactly
+  once by the selection.
+- `modbus-compile-case/v1` is local control data, not a portable deliverable. It
+  records the immutable source and request hashes, compiler version, state,
+  receipts, active packet, next action, and a case-relative artifact index.
+
+The legacy bound identity remains:
+
+```text
+route_id + unit_id + area + protocol_offset + logical_point_id
+```
+
+When an OEM point is projected into `modbus-map/v1`, its `oem_point_id` becomes
+the `logical_point_id`; the supplied binding contributes route and unit. This is
+a deterministic mapping and preserves the existing planner and exporter
+identity without placing deployment facts in the OEM artifact.
+
+Portable OEM and user-map artifacts use allowlisted semantic and provenance
+data. They reject credentials, endpoints, raw evidence payloads, captures,
+source excerpts, and local paths. Source references carry identifiers such as
+page, row, region, and hashes; private evidence remains in local case storage.
+Case artifact paths must be normalized, case-relative paths and each indexed
+artifact carries its schema and SHA-256 value.
+
 Target-native JSON is exempt from this envelope when adding fields would break
 the target format. Examples include a Node-RED flow and target-specific setup
 documents. Each exempt file must appear by path and SHA-256 value in the
@@ -108,7 +152,16 @@ The evaluator reports candidates. It does not select a winner or update a map.
 
 A byte-order decision references one supplied `modbus-byte-order-evidence/v1` artifact by semantic SHA-256. The apply command verifies that the evidence sample identity matches the map point and that the selected layout and datatype exist in the candidate set.
 
-`apply-review` creates a new map. It retains an audit record and excluded-point dispositions. It approves the result only when the human requested approval and no blocking hold remains. A map change invalidates the previous read plan, so the workflow must compile a new plan before final tool generation.
+`apply-review` creates a new map. It retains an audit record, excluded-point
+dispositions, and batch hold dispositions. One hold decision may resolve a shared
+bounded source-confirmation scope by exact hold code; it must cite evidence for the
+source hash, selection, record count, and exceptions. It approves the result only when
+the human requested approval and no blocking hold remains. A map change invalidates the
+previous read plan, so the workflow must compile a new plan before final generation.
+
+Evidence-review status is `ready` when automated checks produce no decision groups and
+`blocked` when one or more grouped decisions remain. A global source hold produces one
+artifact-scoped decision group, not one group per page or record.
 
 ## Tool pack
 
