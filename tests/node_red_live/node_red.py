@@ -19,7 +19,13 @@ class ReadLedger:
     max_in_flight: int = 1
 
     def __post_init__(self) -> None:
-        if self.rounds != 3 or self.max_reads != 180 or self.max_seconds != 60 or self.max_in_flight != 1:
+        if (
+            self.rounds != 3
+            or self.max_reads != 180
+            or self.max_seconds != 60
+            or self.cadence_seconds != 1
+            or self.max_in_flight != 1
+        ):
             raise CampaignError("live campaign budget is fixed at three rounds, 180 reads, 60 seconds, one in flight")
 
 

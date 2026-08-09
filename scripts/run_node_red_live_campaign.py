@@ -9,7 +9,6 @@ live read occurred.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -21,7 +20,7 @@ from urllib.parse import urlparse
 if str(Path(__file__).resolve().parents[1] / "tests") not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
-from node_red_live.node_red import CampaignError, NodeRedRuntime, ReadLedger
+from node_red_live.node_red import CampaignError, NodeRedRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]
