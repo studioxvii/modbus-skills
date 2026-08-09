@@ -182,28 +182,34 @@ class NodeRedAdminClient:
             {"name": name, "value": str(value), "type": "str"}
             for name, value in sorted(environment.items())
         ]
-        before_mtime = capture_path.stat().st_mtime_ns if capture_path.exists() else None
+        try:
+            last_seen_mtime = capture_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            last_seen_mtime = None
         try:
             self.deploy(deployed)
             self.trigger(str(injects[0]["id"]))
             deadline = self._clock() + timeout_seconds
             while self._clock() < deadline:
-                if capture_path.is_file():
+                try:
                     current_mtime = capture_path.stat().st_mtime_ns
-                    if before_mtime is None or current_mtime != before_mtime:
-                        try:
-                            capture = json.loads(capture_path.read_text(encoding="utf-8"))
-                        except (OSError, json.JSONDecodeError):
-                            capture = None
-                        if isinstance(capture, dict):
-                            expected = set(capture.get("expected_request_ids", ()))
-                            observed = {
-                                str(sample.get("request_id"))
-                                for sample in capture.get("samples", ())
-                                if isinstance(sample, Mapping) and sample.get("request_id")
-                            }
-                            if expected and expected <= observed:
-                                return capture
+                except FileNotFoundError:
+                    current_mtime = None
+                if current_mtime is not None and current_mtime != last_seen_mtime:
+                    last_seen_mtime = current_mtime
+                    try:
+                        capture = json.loads(capture_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        capture = None
+                    if isinstance(capture, dict):
+                        expected = set(capture.get("expected_request_ids", ()))
+                        observed = {
+                            str(sample.get("request_id"))
+                            for sample in capture.get("samples", ())
+                            if isinstance(sample, Mapping) and sample.get("request_id")
+                        }
+                        if expected and expected <= observed:
+                            return capture
                 self._wait(0.1)
             raise CampaignError("Node-RED read plan did not complete before the timeout")
         finally:

@@ -550,10 +550,12 @@ def _node_red_summary(path: Path) -> dict[str, Any]:
     counts: dict[str, int] = {}
     tabs_disabled = True
     manual_injects = True
+    names: set[str] = set()
     for node in flow:
         if not isinstance(node, Mapping):
             continue
         node_type = str(node.get("type", ""))
+        names.add(str(node.get("name", "")))
         counts[node_type] = counts.get(node_type, 0) + 1
         if node_type == "tab":
             tabs_disabled = tabs_disabled and node.get("disabled") is True
@@ -567,6 +569,7 @@ def _node_red_summary(path: Path) -> dict[str, Any]:
         "counts": counts,
         "tabs_disabled": tabs_disabled,
         "manual_injects": manual_injects,
+        "names": names,
         "write_nodes": sum(
             count for node_type, count in counts.items() if "write" in node_type.lower()
         ),
@@ -674,10 +677,11 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
     probe_requests = len(byte_plan.get("requests", ()))
     check["byte-order-probe-and-final-hold"].check(
         "node-red-probe-is-manual-one-shot",
-        probe_node_red["counts"].get("inject", 0) == probe_requests
-        and probe_node_red["counts"].get("modbus-flex-getter", 0) == probe_requests
+        probe_node_red["counts"].get("inject", 0) == 1
+        and 0 < probe_node_red["counts"].get("modbus-flex-getter", 0) <= probe_requests
         and probe_node_red["counts"].get("modbus-read", 0) == 0
-        and probe_node_red["manual_injects"],
+        and probe_node_red["manual_injects"]
+        and "Run bounded read plan" in probe_node_red["names"],
         details={"request_count": probe_requests, "inject_count": probe_node_red["counts"].get("inject", 0), "getter_count": probe_node_red["counts"].get("modbus-flex-getter", 0)},
     )
     check["byte-order-probe-and-final-hold"].check(
@@ -889,12 +893,14 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
     final_node_red = _node_red_summary(clean_pack_one / "node-red" / "flow.json")
     check["artifact-safety-and-determinism"].check(
         "node-red-final-matches-read-plan",
-        final_node_red["counts"].get("modbus-flex-getter", 0) == len(clean_plan.get("requests", ()))
-        and final_node_red["counts"].get("inject", 0) == len(clean_plan.get("requests", ()))
+        final_node_red["counts"].get("inject", 0) == 1
+        and 0 < final_node_red["counts"].get("modbus-flex-getter", 0) <= len(clean_plan.get("requests", ()))
         and final_node_red["counts"].get("modbus-read", 0) == 0
         and final_node_red["manual_injects"]
         and final_node_red["tabs_disabled"]
-        and final_node_red["write_nodes"] == 0,
+        and final_node_red["write_nodes"] == 0
+        and "Run bounded read plan" in final_node_red["names"]
+        and "Write capture.json" in final_node_red["names"],
         details={"request_count": len(clean_plan.get("requests", ())), "getter_count": final_node_red["counts"].get("modbus-flex-getter", 0), "inject_count": final_node_red["counts"].get("inject", 0), "tabs_disabled": final_node_red["tabs_disabled"], "write_node_count": final_node_red["write_nodes"]},
     )
     commands = (clean_pack_one / "modpoll" / "gavinying-cli" / "commands.txt").read_text(encoding="utf-8")

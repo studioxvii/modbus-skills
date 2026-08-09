@@ -127,7 +127,7 @@ def export_node_red(
     ]
 
     clients: dict[str, str] = {}
-    for route_index, route in enumerate(routes):
+    for route in routes:
         prefix = route_env[route]
         client_id = _node_id(seed, f"client:{route}")
         clients[route] = client_id
@@ -734,7 +734,8 @@ def _capture_function(
         "    (msg.payload && msg.payload.state) || (msg.error && msg.error.message) || 'read-failed'\n"
         "}));\n"
         "const existing = flow.get('modbusSkillsCapture') || [];\n"
-        "const combined = existing.concat(samples);\n"
+        "existing.push(...samples);\n"
+        "const combined = existing;\n"
         "flow.set('modbusSkillsCapture', combined);\n"
         "const capture = {\n"
         "  schema_version: \"capture/v1\", capture_id: runId,\n"

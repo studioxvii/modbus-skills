@@ -62,8 +62,8 @@ python3 scripts/run_node_red_live_campaign.py \
   --authorize \
   --node-red-cli /path/to/node-red \
   --flow /path/to/node-red/flow.json \
-  --capture /private/output/capture.json \
-  --hashes /private/output/hashes.json
+  --capture ./private/output/capture.json \
+  --hashes ./private/output/hashes.json
 ```
 
 The runner imports the reviewed flow, enables it for this run, clicks its single

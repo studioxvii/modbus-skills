@@ -12,9 +12,13 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+RUNTIME = Path(__file__).resolve().parents[1] / "plugins" / "modbus-skills" / "runtime"
+if str(RUNTIME) not in sys.path:
+    sys.path.insert(0, str(RUNTIME))
 if str(Path(__file__).resolve().parents[1] / "tests") not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
+from modbus_skills.analysis import analyze_capture
 from node_red_live.node_red import CampaignError, NodeRedAdminClient, NodeRedRuntime
 from node_red_live.simulator import SimulatorClient, SimulatorError
 
@@ -82,7 +86,7 @@ def capture_row(*, route: str, unit_id: int, area: str, protocol_offset: int, ti
     return row
 
 
-def _hashes(contract: Mapping[str, Any], supplied: Mapping[str, str] | None) -> dict[str, str]:
+def _hashes(supplied: Mapping[str, str] | None) -> dict[str, str]:
     result: dict[str, str] = {}
     for name in REQUIRED_HASHES:
         value = str((supplied or {}).get(name, "unavailable"))
@@ -139,7 +143,7 @@ def run_campaign(
     selected = next((p for p in contract["profiles"] if p["id"] == profile_id), None) if profile_id else contract["profiles"][0]
     if selected is None:
         raise CampaignError("unknown campaign profile")
-    report: dict[str, Any] = {"schema_version": "node-red-live-report/v1", "run_id": uuid.uuid4().hex, "profile_id": selected["id"], "fleet_size": selected["fleet_size"], "status": "blocked", "terminal_state": "blocked", "issue_codes": [], "request_count": 0, "error_count": 0, "hashes": _hashes(contract, hashes), "versions": {"campaign": contract["schema_version"]}, "cleanup": {"simulator_reset": False, "flow_removed": False}}
+    report: dict[str, Any] = {"schema_version": "node-red-live-report/v1", "run_id": uuid.uuid4().hex, "profile_id": selected["id"], "fleet_size": selected["fleet_size"], "status": "blocked", "terminal_state": "blocked", "issue_codes": [], "request_count": 0, "error_count": 0, "hashes": _hashes(hashes), "versions": {"campaign": contract["schema_version"]}, "cleanup": {"simulator_reset": False, "flow_removed": False}}
     if not authorized:
         report["issue_codes"] = ["authorization-required"]
         return report
@@ -174,25 +178,16 @@ def run_campaign(
             },
             timeout_seconds=float(contract["budget"]["max_seconds"]),
         )
-        expected = set(capture.get("expected_request_ids", ()))
-        observed = {
-            str(sample.get("request_id"))
-            for sample in capture.get("samples", ())
-            if isinstance(sample, Mapping) and sample.get("request_id")
-        }
-        errors = [
-            sample
-            for sample in capture.get("samples", ())
-            if isinstance(sample, Mapping) and sample.get("success") is False
-        ]
+        analysis = analyze_capture(capture)
+        campaign = analysis["campaign"]
         mismatches = _oracle_mismatches(capture, simulator)
-        missing = sorted(expected - observed)
-        report["request_count"] = len(observed)
-        report["error_count"] = len(errors)
+        missing = campaign["missing_request_ids"]
+        report["request_count"] = campaign["observed_requests"]
+        report["error_count"] = analysis["communications"]["error_count"]
         report["cleanup"]["flow_removed"] = True
         if missing:
             report["issue_codes"].append("planned-requests-missing")
-        if errors:
+        if report["error_count"]:
             report["issue_codes"].append("node-red-read-errors")
         if mismatches:
             report["issue_codes"].append("simulator-oracle-mismatch")

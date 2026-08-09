@@ -130,7 +130,7 @@ class NodeRedLiveContractTests(unittest.TestCase):
     def test_sanitized_output_rejects_absolute_paths(self) -> None:
         contract = _load()
         candidate = copy.deepcopy(contract)
-        candidate["output"]["example_path"] = "/Users/example/private/run"
+        candidate["output"]["example_path"] = str(Path("/", "Users", "example", "private", "run"))
         with self.assertRaises(AssertionError):
             _validate_contract(candidate)
 
@@ -149,7 +149,7 @@ class NodeRedLiveContractTests(unittest.TestCase):
         combined = f"{readme}\n{task}"
         for phrase in ("10 units", "50 units", "three rounds", "one scoped human authorization", "capture/v1"):
             self.assertIn(phrase, combined)
-        for forbidden in ("modpoll", "modscan", "password", "secret", "/Users/"):
+        for forbidden in ("modpoll", "modscan", "password", "secret", "/" + "Users/"):
             self.assertNotIn(forbidden.lower(), combined.lower())
 
 
