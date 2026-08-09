@@ -17,6 +17,12 @@ Follow `../../references/interaction-contract.md`.
 4. Inspect the setup manifest, decision report, polling limits, and generated files.
 5. Verify with the pinned target implementation.
 
+## Output files
+
+- The profile folder under `modpoll/` - Start here. It contains the CSV, XML, or command files used to configure the selected Modpoll product.
+- The profile `README.md` - Short operator instructions for those files.
+- `manifest.json` and `modpoll-result.json` - Normally ignore these. They bind the generated files to the exact map and read plan and record any holds.
+
 Completion requires a generated or held status with visible native-verification state.
 
 ## Handoff

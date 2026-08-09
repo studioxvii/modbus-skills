@@ -16,6 +16,10 @@ Follow `../../references/interaction-contract.md`.
 3. Group remaining assumptions and holds by shared root cause and affected scope.
 4. Ask once for all independent blocking engineering choices, then rerun once.
 
+## Output files
+
+- `normalized.json` - Use this canonical map for validation and later steps. It keeps source values, resolved engineering fields, warnings, and grouped unresolved holds together.
+
 Completion requires every source field to be normalized, held, or rejected with
 evidence; clean deterministic normalization needs no human approval.
 

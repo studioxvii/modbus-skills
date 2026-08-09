@@ -18,13 +18,43 @@ Follow `../../references/interaction-contract.md`.
 3. Put the OEM source, measurement intent, optional targets, and any resume input in
    one request file.
 4. Run `<selected-python> <skill-dir>/scripts/run.py --request <request.json> --output <case-directory>`.
-5. Return the result state, elapsed time, artifact paths, exclusions, and next action.
+5. Inspect the result plus the user-map holds and target statuses against the user's
+   requested outcome. Return the state, elapsed time, artifact paths, exclusions, and
+   one useful next step; never treat `next_action: none` alone as proof of completion.
 6. When the result needs a decision, present its complete grouped packet once, encode
    the reply in a new request, and rerun the same case. Do not invent fields or bypass
    case, source, packet, or artifact hashes.
+7. Continue this skill automatically for safe internal stages. When a typed decision,
+   physical read, or target choice is required, recommend continuing this skill with
+   the exact case and input. Do not expose internal specialist-stage choreography.
+
+## Output files
+
+Open these first:
+
+- `artifacts/user-map.md` - The short human-readable map organized by measurement group.
+- `artifacts/user-map.csv` - The spreadsheet-ready map for people and common tools.
+- `artifacts/user-map.json` - The same map in the complete machine-readable format.
+
+Normally leave these alone:
+
+- `targets/` - Open this folder only when you requested files for Node-RED, Modpoll, or ModScan. It contains the files to import into that tool.
+- `compile-result.json` - Codex reads this receipt to tell whether the run finished or needs something from you. You normally do not need to open it.
+- `case.json` - This checkpoint lets Codex continue the same job later without starting over. Keep it until the job is finished, and do not edit it.
+- The other files under `artifacts/` - These show how Codex turned the OEM source into your final map. Keep them for troubleshooting or an audit; ignore them during normal use.
 
 Completion requires `compile-result.json` plus the complete offline user-map bundle.
 Requested targets may remain independently held without invalidating completed outputs.
+
+## Finish
+
+- The requested offline bundle is usable: say `Done`, name its human, JSON, and CSV
+  artifacts, then offer target generation only as an optional goal.
+- The current case can advance safely: continue it without a handoff.
+- A decision or external action blocks the requested outcome: recommend continuing
+  `$compile-user-map` with the case-bound packet or probe and invite `proceed`.
+- A requested target is held while the offline map is usable: report both facts and
+  recommend the one action that unlocks that target.
 
 Never perform a live device read. Return a case-bound probe when physical evidence is
 required. Keep unsupported writes, broadcasts, scans, credentials, and polling stopped.

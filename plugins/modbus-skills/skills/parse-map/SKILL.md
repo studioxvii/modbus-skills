@@ -17,6 +17,10 @@ Follow `../../references/interaction-contract.md`.
 4. Validate the whole parse, then summarize rejected rows, assumptions, warnings, and
    holds by cause instead of presenting rows one at a time.
 
+## Output files
+
+- The requested output JSON - Use this candidate map as the input to normalization. It preserves source values and lists rejected rows and parse warnings. It is not yet an approved map.
+
 Completion requires a schema-valid candidate map and parse report. Engineering fields can remain unresolved.
 
 ## Handoff

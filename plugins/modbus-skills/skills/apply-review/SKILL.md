@@ -20,6 +20,10 @@ Follow `../../references/interaction-contract.md`.
 6. Run once for the complete batch and report applied decisions, exclusions, audit
    data, and only the remaining holds.
 
+## Output files
+
+- `reviewed.json` - Use this new reviewed map. It contains the accepted changes, exclusions, remaining holds, and the evidence trail. The original draft is unchanged.
+
 Completion requires a new map whose approval state matches its remaining holds.
 
 ## Handoff
