@@ -1,13 +1,12 @@
 # Verification Status
 
-Verification date: 2026-08-07.
+Verification date: 2026-08-08.
 
 ## Passed
 
 - The OpenAI plugin validator accepted the plugin manifest.
-- The skill validator accepted all 19 skills.
-- The dependency-free repository suite passed 250 tests.
-- A clean checkout passed the same 250-test repository suite.
+- The skill validator accepted all 20 skills.
+- The dependency-free repository suite passed 308 tests in the current working tree.
 - The public synthetic human workflow passed 41 of 41 checks.
 - A local rights-restricted corpus of seven real register maps passed 45 of 45 workflow checks. The maps and local artifacts are not in this repository.
 - Three blind users completed the novice probe, commissioning-pack, and map-review scenarios without repository edits or live device traffic.
@@ -24,6 +23,13 @@ The real-map workflow confirmed these behaviors:
 - Node-RED, Modpoll, and ModScan can be built alone or in any combination.
 - Tool packs are deterministic, checksummed, read-only, and free of review audit data.
 - JSON and CSV capture analysis reports communication, duplicate, gap, stale, flatline, range, rate, and byte-order evidence conditions.
+
+The outcome-compiler transcript suite also passed clean structured intake, automatic
+PDF coordinate fallback, one grouped selection resume, preserved offline artifacts at
+the binding gate, and one evidenced read across offsets 257 through 308. Its tracked
+150-row synthetic benchmark completed the offline bundle in under 20 ms on the recorded
+macOS arm64 / Python 3.14.6 envelope, below the five-minute local threshold. Wall time
+is diagnostic; transcript shape is the deterministic repository gate.
 
 ## Not yet verified
 

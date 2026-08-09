@@ -23,6 +23,10 @@
     "positive_stems": ["compare these two Modbus register maps", "show map changes between these firmware revisions"],
     "negative": ["validate one register map", "convert these addresses", "analyze time-series samples", "generate a ModScan plan", "compare two unrelated text files"]
   },
+  "compile-user-map": {
+    "positive_stems": ["turn this OEM Modbus map into an organized user map for temperatures alarms and status", "compile this device manual and measurement intent into JSON CSV and requested tool outputs"],
+    "negative": ["only extract register rows from these PDF pages", "compare these two firmware maps", "convert these 40001 references to offsets", "analyze this completed capture", "only generate a Node-RED flow from this validated map"]
+  },
   "plan-reads": {
     "positive_stems": ["group these Modbus points into bounded reads", "compile a traceable FC03 and FC04 poll plan"],
     "negative": ["parse this vendor CSV", "decode these raw words", "generate writes for these points", "analyze a completed capture", "find devices on the network"]

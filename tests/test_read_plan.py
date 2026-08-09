@@ -39,6 +39,29 @@ def point(
     )
 
 
+def island(
+    start,
+    end,
+    *,
+    island_id="safe-1",
+    route="r1",
+    unit=1,
+    area="holding-register",
+    function_code=3,
+):
+    return {
+        "island_id": island_id,
+        "route_id": route,
+        "unit_id": unit,
+        "area": area,
+        "function_code": function_code,
+        "start_offset": start,
+        "end_offset": end,
+        "reason": "OEM evidence declares this interval continuously readable",
+        "evidence_refs": [f"evidence:{island_id}"],
+    }
+
+
 class ReadPlanTests(unittest.TestCase):
     def test_contiguous_points_share_one_bounded_register_read(self):
         points = (
@@ -56,13 +79,72 @@ class ReadPlanTests(unittest.TestCase):
             [("temperature", 0), ("status", 2)],
         )
 
-    def test_gap_policy_is_explicit(self):
+    def test_gap_requires_an_evidenced_readable_island(self):
         points = (point("a", 0), point("b", 2))
 
         self.assertEqual(len(compile_read_plan(points).requests), 2)
-        merged = compile_read_plan(points, max_gap=1)
+        self.assertEqual(len(compile_read_plan(points, max_gap=1).requests), 2)
+        merged = compile_read_plan(points, readable_islands=[island(0, 2)])
         self.assertEqual(len(merged.requests), 1)
         self.assertEqual(merged.requests[0].quantity, 3)
+        self.assertEqual(
+            merged.requests[0].bridged_ranges[0].to_dict(),
+            {
+                "start_offset": 1,
+                "end_offset": 1,
+                "quantity": 1,
+                "readable_island_id": "safe-1",
+                "reason": "OEM evidence declares this interval continuously readable",
+                "evidence_refs": ["evidence:safe-1"],
+            },
+        )
+
+    def test_sparse_points_pack_to_farthest_safe_span_in_one_island(self):
+        plan = compile_read_plan(
+            (point("first", 257), point("last", 308)),
+            readable_islands=[island(257, 308)],
+        )
+        self.assertEqual(len(plan.requests), 1)
+        self.assertEqual((plan.requests[0].start_offset, plan.requests[0].quantity), (257, 52))
+        self.assertEqual(
+            (plan.requests[0].bridged_ranges[0].start_offset, plan.requests[0].bridged_ranges[0].end_offset),
+            (258, 307),
+        )
+
+    def test_unsafe_or_unknown_gap_splits_even_inside_broad_policy(self):
+        points = (point("a", 0), point("b", 10))
+        readable = [island(0, 10)]
+        unsafe = [
+            {
+                "route_id": "r1",
+                "unit_id": 1,
+                "area": "holding-register",
+                "start_offset": 5,
+                "end_offset": 6,
+                "reason": "Reserved addresses",
+                "evidence_refs": ["manual:reserved"],
+            }
+        ]
+        self.assertEqual(
+            len(compile_read_plan(points, readable_islands=readable, unsafe_intervals=unsafe).requests),
+            2,
+        )
+        self.assertEqual(len(compile_read_plan(points, max_gap=20).requests), 2)
+
+    def test_island_identity_and_device_limit_split_requests(self):
+        points = (point("a", 0), point("b", 10), point("c", 20))
+        split_islands = [island(0, 10, island_id="one"), island(11, 20, island_id="two")]
+        self.assertEqual(len(compile_read_plan(points, readable_islands=split_islands).requests), 2)
+        self.assertEqual(
+            len(
+                compile_read_plan(
+                    points,
+                    readable_islands=[island(0, 20)],
+                    max_quantities={"holding-register": 15},
+                ).requests
+            ),
+            2,
+        )
 
     def test_route_unit_and_area_are_never_merged(self):
         points = (
@@ -96,7 +178,7 @@ class ReadPlanTests(unittest.TestCase):
 
     def test_register_limit_splits_a_wide_gap_policy(self):
         points = (point("first", 0), point("last-in-block", 124), point("next", 125))
-        plan = compile_read_plan(points, max_gap=200)
+        plan = compile_read_plan(points, readable_islands=[island(0, 125)])
 
         self.assertEqual(len(plan.requests), 2)
         self.assertEqual(plan.requests[0].quantity, 125)
@@ -105,7 +187,7 @@ class ReadPlanTests(unittest.TestCase):
     def test_custom_limit_can_only_reduce_protocol_limit(self):
         plan = compile_read_plan(
             (point("a", 0), point("b", 10)),
-            max_gap=20,
+            readable_islands=[island(0, 10)],
             max_quantities={"holding-register": 10},
         )
         self.assertEqual(len(plan.requests), 2)

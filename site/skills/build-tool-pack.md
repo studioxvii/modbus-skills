@@ -1,6 +1,6 @@
 # Build Tool Pack
 
-Build any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and read plan.
+Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan.
 
 ## Common requests
 

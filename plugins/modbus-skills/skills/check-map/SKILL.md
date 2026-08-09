@@ -7,12 +7,15 @@ description: Check a normalized Modbus map for identity, range, overlap, width, 
 
 Run deterministic checks and return structured findings.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Run `python3 <skill-dir>/scripts/run.py --input <map.json> --output <validation.json>`.
 2. Group findings by `error`, `warning`, and `hold`.
-3. Show composite identity and source evidence for each finding.
-4. Confirm final generation is held while an error or hold remains.
+3. Group findings by code and root cause; include representative composite identities
+   plus the complete affected-ID list in the artifact.
+4. Hold final generation automatically while an error or hold remains.
 
 Completion requires every check to have a visible pass, finding, or skipped reason.
 

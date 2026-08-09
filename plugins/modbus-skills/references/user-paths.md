@@ -1,6 +1,18 @@
 # Modbus user paths
 
-Choose the path from the user's goal and current artifact. Recommend the first missing step, not the full catalog.
+Choose the path from the user's outcome and current artifact. Prefer one outcome skill;
+use a specialist only when the user explicitly requests that stage.
+
+## I need an organized user map or outputs from an OEM source
+
+```text
+OEM PDF, CSV, JSON, XML, XLSX, or text + measurement intent + optional targets
+  -> $compile-user-map
+```
+
+This is the primary route. It completes safe offline work in one run, resumes one
+case only when a material exception blocks progress, and leaves live reads separate.
+Do not replace it with a parse-review-normalize-plan-builder invocation chain.
 
 ## I have a register map
 
@@ -8,21 +20,24 @@ Choose the path from the user's goal and current artifact. Recommend the first m
 PDF manual -> $extract-pdf-map
 CSV, JSON, XML, XLSX, or text -> $parse-map
 candidate map -> $normalize-map
-normalized map -> $check-map -> $review-evidence -> $apply-review
-reviewed map -> $plan-reads
+normalized map -> $check-map
+clean validated map -> $plan-reads
+blocking exception groups -> $review-evidence -> $apply-review -> $plan-reads
 ```
 
-Use `$review-map` when the user wants the complete source-to-decision workflow instead of selecting each stage.
+Use `$review-map` only when the user explicitly wants source-map review rather than an
+organized user map or output bundle.
 
 ## I need a polling-tool output
 
 ```text
-reviewed map -> $plan-reads
+validated map -> $plan-reads
 one named target -> $build-node-red | $build-modpoll | $build-modscan
 several or undecided targets -> $build-tool-pack
 ```
 
-Use `probe` mode while required byte order is unresolved. Use `final` mode only with a plan bound to the exact reviewed map.
+Use `probe` mode while required byte order is unresolved. Use `final` mode only with a
+plan bound to the exact validated map.
 
 ## I do not know the byte order
 
@@ -48,8 +63,8 @@ Analysis produces evidence. It does not issue device actions.
 
 ```text
 raw old or new sources -> $review-map for each
-two reviewed maps -> $compare-maps
-approved new map -> $plan-reads -> selected builder
+two validated maps -> $compare-maps
+validated new map -> $plan-reads -> selected builder
 ```
 
 Map order changes are noise. Route, unit, area, and offset changes are moves.
@@ -64,4 +79,8 @@ opaque or undocumented native format -> stop at a documented interchange plan
 
 ## Routing rule
 
-Recommend one next skill with its required input and output artifact. Show the full path only when the user asks for it. Offer one alternate only when the current goal is genuinely ambiguous.
+Recommend the skill that completes the user's outcome with its available inputs.
+Choose `$compile-user-map` for OEM-source-to-user-output requests. Choose a specialist
+for explicit extraction, parsing, review, comparison, remapping, capture analysis,
+byte-order, planning, or target-only requests. Show a sequence only when asked. Offer
+one alternate only when the current goal is genuinely ambiguous.

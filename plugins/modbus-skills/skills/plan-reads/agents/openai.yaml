@@ -1,6 +1,6 @@
 interface:
   display_name: "Plan Reads"
   short_description: "Compile bounded Modbus read blocks"
-  default_prompt: "Use $plan-reads to compile safe reads for this reviewed map."
+  default_prompt: "Use $plan-reads to compile safe reads for this validated map."
 policy:
   allow_implicit_invocation: false

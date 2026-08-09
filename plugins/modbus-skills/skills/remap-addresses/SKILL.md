@@ -7,15 +7,19 @@ description: Preview and apply a known map-wide conversion between Modbus offset
 
 Preview a known conversion before applying it.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Require the source and target conventions.
 2. Require an explicit register area when notation does not prove it.
 3. Run `python3 <skill-dir>/scripts/run.py --input <map.json> --from <convention> --to <convention> --output <preview.json>`.
-4. Review invalid offsets and collisions.
-5. Apply only after the user confirms the preview.
+4. Validate invalid offsets and collisions across the whole map.
+5. When the requested conventions are explicit and the preview is collision-free,
+   apply the conversion without another confirmation. Ask once only for ambiguity or
+   a lossy/colliding result.
 
-Completion requires a collision-free preview and explicit confirmation before map output.
+Completion requires a collision-free, hash-bound preview before map output.
 
 ## Handoff
 

@@ -1,0 +1,9 @@
+Synthetic register table
+
+Address  Name                         Type    Unit
+257      Ambient temperature         INT16   degC
+         Operating status            UINT16  enum
+308      Alarm summary               UINT16  bits
+
+The blank repeated address cell is intentional. It is redistribution-safe test
+data for a future compiler source-intake fallback transcript.

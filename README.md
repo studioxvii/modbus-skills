@@ -2,7 +2,9 @@
 
 Read-only Modbus engineering workflows for the OpenAI Codex plugin architecture.
 
-Modbus Skills turns register maps, raw register samples, and bounded captures into reviewed engineering artifacts. It can parse and validate maps, evaluate byte order from one read, compile safe read plans, generate tool files, compare revisions, and analyze captured data.
+Modbus Skills turns an OEM register map and measurement intent into an organized user
+map, JSON, CSV, and optional tool outputs in one resumable run. Focused skills remain
+available for extraction, validation, byte order, comparison, and capture analysis.
 
 This repository is private and pre-release. It does not contain private product code, customer data, vendor manuals, or complete vendor register maps.
 
@@ -14,18 +16,20 @@ This project makes those boundaries explicit:
 
 - Unknown engineering values become blocking holds.
 - One raw read can be evaluated with every supported byte and word layout.
-- A human must approve engineering decisions before final output.
+- Clean deterministic work proceeds automatically; a human resolves only genuine
+  engineering ambiguity or authorizes the next live device action.
 - Read plans use Modbus read function codes 01 through 04 only.
-- Generated artifacts are deterministic, checksummed, and traceable to the reviewed map.
+- Generated artifacts are deterministic, checksummed, and traceable to the validated map.
 
 ## What you can do
 
 | Task | Result |
 | --- | --- |
-| Review CSV, JSON, XML, XLSX, text, or PDF map data | Traceable candidate map, normalized map, lint report, and review queue |
+| Compile an OEM source for a specific use | Organized user map, JSON, CSV, exclusions, and optional target outputs |
+| Review CSV, JSON, XML, XLSX, text, or PDF map data | Traceable candidate map, normalized map, lint report, and grouped exception queue |
 | Resolve uncertain 32-bit byte order | `ABCD`, `BADC`, `CDAB`, and `DCBA` interpretations from one raw sample |
 | Resolve uncertain 64-bit byte order | Every supported 64-bit byte and word layout from one four-word sample |
-| Plan device reads | Bounded FC01–FC04 blocks tied to the exact reviewed map hash |
+| Plan device reads | Bounded FC01–FC04 blocks tied to the exact validated map hash |
 | Build polling artifacts | Node-RED, Modpoll, Modbus Poll, ModScan, or any selected combination |
 | Review firmware changes | Added, removed, moved, and changed points without row-order noise |
 | Analyze read data | Communication errors, gaps, duplicates, stale values, flatlines, range issues, rates, and byte-order evidence |
@@ -50,11 +54,11 @@ Private repository access is required during pre-release.
 Try one of these prompts in Codex:
 
 ```text
-$review-map Review this register map. Preserve every source row and do not guess missing fields.
+$compile-user-map Turn this OEM map into an organized user map for temperatures, status, and alarms, with JSON and CSV outputs.
 ```
 
 ```text
-$build-tool-pack Build a read-only Node-RED and Modpoll probe for this reviewed map.
+$build-tool-pack Build a read-only Node-RED and Modpoll probe for this validated map.
 ```
 
 ```text
@@ -65,15 +69,72 @@ $check-byte-order Evaluate every possible byte order for these raw words. Do not
 $compare-maps Compare these firmware maps and show moved, added, removed, and changed points.
 ```
 
-Use `$modbus-help` when you do not know which skill to use. It recommends one next skill from your goal and current artifact.
+Use `$modbus-help` when you do not know which skill to use. OEM-source-to-output goals
+route to `$compile-user-map`; focused stage requests route to the matching specialist.
 
 All skills require explicit invocation. This keeps unrelated skill instructions out of the agent context.
+
+## Fast OEM map compiler
+
+`$compile-user-map` is the default path from an OEM manual to usable engineering
+artifacts. Give it the source and describe the measurements you need; do not manually
+work through extraction, normalization, review, selection, and read planning skills.
+
+```text
+$compile-user-map Use ./manual.pdf to build a user map for temperatures, operating
+status, active alarms, and power. Return the organized map plus JSON and CSV.
+```
+
+The skill automatically:
+
+1. preflights the local source and available PDF capability;
+2. finds likely register pages and reconciles strict and coordinate extraction;
+3. preserves source locations while normalizing the OEM semantics;
+4. selects and organizes the requested measurements;
+5. validates counts, identities, ranges, datatypes, and artifact hashes; and
+6. writes the completed offline bundle before considering optional device targets.
+
+A clean source completes without an approval question. If evidence is genuinely
+ambiguous, the result contains one grouped decision packet with affected counts and
+source references. Device binding, a physical read, and byte-order confirmation remain
+separate gates because they can materially change a requested device-specific output.
+
+Typical output:
+
+```text
+case-directory/
+├── compile-result.json       # state, elapsed time, artifacts, holds, next action
+├── case.json                 # hash-bound resumable case manifest
+└── artifacts/
+    ├── user-map.md           # compact engineer-readable map
+    ├── user-map.json         # canonical machine-readable output
+    ├── user-map.csv          # spreadsheet/import output
+    └── user-map-manifest.json # artifact hashes, lineage, and bundle status
+```
+
+Excluded or quarantined source items remain in the user map's exception annex rather
+than blocking unrelated selected points.
+
+For deterministic runtime use, create a request described in
+[`compile-user-map/references/request.md`](plugins/modbus-skills/skills/compile-user-map/references/request.md)
+and run:
+
+```bash
+python3 plugins/modbus-skills/skills/compile-user-map/scripts/run.py \
+  --request request.json \
+  --output ./compile-case
+```
+
+Re-running the same request is idempotent. A resume accepts only the typed input named
+by `compile-result.json`; stale hashes, broadened decisions, and modified evidence are
+rejected without changing the case.
 
 ## Choose your path
 
 | Starting point or goal | Start here | Typical next step |
 | --- | --- | --- |
-| Register map or device manual | `$review-map` | `$plan-reads` |
+| OEM register map or device manual plus desired measurements | `$compile-user-map` | Completed offline bundle or one grouped exception |
+| Explicit source-map review only | `$review-map` | Grouped decision packet when needed |
 | Polling-tool output | `$plan-reads` | One builder or `$build-tool-pack` |
 | Unknown byte order | `$capture-sample` | `$check-byte-order` |
 | Bad values or communication | `$analyze-capture` | Evidence review or map comparison |
@@ -84,14 +145,15 @@ See the [user-path guide](plugins/modbus-skills/references/user-paths.md) for th
 
 ## Core workflows
 
-| Workflow | Purpose | Human stop |
+| Workflow | Purpose | Stops only for |
 | --- | --- | --- |
-| `review-register-map` | Parse, normalize, lint, review, and apply explicit decisions | Every blocking hold must be resolved or excluded |
+| `compile-user-map` | Compile an OEM source and intent into organized user outputs | One grouped source decision, missing requested target binding, or separate physical evidence |
+| `review-register-map` | Parse, normalize, lint, and review in one pass | Grouped blocking exceptions; clean maps continue automatically |
 | `determine-byte-order` | Evaluate one immutable raw sample and record a confirmed layout | A human selects one layout with evidence |
 | `probe-resolve-finalize-tool-pack` | Build a probe, collect one read, resolve byte order, and rebuild final targets | No final pack before sample and layout review |
 | `build-tool-pack` | Generate any combination of Node-RED, Modpoll, and ModScan | The map and exact map-bound plan must pass preflight |
-| `analyze-read-data` | Analyze bounded JSON or CSV captures | A human reviews thresholds and alternative causes |
-| `compare-map-revisions` | Compare reviewed maps across device or firmware revisions | A human reviews location and field changes |
+| `analyze-read-data` | Analyze bounded JSON or CSV captures | Missing thresholds or metadata that materially change findings |
+| `compare-map-revisions` | Compare validated maps across device or firmware revisions | Ambiguous identity or an explicit acceptance decision |
 
 The workflow definitions are available in [`catalog/workflows.json`](catalog/workflows.json). Artifact contracts are documented in [`docs/contracts/artifacts.md`](docs/contracts/artifacts.md).
 
@@ -101,7 +163,7 @@ Byte order does not need to be known before the first probe exists.
 
 ```mermaid
 flowchart LR
-    A["Reviewed map with unresolved byte order"] --> B["Compile bounded read plan"]
+    A["Validated map with unresolved byte order"] --> B["Compile bounded read plan"]
     B --> C["Generate a read-only probe"]
     C --> D["Run one physical Modbus read"]
     D --> E["Evaluate every supported layout"]
@@ -122,20 +184,21 @@ Modpoll and ModScan probes collect the same raw words. `check-byte-order` then e
 | `gavinying/modpoll` | Documented `device`, `poll`, and `ref` CSV files | Use the pinned open-source implementation for acceptance testing |
 | Witte Modbus Poll | Readable desktop plan, bounded PowerShell automation, or disabled v12 XML | The project does not synthesize opaque `.mbp` or `.mbw` files |
 | ModScan | Manual setup, read-plan, point-map, and protocol test-message files | The project does not invent undocumented `.tst` or `.cfg` formats |
-| Combined tool pack | Any non-empty target combination with manifests and SHA-256 checksums | All targets use one reviewed map and one read plan |
+| Combined tool pack | Any non-empty target combination with manifests and SHA-256 checksums | All targets use one validated map and one read plan |
 
 ## Safety model
 
 The runtime fails closed. It does not generate Modbus writes, broadcast requests, discovery scans, stored credentials, or unbounded polling.
 
-Final output requires:
+Final output requires these properties to be verified; it does not require a separate
+blanket approval when every property is explicit and checks pass:
 
 - A resolved route and unit identifier.
 - A confirmed register area and address convention.
 - Readable point access.
 - A confirmed datatype and word width.
 - A confirmed byte order for applicable multi-register values.
-- A read plan bound to the SHA-256 hash of the exact reviewed map.
+- A read plan bound to the SHA-256 hash of the exact validated map.
 - A new read plan after any approved map change.
 
 Source `include` and `reviewed` flags remain evidence. They never become repository approval. Write-only and source-excluded points cannot enter an active read plan.
@@ -145,6 +208,7 @@ Source `include` and `reviewed` flags remain evidence. They never become reposit
 | Goal | Skill |
 | --- | --- |
 | Route an unclear request | `modbus-help` |
+| Compile an OEM map into organized user outputs | `compile-user-map` |
 | Parse CSV, JSON, XML, XLSX, or delimited text | `parse-map` |
 | Extract traceable candidates from a PDF | `extract-pdf-map` |
 | Normalize explicit map fields | `normalize-map` |
@@ -169,7 +233,7 @@ Source `include` and `reviewed` flags remain evidence. They never become reposit
 ```text
 .agents/plugins/marketplace.json       Repository marketplace entry
 plugins/modbus-skills/                 Installable OpenAI plugin
-plugins/modbus-skills/skills/          Nineteen focused skills
+plugins/modbus-skills/skills/          One outcome skill and focused specialist skills
 plugins/modbus-skills/runtime/         Deterministic Python runtime
 catalog/                               Skill, workflow, and activation catalogs
 docs/contracts/                        Chaining and artifact contracts
@@ -201,9 +265,15 @@ python3 scripts/verify_repo.py
 
 Current evidence:
 
-- 19 skills pass the official skill validator.
+- All 20 skills pass the repository validator.
 - The plugin passes the official OpenAI plugin validator.
-- 250 repository tests pass from a clean checkout.
+- 308 repository tests pass in the current working tree.
+- The outcome-compiler transcript suite passes clean structured intake, automatic PDF
+  coordinate fallback, grouped decision/resume, binding preservation, and evidenced
+  contiguous-read scenarios.
+- The tracked 150-point synthetic benchmark completes the offline bundle in under
+  20 ms on the documented macOS arm64 / Python 3.14.6 envelope, against a five-minute
+  local threshold. Timing is diagnostic; transcript behavior is the deterministic gate.
 - The public synthetic human workflow passes 41 of 41 checks.
 - Seven local real-world register maps pass 45 of 45 workflow checks across 31 skill calls.
 - Blind novice, commissioning, and reviewer trials pass.

@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: OEM Map to Output in Minutes</title>
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --paper: #fffdf8;
+      --ink: #17211f;
+      --muted: #59645f;
+      --line: #d8d4c9;
+      --accent: #006b5c;
+      --accent-soft: #dff2ec;
+      --accent-text: #004c41;
+      --blue-soft: #e7eff9;
+      --blue-text: #254f7b;
+      --warn-soft: #fff0cf;
+      --warn-text: #6f4b00;
+      --rose-soft: #f8e4e1;
+      --rose-text: #7b3028;
+      --shadow: 0 12px 40px rgba(35, 44, 40, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.62;
+    }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .92em; }
+    .page {
+      width: min(940px, calc(100% - 32px));
+      margin: 28px auto 56px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    header { padding: 52px 58px 36px; background: linear-gradient(145deg, #fffdf8, #edf6f2); }
+    main { padding: 0 58px 52px; }
+    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 8px 0 12px; font-size: clamp(34px, 6vw, 56px); line-height: 1.02; letter-spacing: -.045em; max-width: 14ch; }
+    h2 { margin: 54px 0 18px; font-size: 27px; line-height: 1.15; letter-spacing: -.025em; }
+    h3 { margin: 0; font-size: 22px; line-height: 1.22; letter-spacing: -.018em; }
+    p { max-width: 72ch; }
+    strong { color: inherit; }
+    .dek { color: var(--muted); font-size: 18px; max-width: 70ch; }
+    .metadata, .stats, .chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 24px; }
+    .chip, .stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border-radius: 999px;
+      border: 1px solid #bed8d0;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      padding: 6px 11px;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .stats { margin-top: 28px; }
+    .stat { border-color: var(--line); background: rgba(255,255,255,.75); color: var(--ink); padding: 9px 13px; }
+    .stat b { font-size: 17px; }
+    nav {
+      margin: 0 58px;
+      padding: 18px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+    }
+    nav a { font-size: 13px; font-weight: 700; text-decoration: none; }
+    .callout { margin: 28px 0; padding: 22px 24px; border-radius: 16px; background: var(--accent-soft); color: var(--accent-text); }
+    .callout p { margin: 5px 0 0; }
+    .axis-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+    .axis { padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+    .axis b { display: block; margin-bottom: 4px; }
+    .jump-list { margin: 18px 0 26px; padding: 18px 22px 18px 42px; border-radius: 14px; background: var(--blue-soft); color: var(--blue-text); }
+    .jump-list li { margin: 5px 0; }
+    .idea { margin: 18px 0; padding: 26px; border: 1px solid var(--line); border-radius: 18px; background: #fff; }
+    .idea-head { display: flex; gap: 15px; align-items: flex-start; }
+    .rank { flex: 0 0 auto; min-width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; background: var(--accent); color: white; font-weight: 850; }
+    .idea dl { display: grid; grid-template-columns: 100px 1fr; gap: 8px 16px; margin: 18px 0 0; }
+    .idea dt { color: var(--muted); font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .idea dd { margin: 0; }
+    .idea .chips { margin-top: 13px; }
+    .idea .chip.blue { background: var(--blue-soft); color: var(--blue-text); border-color: #c4d4e8; }
+    .idea .chip.warn { background: var(--warn-soft); color: var(--warn-text); border-color: #e8d29e; }
+    .diagram { margin: 22px 0 4px; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: #faf9f5; overflow-x: auto; }
+    .diagram svg { width: 100%; height: auto; display: block; min-width: 640px; }
+    .caption { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13px; }
+    th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .sources li { margin: 8px 0; }
+    footer { padding: 20px 58px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; background: #f8f6f0; }
+    @media (max-width: 720px) {
+      header, main { padding-left: 24px; padding-right: 24px; }
+      nav { margin-left: 24px; margin-right: 24px; }
+      .axis-grid { grid-template-columns: 1fr; }
+      .idea dl { grid-template-columns: 1fr; gap: 3px; }
+      .idea dd { margin-bottom: 10px; }
+      footer { padding-left: 24px; padding-right: 24px; }
+    }
+  </style>
+</head>
+<body>
+<article class="page">
+  <header>
+    <div class="eyebrow">Ideation · workflow redesign</div>
+    <h1>OEM map to output in minutes</h1>
+    <p class="dek">The central change is not “fewer approvals.” It is changing the product from a shelf of stage-oriented skills into an outcome compiler: the user states what they need, the system completes every safe local step, and humans see only material exceptions.</p>
+    <div class="metadata" aria-label="Document metadata">
+      <span class="chip">Date · <time datetime="2026-08-08">2026-08-08</time></span>
+      <span class="chip">Topic · oem-map-to-output-speed</span>
+      <span class="chip">Mode · repo-grounded</span>
+    </div>
+    <p><strong>Focus:</strong> Simplicity, accuracy, and speed across the full OEM Modbus manual → organized user map → requested output workflow.</p>
+    <div class="stats" aria-label="Reference task signals">
+      <span class="stat"><b>34.6 min</b> agent runtime</span>
+      <span class="stat"><b>20</b> turns</span>
+      <span class="stat"><b>1.2 MB</b> primary “normalized” JSON</span>
+      <span class="stat"><b>6 → 1</b> avoidable read blocks</span>
+    </div>
+  </header>
+
+  <nav aria-label="Document navigation">
+    <a href="#grounding-context">Grounding Context</a>
+    <a href="#topic-axes">Topic Axes</a>
+    <a href="#ranked-ideas">Ranked Ideas</a>
+    <a href="#failure-matrix">Cross-skill Failure Matrix</a>
+    <a href="#rejection-summary">Rejection Summary</a>
+    <a href="#sources">Sources &amp; References</a>
+  </nav>
+
+  <main>
+    <section id="grounding-context">
+      <h2>Grounding Context</h2>
+      <p>The reference task showed the same design defect repeatedly. A PDF extractor asked for pages it could discover, installed Poppler in the critical path, failed on merged table cells, and recovered through bespoke code. The next stages required adapters because the candidate schema did not compose with the evidence reviewer. Review began page by page. Normalization mixed OEM facts with site binding and repeated map-wide uncertainty per point. “Plan reads” did not select measurements. Finally, the zero-gap planner generated six Node-RED getters for a legal bounded range that an experienced user immediately recognized as one FC03 read.</p>
+      <p>The repository’s stated policy is already correct: optimize for minutes of human attention, automate deterministic work, group exceptions by root cause, and preserve canonical contracts. The runtime and public workflow have not yet caught up with that policy.</p>
+      <div class="callout">
+        <div class="eyebrow">Decisive point of view</div>
+        <p><strong>Skills should remain internal compiler passes.</strong> The primary user surface should be one offline-first outcome workflow. Granular skills stay available for inspection and expert use, but ordinary users should never have to operate the artifact graph.</p>
+      </div>
+      <p>External prior art reinforces this direction: document systems use field confidence and source anchors; table tools support multiple extraction strategies and quality metrics; compiler pipelines separate source evidence from typed semantic representations; lineage systems preserve source-to-output traceability; and Modbus FC03/04 reads are bounded contiguous ranges that can be packed deterministically.</p>
+    </section>
+
+    <section id="topic-axes">
+      <h2>Topic Axes</h2>
+      <div class="axis-grid">
+        <div class="axis"><b>1 · Extraction reliability</b>Page discovery, parser fallbacks, quality gates, and dependency readiness.</div>
+        <div class="axis"><b>2 · Artifact contracts</b>Evidence, OEM semantics, selection, binding, and partial readiness.</div>
+        <div class="axis"><b>3 · Human interaction</b>Exception batching, plain language, scoped decisions, and resume.</div>
+        <div class="axis"><b>4 · Intent and user maps</b>Measurement selection, categories, aliases, and useful deliverables.</div>
+        <div class="axis"><b>5 · Planning and outputs</b>Safe read optimization, target generation, and verification.</div>
+      </div>
+    </section>
+
+    <section id="ranked-ideas">
+      <h2>Ranked Ideas</h2>
+      <ol class="jump-list">
+        <li><a href="#i1">Offline-first outcome compiler</a></li>
+        <li><a href="#i2">Quality-gated extraction ladder</a></li>
+        <li><a href="#i3">Three-layer map model</a></li>
+        <li><a href="#i4">Phase-scoped decision transaction</a></li>
+        <li><a href="#i5">Intent-first user map with slice readiness</a></li>
+        <li><a href="#i6">Evidence-aware read optimizer</a></li>
+        <li><a href="#i7">Transcript speed and fidelity contract</a></li>
+      </ol>
+
+      <article class="idea" id="i1">
+        <div class="idea-head"><div class="rank">1</div><div><h3>I1. Offline-first outcome compiler</h3><div class="chips"><span class="chip blue">Axis 5 · Orchestration</span><span class="chip">Confidence 96%</span><span class="chip warn">Complexity High</span></div></div></div>
+        <p><strong>Description:</strong> Add one primary workflow—working name <code>build-device-project</code>—that accepts an OEM manual, plain-language measurement intent, optional connection settings, and requested output targets. It owns page discovery, extraction, review, semantic compilation, selection, map rendering, read packing, output generation, and offline verification. Intermediate artifacts remain auditable under a machine subdirectory; the user sees a finished bundle or one phase-scoped exception packet.</p>
+        <dl>
+          <dt>Basis</dt><dd><strong>direct:</strong> <code>modbus-help</code> recommends and stops, <code>review-map</code> excludes PDF extraction, and the reference user had to invoke and bridge each stage manually.</dd>
+          <dt>Rationale</dt><dd>The real unit of work is not “normalize a map”; it is “turn this manual into the map and output I need.” Retaining stage skills internally preserves engineering clarity without charging the user for it.</dd>
+          <dt>Downsides</dt><dd>The orchestrator must define hard boundaries: safe offline work continues automatically; live-device access remains explicit and bounded. Error and resume semantics become a first-class architecture concern.</dd>
+        </dl>
+        <div class="diagram" role="img" aria-label="Before and after workflow comparison">
+          <svg viewBox="0 0 820 245" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#59645f"/></marker></defs>
+            <text x="24" y="30" font-size="13" font-weight="800" fill="#7b3028">CURRENT · USER OPERATES THE PIPELINE</text>
+            <g fill="#f8e4e1" stroke="#cfa8a2"><rect x="24" y="48" width="108" height="48" rx="10"/><rect x="157" y="48" width="108" height="48" rx="10"/><rect x="290" y="48" width="108" height="48" rx="10"/><rect x="423" y="48" width="108" height="48" rx="10"/><rect x="556" y="48" width="108" height="48" rx="10"/><rect x="689" y="48" width="108" height="48" rx="10"/></g>
+            <g font-size="12" font-weight="700" fill="#57211b" text-anchor="middle"><text x="78" y="77">Extract</text><text x="211" y="77">Review</text><text x="344" y="77">Normalize</text><text x="477" y="77">Select</text><text x="610" y="77">Plan</text><text x="743" y="77">Build</text></g>
+            <g stroke="#59645f" stroke-width="1.5" marker-end="url(#arrow)"><path d="M133 72 H152"/><path d="M266 72 H285"/><path d="M399 72 H418"/><path d="M532 72 H551"/><path d="M665 72 H684"/></g>
+            <text x="24" y="146" font-size="13" font-weight="800" fill="#004c41">PROPOSED · USER STATES THE OUTCOME</text>
+            <rect x="24" y="163" width="210" height="56" rx="12" fill="#e7eff9" stroke="#b8cbe3"/><text x="129" y="186" font-size="12" font-weight="800" fill="#254f7b" text-anchor="middle">MANUAL + INTENT + TARGET</text><text x="129" y="204" font-size="11" fill="#254f7b" text-anchor="middle">one outcome request</text>
+            <path d="M235 191 H303" stroke="#59645f" stroke-width="1.8" marker-end="url(#arrow)"/>
+            <rect x="310" y="153" width="220" height="76" rx="14" fill="#dff2ec" stroke="#87bbae"/><text x="420" y="181" font-size="13" font-weight="850" fill="#004c41" text-anchor="middle">OUTCOME COMPILER</text><text x="420" y="201" font-size="11" fill="#004c41" text-anchor="middle">safe stages + checkpoints</text>
+            <path d="M531 191 H599" stroke="#59645f" stroke-width="1.8" marker-end="url(#arrow)"/>
+            <rect x="606" y="163" width="191" height="56" rx="12" fill="#fff0cf" stroke="#dfc176"/><text x="701" y="186" font-size="12" font-weight="800" fill="#6f4b00" text-anchor="middle">OUTPUT OR EXCEPTIONS</text><text x="701" y="204" font-size="11" fill="#6f4b00" text-anchor="middle">never stage choreography</text>
+          </svg>
+          <p class="caption">Illustrative direction: the internal passes remain; the user-facing choreography disappears.</p>
+        </div>
+      </article>
+
+      <article class="idea" id="i2">
+        <div class="idea-head"><div class="rank">2</div><div><h3>I2. Quality-gated extraction ladder</h3><div class="chips"><span class="chip blue">Axis 1 · Extraction</span><span class="chip">Confidence 95%</span><span class="chip warn">Complexity High</span></div></div></div>
+        <p><strong>Description:</strong> Automatically locate likely Modbus page clusters, then try a deterministic strategy ladder: native structured text, layout-preserving text, coordinate reconstruction, and local OCR/layout extraction. Every strategy emits the same evidence contract. Coverage, address continuity, width/type consistency, duplicate detection, cross-page headers, and parser disagreement determine whether the result advances; only anomalous cells or regions enter review.</p>
+        <dl>
+          <dt>Basis</dt><dd><strong>direct:</strong> The strict parser returned zero rows on merged cells while an ad hoc coordinate method recovered 149 candidates. Page discovery, OCR preparation, and dependency installation occurred outside the executable workflow. <strong>external:</strong> Camelot, AWS Textract, and Google Document AI support strategy selection, source geometry, confidence, and quality-based review routing.</dd>
+          <dt>Rationale</dt><dd>OEM manuals are layout documents, not reliably delimited text files. Parser failure should be an expected branch with comparable evidence—not a reason to invent one-off scripts.</dd>
+          <dt>Downsides</dt><dd>Multiple strategies increase runtime and test surface. Confidence must be calibrated on representative fixtures; agreement between two weak strategies is not proof.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i3">
+        <div class="idea-head"><div class="rank">3</div><div><h3>I3. Three-layer map model</h3><div class="chips"><span class="chip blue">Axis 2 · Contracts</span><span class="chip">Confidence 95%</span><span class="chip warn">Complexity High</span></div></div></div>
+        <p><strong>Description:</strong> Separate three concerns that are currently fused. The <em>OEM semantic map</em> stores reusable source-backed vendor facts. The <em>user map selection</em> stores the measurements, names, groups, priorities, and display choices a person wants. The <em>device binding</em> stores TCP/RTU route, endpoint, unit ID, area overrides, target constraints, and live evidence. A bound operational projection joins them only when an output needs it.</p>
+        <dl>
+          <dt>Basis</dt><dd><strong>direct:</strong> Current canonical identities include route and unit, making site facts into per-point normalization holds and preventing an otherwise useful OEM catalog. <strong>external:</strong> Compiler intermediate representations and OpenLineage separate source truth, semantic transformation, and consumer-specific projection.</dd>
+          <dt>Rationale</dt><dd>One reviewed OEM map should serve many devices and many user selections. Changing an IP or unit must not invalidate source review or point identity.</dd>
+          <dt>Downsides</dt><dd>Requires a schema migration and explicit join/provenance rules. Too many user-visible files would recreate the original UX defect, so the layers must remain internal by default.</dd>
+        </dl>
+        <div class="diagram" role="img" aria-label="Three-layer map model">
+          <svg viewBox="0 0 820 250" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#59645f"/></marker></defs>
+            <rect x="36" y="24" width="212" height="72" rx="14" fill="#dff2ec" stroke="#87bbae"/><text x="142" y="51" text-anchor="middle" font-size="13" font-weight="850" fill="#004c41">OEM SEMANTIC MAP</text><text x="142" y="72" text-anchor="middle" font-size="11" fill="#004c41">addresses · meaning · source evidence</text>
+            <rect x="304" y="24" width="212" height="72" rx="14" fill="#e7eff9" stroke="#b8cbe3"/><text x="410" y="51" text-anchor="middle" font-size="13" font-weight="850" fill="#254f7b">USER SELECTION</text><text x="410" y="72" text-anchor="middle" font-size="11" fill="#254f7b">intent · groups · aliases · slice</text>
+            <rect x="572" y="24" width="212" height="72" rx="14" fill="#fff0cf" stroke="#dfc176"/><text x="678" y="51" text-anchor="middle" font-size="13" font-weight="850" fill="#6f4b00">DEVICE BINDING</text><text x="678" y="72" text-anchor="middle" font-size="11" fill="#6f4b00">route · unit · endpoint · limits</text>
+            <path d="M142 97 V139 H329" stroke="#59645f" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"/><path d="M410 97 V139" stroke="#59645f" stroke-width="1.6" marker-end="url(#arrow2)"/><path d="M678 97 V139 H491" stroke="#59645f" stroke-width="1.6" fill="none" marker-end="url(#arrow2)"/>
+            <rect x="274" y="146" width="272" height="78" rx="16" fill="#17211f"/><text x="410" y="177" text-anchor="middle" font-size="14" font-weight="850" fill="#fffdf8">BOUND OPERATIONAL VIEW</text><text x="410" y="199" text-anchor="middle" font-size="11" fill="#dff2ec">read plan · user map · target backends</text>
+          </svg>
+          <p class="caption">Illustrative direction: reusable facts, human intent, and site binding have independent lifecycles.</p>
+        </div>
+      </article>
+
+      <article class="idea" id="i4">
+        <div class="idea-head"><div class="rank">4</div><div><h3>I4. Phase-scoped decision transaction</h3><div class="chips"><span class="chip blue">Axis 3 · Interaction</span><span class="chip">Confidence 93%</span><span class="chip warn">Complexity Medium</span></div></div></div>
+        <p><strong>Description:</strong> Render every currently answerable independent exception in one plain-language packet with scope, consequence, recommended disposition, and affected count. Compile a reply such as “all pages are correct; retain 339/340 as unlabeled” into exact hash-bound records and resume automatically. If a later physical sample creates genuinely new byte-order evidence, that is a new phase and may produce one later packet—it does not justify serial questions now.</p>
+        <dl>
+          <dt>Basis</dt><dd><strong>direct:</strong> Grouped decision artifacts now exist, but the runtime is stateless, receipts omit actionable context, and users or agents must author decision JSON and restart stages manually.</dd>
+          <dt>Rationale</dt><dd>The unit of human review should be an independent engineering judgment, never a page, row, point, file, or internal stage. Scope widening must be automatic when a user says “every page.”</dd>
+          <dt>Downsides</dt><dd>Natural-language compilation must be conservative and echo the exact typed interpretation before applying it. A universal “one question ever” promise would be unsafe and is explicitly rejected.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i5">
+        <div class="idea-head"><div class="rank">5</div><div><h3>I5. Intent-first user map with slice readiness</h3><div class="chips"><span class="chip blue">Axis 4 · Intent and outputs</span><span class="chip">Confidence 94%</span><span class="chip warn">Complexity Medium</span></div></div></div>
+        <p><strong>Description:</strong> Make “what do you want from this device?” part of planning. Translate goals like power, phase voltage/current, frequency, energy, alarms, and status into an editable <em>included / maybe / excluded</em> selection with categories, aliases, descriptions, units, and source links. Produce a concise CSV plus a readable HTML view by default. Compile selected eligible points while preserving unresolved or irrelevant rows in an exception annex.</p>
+        <dl>
+          <dt>Basis</dt><dd><strong>direct:</strong> The user correctly challenged “isn’t that what plan reads is for?” Current planning consumes every active point; there is no selection schema, no category vocabulary, and no standard organized human map output.</dd>
+          <dt>Rationale</dt><dd>The product is not a 1.2 MB normalized vendor dump. It is a traceable, purpose-specific map that a human can understand and an output backend can consume.</dd>
+          <dt>Downsides</dt><dd>Semantic matching can be wrong; uncertain matches need a “maybe” state and cannot silently enter a live plan. Domain starter sets should remain suggestions, not universal truths.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="i6">
+        <div class="idea-head"><div class="rank">6</div><div><h3>I6. Evidence-aware read optimizer</h3><div class="chips"><span class="chip blue">Axis 5 · Planning</span><span class="chip">Confidence 96%</span><span class="chip warn">Complexity Medium</span></div></div></div>
+        <p><strong>Description:</strong> Plan from the selected points and optimize for the fewest legal bounded requests—not for zero unused addresses. Automatically bridge intervening addresses only when the OEM semantic map proves the span is readable and compatible in route, unit, area/function, polling class, device quantity limit, and multiword boundaries. Unknown, reserved, write-only, or explicitly hazardous spans force a split. Each plan explains padded addresses and why every block was formed.</p>
+        <dl>
+          <dt>Basis</dt><dd><strong>direct:</strong> <code>max-gap 0</code> produced six requests for selected points spanning 257–308; the user immediately identified a one-request FC03 alternative. <strong>external:</strong> The Modbus specification defines bounded contiguous FC03/04 register reads, making this a deterministic interval-packing problem once semantics are known.</dd>
+          <dt>Rationale</dt><dd>“Unselected” is not the same as “unknown” or “unsafe.” The current planner conflates them and emits visibly inferior target flows.</dd>
+          <dt>Downsides</dt><dd>Some devices reject broad legal reads. Device-specific maximum spans and known bad ranges must be binding-level constraints; the planner should preserve a strict dense policy as an explicit fallback.</dd>
+        </dl>
+        <div class="diagram" role="img" aria-label="Read packing from six blocks to one safe bounded block">
+          <svg viewBox="0 0 820 200" xmlns="http://www.w3.org/2000/svg">
+            <text x="28" y="28" font-size="12" font-weight="800" fill="#7b3028">ZERO-GAP POLICY</text>
+            <g fill="#f8e4e1" stroke="#cfa8a2"><rect x="28" y="43" width="54" height="34" rx="7"/><rect x="105" y="43" width="54" height="34" rx="7"/><rect x="206" y="43" width="54" height="34" rx="7"/><rect x="307" y="43" width="54" height="34" rx="7"/><rect x="485" y="43" width="108" height="34" rx="7"/><rect x="662" y="43" width="54" height="34" rx="7"/></g>
+            <g font-size="10" fill="#57211b" text-anchor="middle"><text x="55" y="64">257–258</text><text x="132" y="64">261–262</text><text x="233" y="64">269–270</text><text x="334" y="64">273–274</text><text x="539" y="64">293–304</text><text x="689" y="64">307–308</text></g>
+            <text x="28" y="123" font-size="12" font-weight="800" fill="#004c41">EVIDENCE-AWARE COVER</text>
+            <rect x="28" y="138" width="688" height="38" rx="10" fill="#dff2ec" stroke="#87bbae"/><text x="372" y="162" font-size="12" font-weight="850" fill="#004c41" text-anchor="middle">FC03 · start 257 · quantity 52 · selected traces preserved</text>
+            <text x="732" y="162" font-size="11" fill="#59645f">1 request</text>
+          </svg>
+          <p class="caption">Illustrative direction using the reference selection; actual merging still depends on documented readable spans and device limits.</p>
+        </div>
+      </article>
+
+      <article class="idea" id="i7">
+        <div class="idea-head"><div class="rank">7</div><div><h3>I7. Transcript speed and fidelity contract</h3><div class="chips"><span class="chip blue">Axis 1 · Quality system</span><span class="chip">Confidence 91%</span><span class="chip warn">Complexity Medium</span></div></div></div>
+        <p><strong>Description:</strong> Turn the user goal into release criteria. Replay privacy-safe pathological manuals and workflow transcripts and record time to first organized map, questions per phase, repeated decisions, dependency readiness, ad hoc adapter count, row accounting, exception count, output size, read-block count, deterministic hashes, and unsafe-operation count. Calibrate extraction review thresholds on verified fixtures and track errors captured per minute of human attention.</p>
+        <dl>
+          <dt>Basis</dt><dd><strong>direct:</strong> Existing tests validate deterministic artifacts but not PDF page discovery, merged-cell extraction, human questions, resume behavior, or read efficiency. <strong>external:</strong> Google Document AI emphasizes threshold evaluation; confidence research warns that raw model confidence is not sufficient.</dd>
+          <dt>Rationale</dt><dd>“Within minutes” and “simple” will drift unless they are measurable. Outcome-level tests catch the exact failure where every isolated command passes but their composition wastes 35 minutes.</dd>
+          <dt>Downsides</dt><dd>Wall-clock CI budgets can be noisy. Use stable stage timings and interaction counts as hard gates, with wall time as a trend unless the runtime is controlled. Live byte-order workflows require separate later-phase budgets; they cannot be collapsed into the offline target.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section id="failure-matrix">
+      <h2>Cross-skill Failure Matrix</h2>
+      <p>The review issue is a corpus-wide pattern: internal granularity leaks into human work. The same redesign rule applies differently across the skills.</p>
+      <table>
+        <thead><tr><th>Skill area</th><th>Similar failure</th><th>Speed-first correction</th></tr></thead>
+        <tbody>
+          <tr><td>PDF / structured parsing</td><td>Ask for pages, sheets, headers, or parser recovery that code can discover.</td><td>Auto-discover and quality-gate; review only conflicting regions.</td></tr>
+          <tr><td>Evidence / apply review</td><td>Expose decision schemas, reviewers, timestamps, and page/point loops.</td><td>One phase packet; compile the reply; widen scope; resume automatically.</td></tr>
+          <tr><td>Normalization / map checking</td><td>Repeat route, unit, area, or scale uncertainty for every point and block the whole artifact.</td><td>Map-level overlays, shared causes, and readiness by selected slice.</td></tr>
+          <tr><td>Plan reads</td><td>Compile every active point and optimize selected-address adjacency instead of request cost.</td><td>Select from intent first; distinguish documented padding from unknown hazards.</td></tr>
+          <tr><td>Byte order / capture</td><td>Potentially ask per point or layout even when a family shares evidence.</td><td>Probe one representative family sample where valid; present all candidates in one phase packet.</td></tr>
+          <tr><td>Compare / remap</td><td>Confirm each move/collision or notation conversion separately.</td><td>Group by transformation rule; auto-apply lossless conversions; show only collisions.</td></tr>
+          <tr><td>Custom / tool outputs</td><td>Ask target/profile choices sequentially and make native verification a separate manual scavenger hunt.</td><td>Collect target choices once, generate all offline files together, simulate locally, and mark only the external verification boundary.</td></tr>
+          <tr><td>Capture analysis</td><td>Turn every threshold or finding into a separate human decision.</td><td>Use named analysis profiles and group findings by root cause and consequence.</td></tr>
+          <tr><td>Help / routing</td><td>Recommend one skill and stop, forcing users to drive the catalog.</td><td>Route to the outcome workflow; granular skills become expert/debug alternatives.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="rejection-summary">
+      <h2>Rejection Summary</h2>
+      <table>
+        <thead><tr><th>#</th><th>Considered idea</th><th>Reason cut or merged</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Double-entry extraction reconciliation</td><td>Merged into I2; independent strategy comparison is a technique inside the ladder, not a separate product direction.</td></tr>
+          <tr><td>2</td><td>Field-level evidence for every field</td><td>Cut as a universal model; use field granularity only when cells conflict, because the complexity is not justified for every source.</td></tr>
+          <tr><td>3</td><td>General semantic dependency graph</td><td>Deferred; symbolic scale and pair relationships need explicit source-backed relation evidence before becoming a corpus-wide abstraction.</td></tr>
+          <tr><td>4</td><td>Slice-level readiness</td><td>Merged into I5.</td></tr>
+          <tr><td>5</td><td>Bind on one universal preflight</td><td>Merged into I3/I4; one physical preflight cannot cover heterogeneous function areas, spans, or later byte-order evidence.</td></tr>
+          <tr><td>6</td><td>Hardware-free target simulation</td><td>Useful verification technique retained inside I7; it does not independently validate transport or real-device behavior.</td></tr>
+          <tr><td>7</td><td>Human-first deliverable bundle</td><td>Merged into I5.</td></tr>
+          <tr><td>8</td><td>Content-addressed case cache</td><td>Deferred until the outcome flow works; current evidence shows correctness and interaction bottlenecks more strongly than recomputation cost.</td></tr>
+          <tr><td>9</td><td>Universal one-question workflow</td><td>Rejected. Physical samples can legitimately create a later independent byte-order decision. I4 uses one packet per evidence phase instead.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sources">
+      <h2>Sources &amp; References</h2>
+      <ul class="sources">
+        <li><a href="codex://threads/019fe317-db29-76d2-bd85-d187d58ed1e1">Reference Codex task</a> — the complete observed workflow and user questions.</li>
+        <li><a href="https://github.com/studioxvii/modbus-skills/blob/main/AGENTS.md">Repository guidance</a> — public boundary, safety, and human-time budget.</li>
+        <li><a href="https://github.com/studioxvii/modbus-skills/blob/main/docs/architecture.md">Repository architecture</a> — current artifact and probe/final workflow.</li>
+        <li><a href="https://github.com/studioxvii/modbus-skills/blob/main/docs/contracts/artifacts.md">Artifact contracts</a> — current canonical map, evidence, decision, and plan boundaries.</li>
+        <li><a href="https://camelot-py.readthedocs.io/en/stable/">Camelot documentation</a> — multiple table parsing strategies, parsing reports, and visual debugging.</li>
+        <li><a href="https://docs.aws.amazon.com/textract/latest/dg/textract-best-practices.html">AWS Textract best practices</a> — table limitations and confidence-based review thresholds.</li>
+        <li><a href="https://docs.cloud.google.com/document-ai/docs/reference/rest/v1/Document">Google Document AI Document schema</a> — page anchors, normalized values, confidence, revisions, and human-review state.</li>
+        <li><a href="https://docs.cloud.google.com/document-ai/docs/evaluate">Google Document AI evaluation</a> — precision/recall and threshold evaluation.</li>
+        <li><a href="https://llvm.org/docs/LangRef.html">LLVM language reference</a> — typed intermediate representation and verification analogy.</li>
+        <li><a href="https://openlineage.io/docs/spec/facets/dataset-facets/column_lineage_facet/">OpenLineage column lineage</a> — field-level source-to-output provenance.</li>
+        <li><a href="https://pymodbus.readthedocs.io/en/latest/source/library/simulator/config.html">PyModbus simulator configuration</a> — executable register layouts and bounded validation targets.</li>
+        <li><a href="https://www.modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf">Modbus Application Protocol V1.1b3</a> — FC03/04 bounded contiguous reads and protocol quantities.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="composition-signal">Composed <time datetime="2026-08-08T22:02:24Z">2026-08-08T22:02:24Z</time> by ce-ideate from the user prompt, the reference task, repository evidence, and cited external sources.</footer>
+</article>
+</body>
+</html>

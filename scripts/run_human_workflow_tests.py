@@ -626,7 +626,7 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
         raw_output = work / "diagnose-without-defaults" / _safe_name(identifier)
         receipt, canonical = _diagnose(runner, _map_path(corpus_dir, entry), raw_output, None)
         check["diagnose-without-defaults"].check(
-            f"{report_id}-holds-or-review", receipt.get("status") in {"blocked", "held", "ready-for-human-review"},
+            f"{report_id}-holds-or-ready", receipt.get("status") in {"blocked", "held", "ready"},
             details={"status": receipt.get("status"), "hold_codes": sorted(_codes(canonical))},
         )
         full_output = work / "diagnose-with-defaults" / _safe_name(identifier)

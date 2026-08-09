@@ -2,9 +2,31 @@
   "schema_version": "workflow-catalog/v2",
   "workflows": [
     {
+      "id": "compile-user-map",
+      "name": "Compile an OEM map into user outputs",
+      "goal": "Produce an organized user map and requested offline outputs in one resumable outcome run.",
+      "steps": [
+        {
+          "id": "compile",
+          "kind": "skill",
+          "skill": "compile-user-map",
+          "inputs": [
+            "modbus-compile-request/v1"
+          ],
+          "output": "modbus-compile-result/v1"
+        }
+      ],
+      "stop_conditions": [
+        "one grouped source decision is required",
+        "a requested target needs device binding",
+        "a separate physical read or byte-order decision is required",
+        "write, broadcast, scan, credentials, or live polling requested"
+      ]
+    },
+    {
       "id": "review-register-map",
       "name": "Review a register map",
-      "goal": "Produce a reviewed Modbus map without silent engineering guesses.",
+      "goal": "Produce a validated Modbus map quickly without silent engineering guesses or serial approval loops.",
       "steps": [
         {
           "id": "parse",
@@ -46,12 +68,13 @@
         {
           "id": "confirm-map",
           "kind": "human-gate",
+          "condition": "decision_groups is non-empty",
           "inputs": [
             "modbus-map/v1",
             "modbus-map-evidence-review/v1"
           ],
           "output": "modbus-review-decisions/v1",
-          "instruction": "Resolve every blocking hold and state each value or exclusion with a reason and evidence reference."
+          "instruction": "Skip this gate when the review status is ready. Otherwise resolve all independent exception groups in one batch with reasons and shared-scope evidence references; never ask page by page or row by row."
         },
         {
           "id": "apply-decisions",
@@ -68,7 +91,7 @@
         "unresolved route or address convention",
         "unresolved register area",
         "unresolved unit identifier",
-        "unreviewed rejected rows",
+        "unresolved rejected-row group",
         "unconfirmed multi-register byte order"
       ]
     },
@@ -94,7 +117,7 @@
             "modbus-byte-order-evidence/v1"
           ],
           "output": "modbus-review-decisions/v1",
-          "instruction": "Confirm one explicit layout with engineering evidence. Keep the raw sample and all candidates."
+          "instruction": "Present eliminated candidates, the complete remaining shortlist, and distinguishing evidence in one decision. Confirm one explicit layout and keep the raw sample and all candidates."
         },
         {
           "id": "apply-layout",
@@ -210,7 +233,7 @@
     {
       "id": "build-tool-pack",
       "name": "Build a multi-target tool pack",
-      "goal": "Generate any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and one read plan.",
+      "goal": "Generate any selected combination of Node-RED, Modpoll, and ModScan from one validated map and one read plan.",
       "steps": [
         {
           "id": "lint",
@@ -266,11 +289,12 @@
         {
           "id": "review-findings",
           "kind": "human-gate",
+          "condition": "a finding requires a consequential follow-up",
           "inputs": [
             "modbus-capture-analysis/v1"
           ],
           "output": "review-disposition/v1",
-          "instruction": "Review thresholds, sample window, missing metadata, and alternative causes before acting on a finding."
+          "instruction": "Present all threshold, metadata, and alternative-cause exceptions together before a consequential follow-up. Skip this gate for a report-only request."
         }
       ],
       "stop_conditions": [
@@ -316,11 +340,12 @@
         {
           "id": "review-diff",
           "kind": "human-gate",
+          "condition": "the user asks to accept or deploy the new revision",
           "inputs": [
             "modbus-map-diff/v1"
           ],
           "output": "review-disposition/v1",
-          "instruction": "Review moved, added, removed, and changed points before accepting a new map revision."
+          "instruction": "Group moved, added, removed, and changed points by cause and request one acceptance decision only when acceptance or deployment is in scope."
         }
       ],
       "stop_conditions": [
