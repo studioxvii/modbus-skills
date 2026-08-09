@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
 
 from scripts.run_node_red_live_campaign import load_campaign_contract, run_campaign
 from node_red_live.node_red import NodeRedRuntime
+from modbus_skills.exporters import canonical_map_hash
+from modbus_skills.node_red import export_node_red
+from modbus_skills.read_plan import compile_read_plan
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,21 +63,51 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
 
     def test_ready_native_driver_runs_flow_and_checks_simulator_oracle(self) -> None:
         contract = load_campaign_contract(CONTRACT)
+        points = [
+            {
+                "logical_point_id": f"unit-{unit_id}",
+                "name": f"Unit {unit_id}",
+                "route_id": "default",
+                "unit_id": unit_id,
+                "area": "holding-register",
+                "protocol_offset": 0,
+                "source_address": {"raw": "40001", "convention": "modicon-reference"},
+                "datatype": "uint16",
+                "word_span": 1,
+                "byte_order": None,
+                "byte_order_confirmed": True,
+                "normalization_status": "confirmed",
+            }
+            for unit_id in range(1, 11)
+        ]
+        canonical_map = {"schema_version": "modbus-map/v1", "points": points}
+        read_plan = compile_read_plan(points).to_dict()
+        read_plan["input_hashes"] = {"canonical_map": canonical_map_hash(canonical_map)}
+        exported = export_node_red(canonical_map, read_plan)
+        flow = json.loads(next(artifact.as_text() for artifact in exported.artifacts if artifact.path.endswith("flow.json")))
+        blocks = next(node["modbusSkillsBlocks"] for node in flow if node.get("modbusSkillsBlocks"))
         capture = {
             "schema_version": "capture/v1",
-            "expected_request_ids": ["run:block-1"],
+            "expected_request_ids": [f"run:{block['block_id']}" for block in blocks],
+            "completed_request_ids": [f"run:{block['block_id']}" for block in blocks],
             "samples": [
                 {
-                    "sample_id": "run:block-1:p1",
-                    "request_id": "run:block-1",
-                    "block_id": "block-1",
-                    "point_id": "p1",
-                    "unit_id": 1,
+                    "sample_id": f"run:{block['block_id']}:unit-{block['unit_id']}",
+                    "request_id": f"run:{block['block_id']}",
+                    "block_id": block["block_id"],
+                    "point_id": f"unit-{block['unit_id']}",
+                    "route": "default",
+                    "route_id": "default",
+                    "unit_id": block["unit_id"],
+                    "area": "holding-register",
                     "protocol_offset": 0,
                     "raw_words": [123],
                     "success": True,
+                    "status": "success",
+                    "derived_values": {},
                     "timestamp": "2026-08-09T12:00:00Z",
                 }
+                for block in blocks
             ],
         }
 
@@ -91,27 +125,37 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
             def registers(self, unit_id):
                 return {"registers": {"0": 123}}
 
-        hashes = {name: "a" * 64 for name in contract["hash_bindings"]}
-        flow = [
-            {"id": "tab", "type": "tab", "disabled": True},
-            {"id": "inject", "type": "inject", "repeat": "", "crontab": "", "once": False},
-            {"id": "read", "type": "modbus-flex-getter", "fc": 3, "tcpHost": "${MODBUS_HOST}"},
-        ]
         with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact_paths = {}
+            hashes = {}
+            payloads = {
+                "canonical_map_sha256": json.dumps(canonical_map, sort_keys=True).encode(),
+                "read_plan_sha256": json.dumps(read_plan, sort_keys=True).encode(),
+                "flow_sha256": json.dumps(flow).encode(),
+                "manifest_sha256": b"{}",
+                "simulator_config_sha256": b"{}",
+            }
+            for name, payload in payloads.items():
+                path = root / f"{name}.json"
+                path.write_bytes(payload)
+                artifact_paths[name] = path
+                hashes[name] = hashlib.sha256(payload).hexdigest()
             report = run_campaign(
                 contract,
                 profile_id="fleet-10",
                 authorized=True,
-                runtime=NodeRedRuntime(which=lambda _: "/tmp/node-red"),
+                runtime=NodeRedRuntime(which=lambda _: "/tmp/node-red", wait=lambda _: None),
                 flow=flow,
                 hashes=hashes,
+                artifact_paths=artifact_paths,
                 admin=Admin(),
                 simulator=Simulator(),
                 capture_path=Path(directory) / "capture.json",
             )
         _assert_report_shape(self, report)
         self.assertEqual("passed", report["status"])
-        self.assertEqual(1, report["request_count"])
+        self.assertEqual(30, report["request_count"])
         self.assertEqual(0, report["error_count"])
         self.assertTrue(report["cleanup"]["flow_removed"])
 

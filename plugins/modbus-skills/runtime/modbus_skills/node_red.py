@@ -219,6 +219,7 @@ def export_node_red(
     response_gate_id = _node_id(seed, "response-gate")
     decode_id = _node_id(seed, "derive")
     capture_id = _node_id(seed, "capture")
+    terminal_gate_id = _node_id(seed, "terminal-gate")
     capture_file_id = _node_id(seed, "capture-file")
     watchdog_id = _node_id(seed, "watchdog")
     watchdog_reset_id = _node_id(seed, "watchdog-reset")
@@ -226,6 +227,16 @@ def export_node_red(
     watchdog_debug_id = _node_id(seed, "watchdog-debug")
     plan_status_debug_id = _node_id(seed, "plan-status")
     read_ids = [_node_id(seed, f"read:{route}") for route in routes]
+    route_function_codes = {
+        route: sorted(
+            {
+                int(block["function_code"])
+                for block in block_specs
+                if block["route_id"] == route
+            }
+        )
+        for route in routes
+    }
 
     nodes.extend(
         [
@@ -251,6 +262,7 @@ def export_node_red(
                 "z": flow_id,
                 "name": "Run bounded read plan",
                 "func": _sequencer_function(block_specs, len(routes)),
+                "modbusSkillsBlocks": block_specs,
                 "outputs": len(routes) + 1,
                 "timeout": 0,
                 "noerr": 0,
@@ -277,6 +289,7 @@ def export_node_red(
                 "showErrors": True,
                 "showWarnings": True,
                 "server": clients[route],
+                "modbusSkillsAllowedFunctionCodes": route_function_codes[route],
                 "useIOFile": False,
                 "ioFile": "",
                 "useIOForPayload": False,
@@ -284,7 +297,7 @@ def export_node_red(
                 "keepMsgProperties": True,
                 "x": 650,
                 "y": 120 + route_index * 45,
-                "wires": [[response_gate_id], [capture_id, error_debug_id]],
+                "wires": [[response_gate_id], [terminal_gate_id, error_debug_id]],
             }
         )
 
@@ -304,7 +317,7 @@ def export_node_red(
                 "libs": [],
                 "x": 890,
                 "y": 150,
-                "wires": [[decode_id, watchdog_reset_id], [capture_id, error_debug_id]],
+                "wires": [[decode_id], [terminal_gate_id, error_debug_id]],
             },
             {
                 "id": decode_id,
@@ -320,7 +333,23 @@ def export_node_red(
                 "libs": [],
                 "x": 1110,
                 "y": 135,
-                "wires": [[capture_id]],
+                "wires": [[terminal_gate_id]],
+            },
+            {
+                "id": terminal_gate_id,
+                "type": "function",
+                "z": flow_id,
+                "name": "Accept first terminal result",
+                "func": _terminal_gate_function(),
+                "outputs": 2,
+                "timeout": 0,
+                "noerr": 0,
+                "initialize": "",
+                "finalize": "",
+                "libs": [],
+                "x": 1220,
+                "y": 150,
+                "wires": [[watchdog_reset_id], [error_debug_id]],
             },
             {
                 "id": capture_id,
@@ -371,7 +400,7 @@ def export_node_red(
                 "libs": [],
                 "x": 1120,
                 "y": 190,
-                "wires": [[watchdog_id]],
+                "wires": [[watchdog_id, capture_id]],
             },
             {
                 "id": watchdog_id,
@@ -392,7 +421,7 @@ def export_node_red(
                 "outputs": 1,
                 "x": 900,
                 "y": 230,
-                "wires": [[capture_id, watchdog_debug_id]],
+                "wires": [[terminal_gate_id, watchdog_debug_id]],
             },
         ]
     )
@@ -631,6 +660,7 @@ def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int) -> 
         "    start_offset: block.start_offset, quantity: block.quantity,\n"
         "    mode: block.mode, point_specs: block.point_specs, started_at_ms: Date.now()\n"
         "  };\n"
+        "  flow.set('modbusSkillsActiveBlockId', block.block_id);\n"
         "  const requestMsg = {\n"
         "    topic: block.block_id, modbusSkillsRequest: request,\n"
         "    payload: {fc: block.function_code, unitid: block.unit_id, address: block.start_offset, quantity: block.quantity}\n"
@@ -644,6 +674,8 @@ def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int) -> 
         "  flow.set('modbusSkillsRunning', true);\n"
         "  flow.set('modbusSkillsQueue', blocks.slice());\n"
         "  flow.set('modbusSkillsCapture', []);\n"
+        "  flow.set('modbusSkillsCompletedRequestIds', []);\n"
+        "  flow.set('modbusSkillsActiveBlockId', null);\n"
         "  flow.set('modbusSkillsRunId', `run-${Date.now()}`);\n"
         "  return next();\n"
         "}\n"
@@ -719,17 +751,17 @@ def _capture_function(
         "const points = Array.isArray(request.point_specs) ? request.point_specs : [];\n"
         "const samples = successful ? derived.map((point) => ({\n"
         "  sample_id: `${requestId}:${point.point_id}`, request_id: requestId,\n"
-        "  point_id: point.point_id, block_id: request.block_id, route_id: request.route_id,\n"
+        "  point_id: point.point_id, block_id: request.block_id, route: request.route_id, route_id: request.route_id,\n"
         "  unit_id: request.unit_id, area: request.area,\n"
         "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
-        "  timestamp, response_time_ms: elapsed, success: true, raw_words: point.raw_values || [],\n"
+        "  timestamp, response_time_ms: elapsed, status: 'success', success: true, raw_words: point.raw_values || [],\n"
         "  derived_values: point\n"
         "})) : points.map((point) => ({\n"
         "  sample_id: `${requestId}:${point.point_id}:error`, request_id: requestId,\n"
-        "  point_id: point.point_id, block_id: request.block_id, route_id: request.route_id,\n"
+        "  point_id: point.point_id, block_id: request.block_id, route: request.route_id, route_id: request.route_id,\n"
         "  unit_id: request.unit_id, area: request.area,\n"
         "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
-        "  timestamp, response_time_ms: elapsed, success: false, raw_words: [],\n"
+        "  timestamp, response_time_ms: elapsed, status: 'error', success: false, raw_words: [],\n"
         "  error: (msg.modbusSkillsReadError && msg.modbusSkillsReadError.reason) ||\n"
         "    (msg.payload && msg.payload.state) || (msg.error && msg.error.message) || 'read-failed'\n"
         "}));\n"
@@ -737,16 +769,33 @@ def _capture_function(
         "existing.push(...samples);\n"
         "const combined = existing;\n"
         "flow.set('modbusSkillsCapture', combined);\n"
+        "const completedRequestIds = flow.get('modbusSkillsCompletedRequestIds') || [];\n"
+        "completedRequestIds.push(requestId);\n"
+        "flow.set('modbusSkillsCompletedRequestIds', completedRequestIds);\n"
         "const capture = {\n"
         "  schema_version: \"capture/v1\", capture_id: runId,\n"
         "  canonical_map_hash: mapHash, read_plan_hash: planHash,\n"
-        "  expected_request_ids: expectedBlockIds.map((id) => `${runId}:${id}`), samples: combined\n"
+        "  expected_request_ids: expectedBlockIds.map((id) => `${runId}:${id}`),\n"
+        "  completed_request_ids: completedRequestIds, samples: combined\n"
         "};\n"
         "const fileMsg = {\n"
         "  filename: env.get('MODBUS_CAPTURE_PATH') || 'modbus-capture.json',\n"
         "  payload: JSON.stringify(capture, null, 2)\n"
         "};\n"
         "return [fileMsg, {modbusSkillsContinue: true, payload: {action: 'next'}}];"
+    )
+
+
+def _terminal_gate_function() -> str:
+    return (
+        "const request = msg.modbusSkillsRequest || {};\n"
+        "const active = flow.get('modbusSkillsActiveBlockId');\n"
+        "if (!request.block_id || request.block_id !== active) {\n"
+        "  msg.modbusSkillsIgnoredTerminal = {block_id: request.block_id || null, active_block_id: active || null};\n"
+        "  return [null, msg];\n"
+        "}\n"
+        "flow.set('modbusSkillsActiveBlockId', null);\n"
+        "return [msg, null];"
     )
 
 

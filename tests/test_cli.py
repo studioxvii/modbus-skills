@@ -161,6 +161,8 @@ class CliIntegrationTests(unittest.TestCase):
             self.assertEqual("generated", receipt["status"])
             if command == "generate-node-red":
                 self.assertEqual("run-bounded-read-plan", receipt["next_action"]["action"])
+                self.assertEqual("capture-sample", receipt["next_action"]["skill"])
+                self.assertEqual("node-red/flow.json", receipt["next_action"]["uses"])
 
         self.assertTrue((self.root / "node" / "node-red" / "flow.json").is_file())
         self.assertTrue((self.root / "modpoll" / "modpoll" / "gavinying-cli" / "synthetic-loop.csv").is_file())

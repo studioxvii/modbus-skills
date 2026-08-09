@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,12 +13,14 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from run_node_red_live_campaign import (  # noqa: E402
     CampaignError,
-    capture_row,
+    REQUIRED_HASHES,
     load_campaign_contract,
+    _verify_evidence_artifacts,
+    _flow_environment,
+    _oracle_mismatches,
     validate_campaign_settings,
 )
 from node_red_live.node_red import (  # noqa: E402
-    BoundedReadLedger,
     CampaignError as NodeRedCampaignError,
     NodeRedAdminClient,
     NodeRedRuntime,
@@ -27,6 +30,8 @@ from node_red_live.simulator import (  # noqa: E402
     SimulatorClient,
     SimulatorError,
 )
+from modbus_skills.node_red import export_node_red  # noqa: E402
+from tests.test_node_red import artifact_text, inputs  # noqa: E402
 
 
 FIXTURE = ROOT / "tests" / "node_red_live" / "fixtures" / "campaign.json"
@@ -43,24 +48,6 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
         contract["budget"]["max_in_flight"] = 2
         with self.assertRaises(CampaignError):
             validate_campaign_settings(contract)
-
-    def test_capture_error_row_has_no_stale_or_derived_values(self) -> None:
-        row = capture_row(
-            route="default",
-            unit_id=4,
-            area="holding-register",
-            protocol_offset=0,
-            timestamp="2026-08-09T12:00:00Z",
-            raw_words=[123],
-            response_time_ms=12.4,
-            status="error",
-            error="timeout",
-            derived_values={"stale": 1},
-        )
-        self.assertEqual("error", row["status"])
-        self.assertEqual([], row["raw_words"])
-        self.assertNotIn("derived_values", row)
-        self.assertEqual("timeout", row["error"])
 
     def test_flow_validation_rejects_write_or_scheduled_nodes(self) -> None:
         safe = [
@@ -80,19 +67,6 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
         self.assertEqual("blocked", availability["status"])
         self.assertIn("node-red-runtime-unavailable", availability["issue_codes"])
 
-    def test_read_ledger_enforces_three_rounds_one_in_flight_and_180_reads(self) -> None:
-        ledger = BoundedReadLedger(clock=lambda: 0.0)
-        for _ in range(3):
-            ledger.begin_round()
-            for _ in range(60):
-                ledger.begin()
-                ledger.finish()
-        self.assertEqual(180, ledger.request_count)
-        with self.assertRaises(NodeRedCampaignError):
-            ledger.begin_round()
-        with self.assertRaises(NodeRedCampaignError):
-            ledger.begin()
-
     def test_flow_validation_allows_placeholder_loopback_host_only(self) -> None:
         flow = [
             {"type": "tab", "disabled": True},
@@ -103,6 +77,61 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
         flow[-1]["tcpHost"] = "10.0.0.8"
         with self.assertRaises(NodeRedCampaignError):
             validate_flow(flow)
+
+    def test_generated_flow_passes_preflight_and_unsafe_client_is_rejected(self) -> None:
+        canonical_map, read_plan = inputs()
+        flow = json.loads(artifact_text(export_node_red(canonical_map, read_plan), "flow.json"))
+        validate_flow(flow)
+        client = next(node for node in flow if node.get("type") == "modbus-client")
+        client["tcpHost"] = "192.0.2.10"
+        with self.assertRaises(NodeRedCampaignError):
+            validate_flow(flow)
+
+    def test_evidence_artifacts_must_match_supplied_hashes(self) -> None:
+        flow = [{"id": "tab", "type": "tab", "disabled": True}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = {}
+            hashes = {}
+            for name in REQUIRED_HASHES:
+                payload = json.dumps(flow).encode() if name == "flow_sha256" else b"{}"
+                path = root / f"{name}.json"
+                path.write_bytes(payload)
+                paths[name] = path
+                hashes[name] = hashlib.sha256(payload).hexdigest()
+            _verify_evidence_artifacts(paths, hashes, flow)
+            hashes["flow_sha256"] = "0" * 64
+            with self.assertRaises(CampaignError):
+                _verify_evidence_artifacts(paths, hashes, flow)
+
+    def test_flow_environment_fills_every_generated_route(self) -> None:
+        environment = _flow_environment(
+            [
+                {"type": "modbus-client", "tcpHost": "${MODBUS_A_HOST}", "tcpPort": "${MODBUS_A_PORT}"},
+                {"type": "modbus-client", "tcpHost": "${MODBUS_B_HOST}", "tcpPort": "${MODBUS_B_PORT}"},
+            ],
+            modbus_port=5502,
+            capture_path=Path("capture.json"),
+        )
+        self.assertEqual("127.0.0.1", environment["MODBUS_A_HOST"])
+        self.assertEqual("5502", environment["MODBUS_B_PORT"])
+
+    def test_oracle_reports_incomplete_capture_identity(self) -> None:
+        mismatches = _oracle_mismatches(
+            {
+                "samples": [
+                    {
+                        "sample_id": "sample-1",
+                        "unit_id": 1,
+                        "protocol_offset": 0,
+                        "raw_words": [1],
+                        "success": True,
+                    }
+                ]
+            },
+            object(),
+        )
+        self.assertEqual("identity-incomplete", mismatches[0]["reason"])
 
     def test_simulator_boundary_uses_json_http_and_surfaces_http_errors(self) -> None:
         client = SimulatorClient("http://127.0.0.1:5020")

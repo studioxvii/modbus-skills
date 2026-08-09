@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -19,7 +21,7 @@ if str(Path(__file__).resolve().parents[1] / "tests") not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
 from modbus_skills.analysis import analyze_capture
-from node_red_live.node_red import CampaignError, NodeRedAdminClient, NodeRedRuntime
+from node_red_live.node_red import CampaignError, NodeRedAdminClient, NodeRedRuntime, planned_requests
 from node_red_live.simulator import SimulatorClient, SimulatorError
 
 
@@ -32,6 +34,7 @@ REQUIRED_HASHES = {
     "simulator_config_sha256",
 }
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+ENV_PLACEHOLDER = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
 
 
 def load_campaign_contract(path: Path) -> dict[str, Any]:
@@ -72,20 +75,6 @@ def validate_campaign_settings(contract: Mapping[str, Any]) -> None:
         raise CampaignError("all five evidence hash bindings are required")
 
 
-def capture_row(*, route: str, unit_id: int, area: str, protocol_offset: int, timestamp: str, raw_words: list[int] | None, response_time_ms: float, status: str, error: str | None = None, derived_values: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    if status not in {"success", "error"}:
-        raise CampaignError("capture status must be success or error")
-    row: dict[str, Any] = {"route": route, "unit_id": unit_id, "area": area, "protocol_offset": protocol_offset, "timestamp": timestamp, "response_time_ms": response_time_ms, "status": status}
-    if status == "success":
-        row["raw_words"] = list(raw_words or [])
-        row["derived_values"] = dict(derived_values or {})
-    else:
-        row["raw_words"] = []
-        if error:
-            row["error"] = str(error)
-    return row
-
-
 def _hashes(supplied: Mapping[str, str] | None) -> dict[str, str]:
     result: dict[str, str] = {}
     for name in REQUIRED_HASHES:
@@ -96,14 +85,49 @@ def _hashes(supplied: Mapping[str, str] | None) -> dict[str, str]:
     return result
 
 
+def _verify_evidence_artifacts(
+    paths: Mapping[str, Path] | None,
+    expected_hashes: Mapping[str, str],
+    flow: list[Mapping[str, Any]],
+) -> None:
+    if paths is None or set(paths) != REQUIRED_HASHES:
+        raise CampaignError("all five evidence artifact paths are required")
+    for name in sorted(REQUIRED_HASHES):
+        path = paths[name]
+        if not path.is_file() or path.is_symlink():
+            raise CampaignError(f"{name} evidence artifact is missing or unsafe")
+        data = path.read_bytes()
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != expected_hashes[name]:
+            raise CampaignError(f"{name} does not match its supplied hash")
+        if name == "flow_sha256":
+            try:
+                recorded_flow = json.loads(data.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise CampaignError("flow evidence artifact is not valid JSON") from exc
+            if recorded_flow != flow:
+                raise CampaignError("flow evidence artifact does not match the reviewed flow")
+
+
 def _oracle_mismatches(capture: Mapping[str, Any], simulator: Any) -> list[dict[str, Any]]:
     cache: dict[int, Mapping[str, Any]] = {}
     mismatches: list[dict[str, Any]] = []
     for sample in capture.get("samples", ()):
-        if not isinstance(sample, Mapping) or sample.get("success") is False:
+        if not isinstance(sample, Mapping):
             continue
-        unit_id = int(sample.get("unit_id", 0))
-        offset = int(sample.get("protocol_offset", -1))
+        try:
+            unit_id = int(sample.get("unit_id", 0))
+            offset = int(sample.get("protocol_offset", -1))
+        except (TypeError, ValueError):
+            mismatches.append({"sample_id": sample.get("sample_id"), "reason": "identity-incomplete"})
+            continue
+        route = sample.get("route", sample.get("route_id"))
+        area = sample.get("area")
+        if route in (None, "") or area in (None, ""):
+            mismatches.append({"sample_id": sample.get("sample_id"), "reason": "identity-incomplete"})
+            continue
+        if sample.get("success") is False:
+            continue
         words = sample.get("raw_words", ())
         if unit_id < 1 or offset < 0 or not isinstance(words, list):
             mismatches.append({"sample_id": sample.get("sample_id"), "reason": "identity-incomplete"})
@@ -127,6 +151,23 @@ def _oracle_mismatches(capture: Mapping[str, Any], simulator: Any) -> list[dict[
     return mismatches
 
 
+def _flow_environment(
+    flow: list[Mapping[str, Any]], *, modbus_port: int, capture_path: Path
+) -> dict[str, str]:
+    environment = {
+        "MODBUS_WATCHDOG_MS": "3000",
+        "MODBUS_CAPTURE_PATH": str(capture_path.resolve()),
+    }
+    for node in flow:
+        if node.get("type") != "modbus-client":
+            continue
+        for field, value in (("tcpHost", "127.0.0.1"), ("tcpPort", str(modbus_port))):
+            match = ENV_PLACEHOLDER.fullmatch(str(node.get(field, "")))
+            if match:
+                environment[match.group(1)] = value
+    return environment
+
+
 def run_campaign(
     contract: Mapping[str, Any],
     *,
@@ -135,6 +176,7 @@ def run_campaign(
     runtime: NodeRedRuntime | None = None,
     flow: list[Mapping[str, Any]] | None = None,
     hashes: Mapping[str, str] | None = None,
+    artifact_paths: Mapping[str, Path] | None = None,
     admin: Any | None = None,
     simulator: Any | None = None,
     capture_path: Path | None = None,
@@ -166,32 +208,59 @@ def run_campaign(
         report["issue_codes"] = ["evidence-hashes-required"]
         return report
     try:
+        _verify_evidence_artifacts(artifact_paths, report["hashes"], flow)
         ready = simulator.require_ready(int(selected["fleet_size"]))
-        capture = admin.run_flow(
-            flow,
-            capture_path=capture_path,
-            environment={
-                "MODBUS_HOST": "127.0.0.1",
-                "MODBUS_PORT": str(ready.modbus_port),
-                "MODBUS_WATCHDOG_MS": "3000",
-                "MODBUS_CAPTURE_PATH": str(capture_path.resolve()),
-            },
-            timeout_seconds=float(contract["budget"]["max_seconds"]),
-        )
-        analysis = analyze_capture(capture)
-        campaign = analysis["campaign"]
-        mismatches = _oracle_mismatches(capture, simulator)
-        missing = campaign["missing_request_ids"]
-        report["request_count"] = campaign["observed_requests"]
-        report["error_count"] = analysis["communications"]["error_count"]
+        blocks = planned_requests(flow)
+        expected_units = set(int(value) for value in selected["unit_ids"])
+        planned_units = {int(block.get("unit_id", 0)) for block in blocks}
+        rounds = int(contract["budget"]["rounds"])
+        if planned_units != expected_units:
+            raise CampaignError("generated flow does not cover the selected fleet exactly")
+        if len(blocks) * rounds > int(contract["budget"]["max_compiled_block_reads"]):
+            raise CampaignError("generated flow exceeds the compiled-block read budget")
+        all_missing: list[str] = []
+        all_mismatches: list[dict[str, Any]] = []
+        coverage_error = False
+        deadline = runtime.clock() + float(contract["budget"]["max_seconds"])
+        for round_index in range(rounds):
+            remaining = deadline - runtime.clock()
+            if remaining <= 0:
+                raise CampaignError("live campaign time budget exhausted")
+            capture = admin.run_flow(
+                flow,
+                capture_path=capture_path,
+                environment=_flow_environment(
+                    flow, modbus_port=ready.modbus_port, capture_path=capture_path
+                ),
+                timeout_seconds=remaining,
+            )
+            analysis = analyze_capture(capture)
+            campaign = analysis["campaign"]
+            expected_request_ids = set(capture.get("expected_request_ids", ()))
+            observed_counts = Counter(str(value) for value in capture.get("completed_request_ids", ()))
+            if (
+                campaign["observed_requests"] != len(blocks)
+                or set(observed_counts) != expected_request_ids
+                or any(count != 1 for count in observed_counts.values())
+            ):
+                coverage_error = True
+                all_missing.extend(
+                    f"round-{round_index + 1}:{value}"
+                    for value in campaign["missing_request_ids"]
+                )
+            report["request_count"] += int(campaign["observed_requests"])
+            report["error_count"] += int(analysis["communications"]["error_count"])
+            all_mismatches.extend(_oracle_mismatches(capture, simulator))
+            if round_index + 1 < rounds:
+                runtime.wait(float(contract["budget"]["cadence_seconds"]))
         report["cleanup"]["flow_removed"] = True
-        if missing:
+        if coverage_error:
             report["issue_codes"].append("planned-requests-missing")
         if report["error_count"]:
             report["issue_codes"].append("node-red-read-errors")
-        if mismatches:
+        if all_mismatches:
             report["issue_codes"].append("simulator-oracle-mismatch")
-        report["oracle_mismatches"] = mismatches[:10]
+        report["oracle_mismatches"] = all_mismatches[:10]
         report["status"] = report["terminal_state"] = (
             "passed" if not report["issue_codes"] else "failed"
         )
@@ -212,12 +281,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--flow", type=Path)
     parser.add_argument("--capture", type=Path)
     parser.add_argument("--hashes", type=Path)
+    parser.add_argument("--canonical-map", type=Path)
+    parser.add_argument("--read-plan", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--simulator-config", type=Path)
     args = parser.parse_args(argv)
     try:
         contract = load_campaign_contract(args.contract)
         runtime = NodeRedRuntime(cli=args.node_red_cli)
         flow = json.loads(args.flow.read_text(encoding="utf-8")) if args.flow else None
         hashes = json.loads(args.hashes.read_text(encoding="utf-8")) if args.hashes else None
+        artifact_paths = (
+            {
+                "canonical_map_sha256": args.canonical_map,
+                "read_plan_sha256": args.read_plan,
+                "flow_sha256": args.flow,
+                "manifest_sha256": args.manifest,
+                "simulator_config_sha256": args.simulator_config,
+            }
+            if all((args.canonical_map, args.read_plan, args.flow, args.manifest, args.simulator_config))
+            else None
+        )
         report = run_campaign(
             contract,
             profile_id=args.profile,
@@ -225,6 +309,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime=runtime,
             flow=flow,
             hashes=hashes,
+            artifact_paths=artifact_paths,
             admin=NodeRedAdminClient(args.node_red_url) if args.flow and args.capture else None,
             simulator=SimulatorClient(args.simulator_url) if args.flow and args.capture else None,
             capture_path=args.capture,

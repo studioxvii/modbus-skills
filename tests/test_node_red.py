@@ -80,6 +80,10 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertEqual(1, counts["catch"])
         self.assertEqual(1, counts["status"])
         self.assertEqual(1, counts["trigger"])
+        getter = next(node for node in flow if node["type"] == "modbus-flex-getter")
+        self.assertEqual([3], getter["modbusSkillsAllowedFunctionCodes"])
+        sequencer = next(node for node in flow if node.get("modbusSkillsBlocks"))
+        self.assertEqual(len(read_plan["requests"]), len(sequencer["modbusSkillsBlocks"]))
         self.assertFalse(any("write" in node["type"].lower() for node in flow))
 
     def test_ids_are_unique_and_environment_values_are_placeholders(self) -> None:
@@ -189,17 +193,24 @@ class NodeRedExporterTests(unittest.TestCase):
             if node["type"] == "function"
             and node["name"] == "Accept complete read"
         )
+        terminal = next(
+            node for node in flow
+            if node.get("name") == "Accept first terminal result"
+        )
         error_debug = next(
             node for node in flow if node.get("name") == "Modbus read errors"
         )
         self.assertEqual([gate["id"]], reads[0]["wires"][0])
         self.assertIn(error_debug["id"], reads[0]["wires"][1])
-        self.assertIn(reset["id"], gate["wires"][0])
         self.assertIn(derives[0]["id"], gate["wires"][0])
+        self.assertEqual([[terminal["id"]]], derives[0]["wires"])
+        self.assertEqual([[reset["id"]], [error_debug["id"]]], terminal["wires"])
+        self.assertIn("request.block_id !== active", terminal["func"])
+        self.assertIn("modbusSkillsActiveBlockId', null", terminal["func"])
         self.assertNotIn(reset["id"], reads[0]["wires"][0])
         self.assertNotIn(watchdog["id"], reads[0]["wires"][0])
         self.assertIn("msg.reset = true", reset["func"])
-        self.assertEqual([[watchdog["id"]]], reset["wires"])
+        self.assertIn(watchdog["id"], reset["wires"][0])
         self.assertIn("return [null, msg]", gate["func"])
         self.assertIn("read-wrong-length", gate["func"])
         self.assertIn("msg.error || msg.modbusError", gate["func"])
@@ -270,6 +281,10 @@ class NodeRedExporterTests(unittest.TestCase):
             if node["type"] == "function"
             and node["name"] == "Accept complete read"
         )
+        terminal = next(
+            node for node in flow
+            if node.get("name") == "Accept first terminal result"
+        )
         derive = next(
             node
             for node in flow
@@ -281,8 +296,9 @@ class NodeRedExporterTests(unittest.TestCase):
         )
         self.assertEqual([gate["id"]], reads[0]["wires"][0])
         self.assertIn(error_debug["id"], reads[0]["wires"][1])
-        self.assertIn(reset["id"], gate["wires"][0])
         self.assertIn(derive["id"], gate["wires"][0])
+        self.assertEqual([[terminal["id"]]], derive["wires"])
+        self.assertEqual([[reset["id"]], [error_debug["id"]]], terminal["wires"])
         self.assertNotIn(reset["id"], reads[0]["wires"][0])
         self.assertNotIn(watchdog["id"], reads[0]["wires"][0])
         self.assertIn("msg.reset = true", reset["func"])

@@ -63,10 +63,11 @@
     "required_fields": [
       "timestamp",
       "raw_words",
-      "derived_values",
       "response_time_ms",
       "status"
     ],
+    "success_fields": ["derived_values"],
+    "error_forbidden_fields": ["derived_values"],
     "row_statuses": ["success", "error"],
     "error_rule": "communication errors remain errors and do not produce derived values"
   },

@@ -35,10 +35,9 @@ unavailable, or the imported flow contains writes, broadcasts, discovery scans,
 deploy-time triggers, credentials, or scheduled polling. Node-RED never writes
 command register 20.
 
-On timeout or an invalid response, allow one bounded retry. During the recovery
-journey, a failed request is represented as a timeout/error row without a stale
-derived value. End as `blocked` when the retry cannot recover, and always stop the
-scenario, drain clients, and retain partial evidence.
+On timeout or an invalid response, keep the error row and continue the bounded
+plan. Do not retry in a hidden loop. If a second attempt is useful, start a new
+named run so the evidence stays clear.
 
 ## Evidence a reviewer receives
 
@@ -62,12 +61,22 @@ python3 scripts/run_node_red_live_campaign.py \
   --authorize \
   --node-red-cli /path/to/node-red \
   --flow /path/to/node-red/flow.json \
+  --canonical-map /path/to/map.json \
+  --read-plan /path/to/read-plan.json \
+  --manifest /path/to/node-red/manifest.json \
+  --simulator-config /path/to/simulator-config.json \
   --capture ./private/output/capture.json \
   --hashes ./private/output/hashes.json
 ```
 
+These five evidence files let the runner prove it is using the map, read plan,
+flow, Node-RED manifest, and simulator setup you reviewed. The hashes file must
+contain the SHA-256 value for each file. A mismatch stops the run before any
+Modbus request.
+
 The runner imports the reviewed flow, enables it for this run, clicks its single
-start button through the local Node-RED API, waits for every planned request,
+start button through the local Node-RED API for three short rounds, waits for
+every planned request,
 checks raw words against the simulator API, and restores the original Node-RED
 flows. If any required input is missing, it returns `blocked` or `not-run` instead
 of claiming a live pass.

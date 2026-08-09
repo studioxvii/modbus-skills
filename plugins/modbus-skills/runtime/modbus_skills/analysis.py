@@ -780,13 +780,21 @@ def analyze_capture(
                 "count": global_error_count,
             }
         )
-    observed_request_ids = sorted(
-        {
-            str(sample["request_id"])
-            for sample in unique
-            if sample.get("request_id") not in (None, "")
-        }
-    )
+    completed_request_ids = capture.get("completed_request_ids")
+    if isinstance(completed_request_ids, Sequence) and not isinstance(
+        completed_request_ids, (str, bytes, bytearray)
+    ):
+        observed_request_ids = sorted(
+            {str(value) for value in completed_request_ids if value not in (None, "")}
+        )
+    else:
+        observed_request_ids = sorted(
+            {
+                str(sample["request_id"])
+                for sample in unique
+                if sample.get("request_id") not in (None, "")
+            }
+        )
     missing_request_ids = sorted(set(expected_request_ids) - set(observed_request_ids))
     if missing_request_ids:
         findings.append(

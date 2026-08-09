@@ -26,7 +26,6 @@ CAPTURE_IDENTITY = {"route", "unit_id", "area", "protocol_offset"}
 CAPTURE_FIELDS = {
     "timestamp",
     "raw_words",
-    "derived_values",
     "response_time_ms",
     "status",
 }
@@ -91,6 +90,8 @@ def _validate_contract(value: dict[str, object]) -> None:
     assert capture["schema_version"] == "capture/v1"
     assert set(capture["required_identity"]) == CAPTURE_IDENTITY
     assert set(capture["required_fields"]) == CAPTURE_FIELDS
+    assert capture["success_fields"] == ["derived_values"]
+    assert capture["error_forbidden_fields"] == ["derived_values"]
     assert set(capture["row_statuses"]) == {"success", "error"}
 
     assert set(value["terminal_statuses"]) == TERMINAL_STATUSES

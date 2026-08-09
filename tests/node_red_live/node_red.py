@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -15,55 +16,7 @@ class CampaignError(ValueError):
     """Raised when a live campaign would violate its safety contract."""
 
 
-@dataclass(frozen=True)
-class ReadLedger:
-    rounds: int = 3
-    max_reads: int = 180
-    max_seconds: float = 60.0
-    cadence_seconds: float = 1.0
-    max_in_flight: int = 1
-
-    def __post_init__(self) -> None:
-        if (
-            self.rounds != 3
-            or self.max_reads != 180
-            or self.max_seconds != 60
-            or self.cadence_seconds != 1
-            or self.max_in_flight != 1
-        ):
-            raise CampaignError("live campaign budget is fixed at three rounds, 180 reads, 60 seconds, one in flight")
-
-
-class BoundedReadLedger:
-    """Monotonic ledger that prevents accidental unbounded live polling."""
-
-    def __init__(self, budget: ReadLedger | None = None, *, clock: Callable[[], float] = time.monotonic) -> None:
-        self.budget = budget or ReadLedger()
-        self._clock = clock
-        self.started_at = self._clock()
-        self.request_count = 0
-        self.round = 0
-        self.in_flight = 0
-
-    def begin_round(self) -> None:
-        if self.round >= self.budget.rounds:
-            raise CampaignError("read round budget exhausted")
-        self.round += 1
-
-    def begin(self) -> None:
-        if self.in_flight >= self.budget.max_in_flight:
-            raise CampaignError("concurrent read budget exceeded")
-        if self.request_count >= self.budget.max_reads:
-            raise CampaignError("compiled-block read budget exhausted")
-        if self._clock() - self.started_at > self.budget.max_seconds:
-            raise CampaignError("live campaign time budget exhausted")
-        self.in_flight += 1
-        self.request_count += 1
-
-    def finish(self) -> None:
-        if self.in_flight <= 0:
-            raise CampaignError("read completion without a read")
-        self.in_flight -= 1
+_HOST_PLACEHOLDER = re.compile(r"^\$\{MODBUS(?:_[A-Z0-9_]+)?_HOST\}$")
 
 
 def validate_flow(flow: Sequence[Mapping[str, Any]]) -> None:
@@ -71,32 +24,73 @@ def validate_flow(flow: Sequence[Mapping[str, Any]]) -> None:
     tabs = [node for node in nodes if node.get("type") == "tab"]
     if not tabs or not all(bool(tab.get("disabled")) for tab in tabs):
         raise CampaignError("Node-RED flow must be disabled before import")
-    forbidden = ("write", "inject-register", "modbus-read", "scan", "discover", "repeat")
+    clients: dict[str, Mapping[str, Any]] = {}
+    for node in nodes:
+        if str(node.get("type", "")).lower() != "modbus-client":
+            continue
+        identifier = str(node.get("id", ""))
+        if not identifier or identifier in clients:
+            raise CampaignError("Node-RED Modbus client IDs must be unique")
+        clients[identifier] = node
+    forbidden_types = ("inject-register", "modbus-read", "scan", "discover", "repeat")
     for node in nodes:
         node_type = str(node.get("type", "")).lower()
         node_name = str(node.get("name", "")).lower()
-        if any(token in node_type or token in node_name for token in forbidden):
+        unsafe_type = (
+            any(token in node_type for token in forbidden_types)
+            or ("modbus" in node_type and "write" in node_type)
+        )
+        unsafe_name = any(token in node_name for token in ("scan", "discover", "write register"))
+        if unsafe_type or unsafe_name:
             if node_type == "inject" and node.get("repeat", "") in ("", None) and not node.get("once", False):
                 continue
             raise CampaignError(f"unsafe Node-RED node: {node.get('type', '')}")
         if node_type == "inject" and (node.get("repeat", "") or node.get("crontab", "") or node.get("once", False)):
             raise CampaignError("Node-RED trigger must be manual one-shot")
         if node_type == "modbus-flex-getter":
+            raw_codes = node.get("modbusSkillsAllowedFunctionCodes")
+            if raw_codes is None:
+                raw_codes = [node.get("fc", node.get("functionCode", 0))]
+            if not isinstance(raw_codes, list) or not raw_codes:
+                raise CampaignError("Node-RED read node has no bounded function codes")
             try:
-                fc = int(node.get("fc", node.get("functionCode", 0)))
+                codes = {int(value) for value in raw_codes}
             except (TypeError, ValueError) as exc:
                 raise CampaignError("Node-RED read node has invalid function code") from exc
-            if fc not in {1, 2, 3, 4}:
+            if not codes <= {1, 2, 3, 4}:
                 raise CampaignError("only Modbus FC01-FC04 reads are permitted")
-            host = node.get("tcpHost", node.get("host"))
-            if host is not None and str(host) not in {"${MODBUS_HOST}", "127.0.0.1", "localhost", "::1"}:
+            server_id = str(node.get("server", ""))
+            client = clients.get(server_id)
+            if server_id and client is None:
+                raise CampaignError("Node-RED read node references an unknown Modbus client")
+            host_source = client if client is not None else node
+            host = host_source.get("tcpHost", host_source.get("host"))
+            if host is not None and str(host) not in {"127.0.0.1", "localhost", "::1"} and _HOST_PLACEHOLDER.fullmatch(str(host)) is None:
                 raise CampaignError("Node-RED Modbus target must be loopback")
+
+
+def planned_requests(flow: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    sequencers = [
+        node
+        for node in flow
+        if node.get("type") == "function"
+        and node.get("name") == "Run bounded read plan"
+        and isinstance(node.get("modbusSkillsBlocks"), list)
+    ]
+    if len(sequencers) != 1:
+        raise CampaignError("generated Node-RED flow must expose one bounded read plan")
+    blocks = sequencers[0]["modbusSkillsBlocks"]
+    if not blocks or not all(isinstance(block, Mapping) for block in blocks):
+        raise CampaignError("generated Node-RED read plan is empty or invalid")
+    return [dict(block) for block in blocks]
 
 
 @dataclass
 class NodeRedRuntime:
     which: Callable[[str], str | None] = shutil.which
     cli: str | None = None
+    wait: Callable[[float], None] = time.sleep
+    clock: Callable[[], float] = time.monotonic
 
     def preflight(self, flow: Sequence[Mapping[str, Any]], *, endpoint: str | None = None) -> dict[str, Any]:
         if flow:
@@ -203,11 +197,16 @@ class NodeRedAdminClient:
                         capture = None
                     if isinstance(capture, dict):
                         expected = set(capture.get("expected_request_ids", ()))
-                        observed = {
-                            str(sample.get("request_id"))
-                            for sample in capture.get("samples", ())
-                            if isinstance(sample, Mapping) and sample.get("request_id")
-                        }
+                        completed = capture.get("completed_request_ids")
+                        observed = (
+                            {str(value) for value in completed}
+                            if isinstance(completed, list)
+                            else {
+                                str(sample.get("request_id"))
+                                for sample in capture.get("samples", ())
+                                if isinstance(sample, Mapping) and sample.get("request_id")
+                            }
+                        )
                         if expected and expected <= observed:
                             return capture
                 self._wait(0.1)
