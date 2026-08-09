@@ -360,6 +360,7 @@ def export_node_red(
                     map_digest,
                     plan_digest,
                     [block["block_id"] for block in block_specs],
+                    sorted({block["unit_id"] for block in block_specs}),
                 ),
                 "outputs": 2,
                 "timeout": 0,
@@ -760,11 +761,13 @@ def _capture_function(
     map_digest: str,
     plan_digest: str,
     block_ids: list[str],
+    unit_ids: list[int],
 ) -> str:
     return (
         f"const mapHash = {stable_json(map_digest, pretty=False)};\n"
         f"const planHash = {stable_json(plan_digest, pretty=False)};\n"
         f"const expectedBlockIds = {stable_json(block_ids, pretty=False)};\n"
+        f"const expectedUnitIds = {stable_json(unit_ids, pretty=False)};\n"
         "const runId = flow.get('modbusSkillsRunId');\n"
         "if (msg.modbusSkillsFinalize === true) {\n"
         "  const completedRequestIds = flow.get('modbusSkillsCompletedRequestIds') || [];\n"
@@ -772,10 +775,11 @@ def _capture_function(
         "    schema_version: \"capture/v1\", capture_id: runId,\n"
         "    canonical_map_hash: mapHash, read_plan_hash: planHash,\n"
         "    expected_request_ids: expectedBlockIds.map((id) => `${runId}:${id}`),\n"
+        "    expected_unit_ids: expectedUnitIds,\n"
         "    completed_request_ids: completedRequestIds,\n"
         "    runtime_metadata: {\n"
         "      target: 'node-red', adapter_version: '2.0.0',\n"
-        "      terminal_state: msg.payload && msg.payload.state,\n"
+        "      terminal_state: msg.payload && msg.payload.state, queue_depth: 0,\n"
         "      max_in_flight: 1, retry_limit: 1\n"
         "    },\n"
         "    samples: flow.get('modbusSkillsCapture') || []\n"

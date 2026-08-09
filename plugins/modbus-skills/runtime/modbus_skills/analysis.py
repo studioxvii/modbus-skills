@@ -146,6 +146,74 @@ def _event(timestamp: datetime, **values: Any) -> dict[str, Any]:
     return {"timestamp": _iso(timestamp), **values}
 
 
+def _unit_id(value: Any) -> int | str | None:
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) and value.is_integer() else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return text
+    return None
+
+
+def _runtime_evidence(
+    capture: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    raw = capture.get("runtime_metadata")
+    evidence = {
+        "available": raw is not None,
+        "valid": False,
+        "evidence_only": True,
+        "target": None,
+        "terminal_state": None,
+        "queue_depth": None,
+        "max_in_flight": None,
+    }
+    if raw is None:
+        return evidence, []
+    errors: list[str] = []
+    if capture.get("schema_version") != "capture/v1":
+        errors.append("runtime_metadata is native evidence only for schema_version capture/v1")
+    if not isinstance(raw, Mapping):
+        errors.append("runtime_metadata must be an object")
+        return evidence, errors
+
+    target = raw.get("target")
+    if target is not None:
+        if isinstance(target, str) and target.strip() == "node-red":
+            evidence["target"] = "node-red"
+        else:
+            errors.append("runtime_metadata.target must be 'node-red'")
+    terminal_state = raw.get("terminal_state")
+    if terminal_state is not None:
+        if isinstance(terminal_state, str) and terminal_state.strip():
+            evidence["terminal_state"] = terminal_state.strip()
+        else:
+            errors.append("runtime_metadata.terminal_state must be non-empty text")
+    queue_depth = raw.get("queue_depth")
+    if queue_depth is not None:
+        if isinstance(queue_depth, int) and not isinstance(queue_depth, bool) and queue_depth >= 0:
+            evidence["queue_depth"] = queue_depth
+        else:
+            errors.append("runtime_metadata.queue_depth must be a nonnegative integer")
+    max_in_flight = raw.get("max_in_flight")
+    if max_in_flight is not None:
+        if isinstance(max_in_flight, int) and not isinstance(max_in_flight, bool) and max_in_flight >= 1:
+            evidence["max_in_flight"] = max_in_flight
+        else:
+            errors.append("runtime_metadata.max_in_flight must be a positive integer")
+    evidence["valid"] = not errors
+    return evidence, errors
+
+
 def _byte_order_stability(
     identifier: str,
     config: Mapping[str, Any],
@@ -348,6 +416,22 @@ def analyze_capture(
         raise CaptureAnalysisError("capture.expected_request_ids must be unique.")
     if len(expected_request_ids) > _HARD_MAX_SAMPLES:
         raise CaptureAnalysisError("capture.expected_request_ids exceeds the sample limit.")
+    raw_expected_units = capture.get("expected_unit_ids", ())
+    if not isinstance(raw_expected_units, Sequence) or isinstance(
+        raw_expected_units, (str, bytes, bytearray)
+    ):
+        raise CaptureAnalysisError("capture.expected_unit_ids must be an array.")
+    normalized_expected_units = tuple(_unit_id(value) for value in raw_expected_units)
+    if any(value is None for value in normalized_expected_units):
+        raise CaptureAnalysisError("capture.expected_unit_ids contains an invalid unit ID.")
+    if len(normalized_expected_units) > _HARD_MAX_POINTS:
+        raise CaptureAnalysisError("capture.expected_unit_ids exceeds the point limit.")
+    expected_unit_counts = Counter(normalized_expected_units)
+    expected_unit_ids = tuple(expected_unit_counts)
+    duplicate_expected_unit_ids = sorted(
+        (identifier for identifier, count in expected_unit_counts.items() if count > 1),
+        key=lambda value: (str(type(value)), str(value)),
+    )
 
     configurations = _config_by_point(capture)
     rejected: list[dict[str, Any]] = []
@@ -784,10 +868,11 @@ def analyze_capture(
     if isinstance(completed_request_ids, Sequence) and not isinstance(
         completed_request_ids, (str, bytes, bytearray)
     ):
-        observed_request_ids = sorted(
-            {str(value) for value in completed_request_ids if value not in (None, "")}
-        )
+        completed_ids = [str(value).strip() for value in completed_request_ids if value not in (None, "")]
+        completed_counts = Counter(completed_ids)
+        observed_request_ids = sorted(completed_counts)
     else:
+        completed_counts = Counter()
         observed_request_ids = sorted(
             {
                 str(sample["request_id"])
@@ -795,7 +880,20 @@ def analyze_capture(
                 if sample.get("request_id") not in (None, "")
             }
         )
+    duplicate_completed_request_ids = sorted(
+        identifier for identifier, count in completed_counts.items() if count > 1
+    )
     missing_request_ids = sorted(set(expected_request_ids) - set(observed_request_ids))
+    unexpected_request_ids = (
+        sorted(set(observed_request_ids) - set(expected_request_ids))
+        if expected_request_ids
+        else []
+    )
+    requests_complete = not (
+        missing_request_ids
+        or unexpected_request_ids
+        or duplicate_completed_request_ids
+    )
     if missing_request_ids:
         findings.append(
             {
@@ -804,6 +902,108 @@ def analyze_capture(
                 "message": f"The capture is missing {len(missing_request_ids)} planned requests.",
                 "count": len(missing_request_ids),
                 "request_ids": missing_request_ids[:_MAX_EVENTS_PER_KIND],
+            }
+        )
+    if unexpected_request_ids:
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "CAMPAIGN_REQUESTS_UNEXPECTED",
+                "message": f"The capture contains {len(unexpected_request_ids)} unplanned completed requests.",
+                "count": len(unexpected_request_ids),
+                "request_ids": unexpected_request_ids[:_MAX_EVENTS_PER_KIND],
+            }
+        )
+    if duplicate_completed_request_ids:
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "CAMPAIGN_COMPLETED_REQUESTS_DUPLICATED",
+                "message": "The completed request list contains duplicate request IDs.",
+                "count": sum(completed_counts[value] - 1 for value in duplicate_completed_request_ids),
+                "request_ids": duplicate_completed_request_ids[:_MAX_EVENTS_PER_KIND],
+            }
+        )
+
+    request_units: dict[str, set[int | str]] = defaultdict(set)
+    missing_unit_id_request_ids: set[str] = set()
+    for sample in unique:
+        request_id = sample.get("request_id")
+        if request_id in (None, ""):
+            continue
+        request_identifier = str(request_id)
+        unit_identifier = _unit_id(sample.get("unit_id"))
+        if unit_identifier is None:
+            missing_unit_id_request_ids.add(request_identifier)
+        else:
+            request_units[request_identifier].add(unit_identifier)
+    ambiguous_unit_request_ids = sorted(
+        identifier for identifier, units in request_units.items() if len(units) > 1
+    )
+    observed_unit_ids = sorted(
+        {next(iter(units)) for units in request_units.values() if len(units) == 1},
+        key=lambda value: (str(type(value)), str(value)),
+    )
+    missing_unit_ids = sorted(
+        set(expected_unit_ids) - set(observed_unit_ids),
+        key=lambda value: (str(type(value)), str(value)),
+    )
+    unexpected_unit_ids = sorted(
+        set(observed_unit_ids) - set(expected_unit_ids),
+        key=lambda value: (str(type(value)), str(value)),
+    ) if expected_unit_ids else []
+    duplicate_unit_ids = duplicate_expected_unit_ids
+    missing_unit_id_requests = sorted(missing_unit_id_request_ids)
+    if missing_unit_ids:
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "CAMPAIGN_UNITS_MISSING",
+                "message": f"The capture is missing {len(missing_unit_ids)} expected unit IDs.",
+                "count": len(missing_unit_ids),
+                "unit_ids": missing_unit_ids[:_MAX_EVENTS_PER_KIND],
+            }
+        )
+    if duplicate_unit_ids:
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "CAMPAIGN_UNITS_DUPLICATED",
+                "message": "The expected unit list contains duplicate unit IDs.",
+                "count": len(duplicate_unit_ids),
+                "unit_ids": duplicate_unit_ids[:_MAX_EVENTS_PER_KIND],
+            }
+        )
+    if missing_unit_id_requests:
+        findings.append(
+            {
+                "severity": "hold",
+                "code": "CAMPAIGN_UNIT_ID_MISSING",
+                "message": "Some request samples do not identify a Modbus unit.",
+                "count": len(missing_unit_id_requests),
+                "request_ids": missing_unit_id_requests[:_MAX_EVENTS_PER_KIND],
+            }
+        )
+    if ambiguous_unit_request_ids:
+        findings.append(
+            {
+                "severity": "hold",
+                "code": "CAMPAIGN_REQUEST_UNIT_AMBIGUOUS",
+                "message": "Some request IDs report more than one Modbus unit.",
+                "count": len(ambiguous_unit_request_ids),
+                "request_ids": ambiguous_unit_request_ids[:_MAX_EVENTS_PER_KIND],
+            }
+        )
+
+    runtime_evidence, runtime_errors = _runtime_evidence(capture)
+    if runtime_errors:
+        findings.append(
+            {
+                "severity": "hold",
+                "code": "RUNTIME_METADATA_INVALID",
+                "message": "Native runtime metadata is malformed and remains untrusted evidence.",
+                "count": len(runtime_errors),
+                "errors": runtime_errors[:_MAX_EVENTS_PER_KIND],
             }
         )
     findings.sort(key=lambda item: (str(item.get("point_id", "")), str(item.get("code", ""))))
@@ -853,7 +1053,32 @@ def analyze_capture(
             "observed_requests": len(observed_request_ids),
             "missing_requests": len(missing_request_ids),
             "missing_request_ids": missing_request_ids,
+            "unexpected_requests": len(unexpected_request_ids),
+            "unexpected_request_ids": unexpected_request_ids,
+            "duplicate_completed_requests": sum(
+                completed_counts[value] - 1 for value in duplicate_completed_request_ids
+            ),
+            "duplicate_completed_request_ids": duplicate_completed_request_ids,
+            "requests_complete": requests_complete,
+            "expected_units": len(expected_unit_ids),
+            "observed_units": len(observed_unit_ids),
+            "missing_units": len(missing_unit_ids),
+            "missing_unit_ids": missing_unit_ids,
+            "unexpected_units": len(unexpected_unit_ids),
+            "unexpected_unit_ids": unexpected_unit_ids,
+            "duplicate_units": len(duplicate_unit_ids),
+            "duplicate_unit_ids": duplicate_unit_ids,
+            "missing_unit_id_requests": len(missing_unit_id_requests),
+            "missing_unit_id_request_ids": missing_unit_id_requests,
+            "ambiguous_unit_request_ids": ambiguous_unit_request_ids,
+            "batch_complete": requests_complete
+            and not missing_unit_ids
+            and not unexpected_unit_ids
+            and not duplicate_unit_ids
+            and not missing_unit_id_requests
+            and not ambiguous_unit_request_ids,
         },
+        "runtime_evidence": runtime_evidence,
         "points": point_results,
         "findings": findings,
         "rejected_samples": rejected,

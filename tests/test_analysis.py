@@ -192,16 +192,120 @@ class CaptureAnalysisTests(unittest.TestCase):
                 ],
             }
         )
+        self.assertEqual(2, result["campaign"]["expected_requests"])
+        self.assertEqual(1, result["campaign"]["observed_requests"])
+        self.assertEqual(1, result["campaign"]["missing_requests"])
+        self.assertEqual(["run-1:block-2"], result["campaign"]["missing_request_ids"])
+        self.assertIn("CAMPAIGN_REQUESTS_MISSING", {item["code"] for item in result["findings"]})
+
+    def test_clean_capture_reports_complete_batch_and_runtime_evidence(self) -> None:
+        result = analyze_capture(
+            {
+                "schema_version": "capture/v1",
+                "expected_request_ids": ["run:block-1", "run:block-2"],
+                "completed_request_ids": ["run:block-1", "run:block-2"],
+                "expected_unit_ids": [1, 2],
+                "runtime_metadata": {
+                    "target": "node-red",
+                    "terminal_state": "drained",
+                    "queue_depth": 0,
+                    "max_in_flight": 1,
+                },
+                "samples": [
+                    {
+                        "request_id": "run:block-1",
+                        "unit_id": 1,
+                        "point_id": "p1",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    },
+                    {
+                        "request_id": "run:block-2",
+                        "unit_id": 2,
+                        "point_id": "p2",
+                        "timestamp": "2026-01-01T00:00:01Z",
+                    },
+                ],
+            }
+        )
+
+        self.assertTrue(result["campaign"]["requests_complete"])
+        self.assertTrue(result["campaign"]["batch_complete"])
+        self.assertEqual([], result["campaign"]["duplicate_completed_request_ids"])
+        self.assertEqual([], result["campaign"]["missing_unit_ids"])
+        self.assertEqual([], result["campaign"]["duplicate_unit_ids"])
         self.assertEqual(
             {
-                "expected_requests": 2,
-                "observed_requests": 1,
-                "missing_requests": 1,
-                "missing_request_ids": ["run-1:block-2"],
+                "available": True,
+                "valid": True,
+                "evidence_only": True,
+                "target": "node-red",
+                "terminal_state": "drained",
+                "queue_depth": 0,
+                "max_in_flight": 1,
             },
-            result["campaign"],
+            result["runtime_evidence"],
         )
-        self.assertIn("CAMPAIGN_REQUESTS_MISSING", {item["code"] for item in result["findings"]})
+        self.assertNotIn("safe", result["runtime_evidence"])
+
+    def test_anomalous_capture_reports_duplicate_ids_and_invalid_runtime_evidence(self) -> None:
+        result = analyze_capture(
+            {
+                "schema_version": "capture/v1",
+                "expected_request_ids": ["run:block-1", "run:block-2"],
+                "completed_request_ids": [
+                    "run:block-1",
+                    "run:block-1",
+                    "run:unexpected",
+                ],
+                "expected_unit_ids": [1, 1, 2],
+                "runtime_metadata": {
+                    "target": "node-red",
+                    "terminal_state": "drained",
+                    "queue_depth": -1,
+                    "max_in_flight": "one",
+                },
+                "samples": [
+                    {
+                        "request_id": "run:block-1",
+                        "unit_id": 1,
+                        "point_id": "p1",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    },
+                    {
+                        "request_id": "run:unexpected",
+                        "point_id": "p3",
+                        "timestamp": "2026-01-01T00:00:02Z",
+                    },
+                ],
+            }
+        )
+
+        campaign = result["campaign"]
+        self.assertFalse(campaign["requests_complete"])
+        self.assertFalse(campaign["batch_complete"])
+        self.assertEqual(["run:block-1"], campaign["duplicate_completed_request_ids"])
+        self.assertEqual(["run:unexpected"], campaign["unexpected_request_ids"])
+        self.assertEqual([2], campaign["missing_unit_ids"])
+        self.assertEqual([1], campaign["duplicate_unit_ids"])
+        self.assertEqual(["run:unexpected"], campaign["missing_unit_id_request_ids"])
+        self.assertEqual(
+            {
+                "available": True,
+                "valid": False,
+                "evidence_only": True,
+                "target": "node-red",
+                "terminal_state": "drained",
+                "queue_depth": None,
+                "max_in_flight": None,
+            },
+            result["runtime_evidence"],
+        )
+        codes = {item["code"] for item in result["findings"]}
+        self.assertIn("CAMPAIGN_COMPLETED_REQUESTS_DUPLICATED", codes)
+        self.assertIn("CAMPAIGN_UNITS_MISSING", codes)
+        self.assertIn("CAMPAIGN_UNITS_DUPLICATED", codes)
+        self.assertIn("CAMPAIGN_UNIT_ID_MISSING", codes)
+        self.assertIn("RUNTIME_METADATA_INVALID", codes)
 
 
 if __name__ == "__main__":

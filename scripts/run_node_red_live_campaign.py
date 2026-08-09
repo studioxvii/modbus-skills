@@ -239,12 +239,13 @@ def run_campaign(
             analysis = analyze_capture(capture)
             campaign = analysis["campaign"]
             report["response_time_ms"].append(analysis["communications"]["response_ms"])
-            runtime_metadata = capture.get("runtime_metadata", {})
-            queue_drained = queue_drained and isinstance(runtime_metadata, Mapping) and runtime_metadata.get("terminal_state") == "drained"
-            if (
-                campaign["observed_requests"] != len(blocks)
-                or campaign["missing_requests"] != 0
-            ):
+            runtime_evidence = analysis["runtime_evidence"]
+            queue_drained = queue_drained and (
+                runtime_evidence["valid"]
+                and runtime_evidence["terminal_state"] == "drained"
+                and runtime_evidence["queue_depth"] == 0
+            )
+            if campaign["observed_requests"] != len(blocks) or not campaign["requests_complete"]:
                 coverage_error = True
             report["request_count"] += int(campaign["observed_requests"])
             report["error_count"] += int(analysis["communications"]["error_count"])
