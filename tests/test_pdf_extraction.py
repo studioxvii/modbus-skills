@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
 sys.path.insert(0, str(RUNTIME))
 
-from modbus_skills.pdf_extraction import extract_pdf  # noqa: E402
+from modbus_skills.pdf_extraction import PdfExtractionError, _call, extract_pdf  # noqa: E402
 
 
 VERSION = subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n")
@@ -51,7 +51,7 @@ class PdfExtractionTests(unittest.TestCase):
         with mock.patch(
             "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
         ), mock.patch(
-            "modbus_skills.pdf_extraction.subprocess.run", side_effect=effects
+            "modbus_skills.pdf_extraction._call", side_effect=effects
         ) as run_mock:
             result = extract_pdf(Path(name), b"%PDF synthetic")
         return result, run_mock
@@ -130,8 +130,12 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual("candidate", result["status"])
         for call in run_mock.call_args_list:
             self.assertIsInstance(call.args[0], list)
-            self.assertFalse(call.kwargs.get("shell", False))
         self.assertIn(filename, run_mock.call_args_list[2].args[0])
+
+    def test_tool_output_is_stopped_at_the_memory_limit(self) -> None:
+        with mock.patch("modbus_skills.pdf_extraction._MAX_TOOL_OUTPUT_BYTES", 8):
+            with self.assertRaisesRegex(PdfExtractionError, "output exceeds 8 bytes"):
+                _call([sys.executable, "-c", "print('0123456789')"], timeout=5)
 
 
 if __name__ == "__main__":

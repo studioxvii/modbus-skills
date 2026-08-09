@@ -634,7 +634,7 @@ class CliIntegrationTests(unittest.TestCase):
         with mock.patch(
             "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
         ), mock.patch(
-            "modbus_skills.pdf_extraction.subprocess.run",
+            "modbus_skills.pdf_extraction._call",
             side_effect=[version, help_result, layout, bbox],
         ):
             receipt = self.run_command("extract-pdf", "--input", source, "--output", output)
@@ -1029,7 +1029,7 @@ class CliIntegrationTests(unittest.TestCase):
         with mock.patch(
             "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
         ), mock.patch(
-            "modbus_skills.pdf_extraction.subprocess.run",
+            "modbus_skills.pdf_extraction._call",
             side_effect=[version, help_result, completed],
         ) as run_mock:
             receipt = self.run_command(

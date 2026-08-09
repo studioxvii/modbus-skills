@@ -267,7 +267,7 @@ class CompilerTests(unittest.TestCase):
         with mock.patch(
             "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
         ), mock.patch(
-            "modbus_skills.pdf_extraction.subprocess.run", side_effect=effects
+            "modbus_skills.pdf_extraction._call", side_effect=effects
         ) as run_mock:
             result = compile_user_map(compile_request, self.root / "pdf-case")
             replay = compile_user_map(copy.deepcopy(compile_request), self.root / "pdf-case")

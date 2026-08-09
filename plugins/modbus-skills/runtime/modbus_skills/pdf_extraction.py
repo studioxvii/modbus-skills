@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import os
 import re
+import selectors
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -239,17 +242,42 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
 
 
 def _call(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[bytes]:
-    completed = subprocess.run(
-        argv,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-        shell=False,
-    )
-    if len(completed.stdout) > _MAX_TOOL_OUTPUT_BYTES or len(completed.stderr) > _MAX_TOOL_OUTPUT_BYTES:
-        raise PdfExtractionError(f"pdftotext output exceeds {_MAX_TOOL_OUTPUT_BYTES} bytes")
-    return completed
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+    assert process.stdout is not None and process.stderr is not None
+    streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+    selector = selectors.DefaultSelector()
+    for stream in streams:
+        os.set_blocking(stream.fileno(), False)
+        selector.register(stream, selectors.EVENT_READ)
+    deadline = time.monotonic() + timeout
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            for key, _events in selector.select(min(remaining, 0.25)):
+                stream = key.fileobj
+                target = streams[stream]
+                chunk = os.read(stream.fileno(), min(65_536, _MAX_TOOL_OUTPUT_BYTES + 1 - len(target)))
+                if not chunk:
+                    selector.unregister(stream)
+                    continue
+                target.extend(chunk)
+                if len(target) > _MAX_TOOL_OUTPUT_BYTES:
+                    raise PdfExtractionError(f"pdftotext output exceeds {_MAX_TOOL_OUTPUT_BYTES} bytes")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        returncode = process.wait(timeout=remaining)
+    except (PdfExtractionError, subprocess.TimeoutExpired):
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        selector.close()
+        process.stdout.close()
+        process.stderr.close()
+    return subprocess.CompletedProcess(argv, returncode, bytes(streams[process.stdout]), bytes(streams[process.stderr]))
 
 
 def _hold_result(
