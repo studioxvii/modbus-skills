@@ -12,9 +12,9 @@
     {
       "id": "apply-review",
       "display_name": "Apply Review",
-      "description": "Apply explicit human decisions to a Modbus map while preserving evidence, exclusions, holds, and audit history.",
-      "short_description": "Apply confirmed map decisions safely",
-      "default_prompt": "Use $apply-review to apply these confirmed map decisions.",
+      "description": "Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.",
+      "short_description": "Apply batched map decisions safely",
+      "default_prompt": "Use $apply-review to apply this batch of confirmed map decisions.",
       "path": "plugins/modbus-skills/skills/apply-review"
     },
     {
@@ -52,7 +52,7 @@
     {
       "id": "build-tool-pack",
       "display_name": "Build Tool Pack",
-      "description": "Build any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and read plan.",
+      "description": "Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan.",
       "short_description": "Build several Modbus tool outputs",
       "default_prompt": "Use $build-tool-pack to build these selected target outputs.",
       "path": "plugins/modbus-skills/skills/build-tool-pack"
@@ -90,6 +90,14 @@
       "path": "plugins/modbus-skills/skills/compare-maps"
     },
     {
+      "id": "compile-user-map",
+      "display_name": "Compile User Map",
+      "description": "Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run.",
+      "short_description": "Compile an OEM map into ready user outputs",
+      "default_prompt": "Use $compile-user-map to turn this OEM map and measurement intent into organized user-map outputs.",
+      "path": "plugins/modbus-skills/skills/compile-user-map"
+    },
+    {
       "id": "extract-pdf-map",
       "display_name": "Extract PDF Map",
       "description": "Extract traceable Modbus register candidates and page evidence from a bounded PDF manual or page range.",
@@ -124,9 +132,9 @@
     {
       "id": "plan-reads",
       "display_name": "Plan Reads",
-      "description": "Compile reviewed Modbus points into deterministic, bounded read blocks for function codes 01 through 04.",
+      "description": "Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04.",
       "short_description": "Compile bounded Modbus read blocks",
-      "default_prompt": "Use $plan-reads to compile safe reads for this reviewed map.",
+      "default_prompt": "Use $plan-reads to compile safe reads for this validated map.",
       "path": "plugins/modbus-skills/skills/plan-reads"
     },
     {
@@ -140,15 +148,15 @@
     {
       "id": "review-evidence",
       "display_name": "Review Evidence",
-      "description": "Review Modbus source evidence, rejected rows, inferences, warnings, and holds before a human map decision.",
-      "short_description": "Turn map evidence into decisions",
-      "default_prompt": "Use $review-evidence to review these source findings and holds.",
+      "description": "Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.",
+      "short_description": "Group map evidence into exceptions",
+      "default_prompt": "Use $review-evidence to automate checks and group these source exceptions.",
       "path": "plugins/modbus-skills/skills/review-evidence"
     },
     {
       "id": "review-map",
       "display_name": "Review Map",
-      "description": "Review a raw or messy Modbus register map through parsing, normalization, checks, evidence, and human decisions.",
+      "description": "Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome.",
       "short_description": "Review a raw Modbus map end to end",
       "default_prompt": "Use $review-map to review this raw register map without guessing.",
       "path": "plugins/modbus-skills/skills/review-map"

@@ -1,6 +1,6 @@
 # Review Evidence
 
-Review Modbus source evidence, rejected rows, inferences, warnings, and holds before a human map decision.
+Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
 
 ## Common requests
 
@@ -13,7 +13,7 @@ Review Modbus source evidence, rejected rows, inferences, warnings, and holds be
 ## Try it
 
 ```text
-Use $review-evidence to review these source findings and holds.
+Use $review-evidence to automate checks and group these source exceptions.
 ```
 
 Source: `plugins/modbus-skills/skills/review-evidence/SKILL.md`

@@ -1,6 +1,6 @@
 # Apply Review
 
-Apply explicit human decisions to a Modbus map while preserving evidence, exclusions, holds, and audit history.
+Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.
 
 ## Common requests
 
@@ -13,7 +13,7 @@ Apply explicit human decisions to a Modbus map while preserving evidence, exclus
 ## Try it
 
 ```text
-Use $apply-review to apply these confirmed map decisions.
+Use $apply-review to apply this batch of confirmed map decisions.
 ```
 
 Source: `plugins/modbus-skills/skills/apply-review/SKILL.md`

@@ -12,6 +12,7 @@
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/check-byte-order.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/check-map.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/compare-maps.html</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/skills/compile-user-map.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/extract-pdf-map.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/modbus-help.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/normalize-map.html</loc></url>
@@ -31,6 +32,7 @@
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/check-byte-order.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/check-map.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/compare-maps.md</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/skills/compile-user-map.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/extract-pdf-map.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/modbus-help.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/normalize-map.md</loc></url>
@@ -39,6 +41,7 @@
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/remap-addresses.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/review-evidence.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/review-map.md</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/workflows/compile-user-map.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/review-register-map.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/determine-byte-order.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/probe-resolve-finalize-tool-pack.html</loc></url>

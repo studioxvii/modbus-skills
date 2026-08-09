@@ -244,6 +244,28 @@
       ]
     },
     {
+      "skill_id": "compile-user-map",
+      "positive": [
+        "Turn this OEM Modbus map into an organized user map for temperatures alarms and status.",
+        "Please turn this OEM Modbus map into an organized user map for temperatures alarms and status.",
+        "Can you turn this OEM Modbus map into an organized user map for temperatures alarms and status.",
+        "I need you to turn this OEM Modbus map into an organized user map for temperatures alarms and status.",
+        "Help me turn this OEM Modbus map into an organized user map for temperatures alarms and status.",
+        "Compile this device manual and measurement intent into JSON CSV and requested tool outputs.",
+        "Please compile this device manual and measurement intent into JSON CSV and requested tool outputs.",
+        "Can you compile this device manual and measurement intent into JSON CSV and requested tool outputs.",
+        "I need you to compile this device manual and measurement intent into JSON CSV and requested tool outputs.",
+        "Help me compile this device manual and measurement intent into JSON CSV and requested tool outputs."
+      ],
+      "negative": [
+        "only extract register rows from these PDF pages",
+        "compare these two firmware maps",
+        "convert these 40001 references to offsets",
+        "analyze this completed capture",
+        "only generate a Node-RED flow from this validated map"
+      ]
+    },
+    {
       "skill_id": "extract-pdf-map",
       "positive": [
         "Extract register tables with page evidence from this PDF.",

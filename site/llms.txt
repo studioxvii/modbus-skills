@@ -1,21 +1,22 @@
 # Modbus Skills
 
 - [Analyze Capture](skills/analyze-capture.html): Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence.
-- [Apply Review](skills/apply-review.html): Apply explicit human decisions to a Modbus map while preserving evidence, exclusions, holds, and audit history.
+- [Apply Review](skills/apply-review.html): Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.
 - [Build Custom Export](skills/build-custom-export.html): Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map.
 - [Build Modpoll](skills/build-modpoll.html): Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles.
 - [Build ModScan](skills/build-modscan.html): Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
 - [Build Node-RED](skills/build-node-red.html): Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.
-- [Build Tool Pack](skills/build-tool-pack.html): Build any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and read plan.
+- [Build Tool Pack](skills/build-tool-pack.html): Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan.
 - [Capture Sample](skills/capture-sample.html): Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
 - [Check Byte Order](skills/check-byte-order.html): Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
 - [Check Map](skills/check-map.html): Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
 - [Compare Maps](skills/compare-maps.html): Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
+- [Compile User Map](skills/compile-user-map.html): Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run.
 - [Extract PDF Map](skills/extract-pdf-map.html): Extract traceable Modbus register candidates and page evidence from a bounded PDF manual or page range.
 - [Modbus Help](skills/modbus-help.html): Choose the next Modbus skill or short workflow from the user's goal and current artifact.
 - [Normalize Map](skills/normalize-map.html): Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
 - [Parse Map](skills/parse-map.html): Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds.
-- [Plan Reads](skills/plan-reads.html): Compile reviewed Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
+- [Plan Reads](skills/plan-reads.html): Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
 - [Remap Addresses](skills/remap-addresses.html): Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation.
-- [Review Evidence](skills/review-evidence.html): Review Modbus source evidence, rejected rows, inferences, warnings, and holds before a human map decision.
-- [Review Map](skills/review-map.html): Review a raw or messy Modbus register map through parsing, normalization, checks, evidence, and human decisions.
+- [Review Evidence](skills/review-evidence.html): Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
+- [Review Map](skills/review-map.html): Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome.

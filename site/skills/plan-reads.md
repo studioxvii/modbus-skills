@@ -1,6 +1,6 @@
 # Plan Reads
 
-Compile reviewed Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
+Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
 
 ## Common requests
 
@@ -13,7 +13,7 @@ Compile reviewed Modbus points into deterministic, bounded read blocks for funct
 ## Try it
 
 ```text
-Use $plan-reads to compile safe reads for this reviewed map.
+Use $plan-reads to compile safe reads for this validated map.
 ```
 
 Source: `plugins/modbus-skills/skills/plan-reads/SKILL.md`
