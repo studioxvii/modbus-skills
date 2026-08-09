@@ -9,7 +9,6 @@ import json
 import re
 import sys
 import uuid
-from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -17,12 +16,15 @@ from urllib.parse import urlparse
 RUNTIME = Path(__file__).resolve().parents[1] / "plugins" / "modbus-skills" / "runtime"
 if str(RUNTIME) not in sys.path:
     sys.path.insert(0, str(RUNTIME))
-if str(Path(__file__).resolve().parents[1] / "tests") not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
-
 from modbus_skills.analysis import analyze_capture
-from node_red_live.node_red import CampaignError, NodeRedAdminClient, NodeRedRuntime, planned_requests
-from node_red_live.simulator import SimulatorClient, SimulatorError
+from modbus_skills.node_red_runtime import (
+    CampaignError,
+    NodeRedAdminClient,
+    NodeRedRuntime,
+    SimulatorClient,
+    SimulatorError,
+    planned_requests,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -185,7 +187,7 @@ def run_campaign(
     selected = next((p for p in contract["profiles"] if p["id"] == profile_id), None) if profile_id else contract["profiles"][0]
     if selected is None:
         raise CampaignError("unknown campaign profile")
-    report: dict[str, Any] = {"schema_version": "node-red-live-report/v1", "run_id": uuid.uuid4().hex, "profile_id": selected["id"], "fleet_size": selected["fleet_size"], "status": "blocked", "terminal_state": "blocked", "issue_codes": [], "request_count": 0, "error_count": 0, "hashes": _hashes(hashes), "versions": {"campaign": contract["schema_version"]}, "cleanup": {"simulator_reset": False, "flow_removed": False}}
+    report: dict[str, Any] = {"schema_version": "node-red-live-report/v1", "run_id": uuid.uuid4().hex, "profile_id": selected["id"], "fleet_size": selected["fleet_size"], "status": "blocked", "terminal_state": "blocked", "issue_codes": [], "request_count": 0, "error_count": 0, "queue_drained": False, "response_time_ms": [], "hashes": _hashes(hashes), "versions": {"campaign": contract["schema_version"]}, "cleanup": {"simulator_reset": False, "flow_removed": False}}
     if not authorized:
         report["issue_codes"] = ["authorization-required"]
         return report
@@ -218,9 +220,9 @@ def run_campaign(
             raise CampaignError("generated flow does not cover the selected fleet exactly")
         if len(blocks) * rounds > int(contract["budget"]["max_compiled_block_reads"]):
             raise CampaignError("generated flow exceeds the compiled-block read budget")
-        all_missing: list[str] = []
         all_mismatches: list[dict[str, Any]] = []
         coverage_error = False
+        queue_drained = True
         deadline = runtime.clock() + float(contract["budget"]["max_seconds"])
         for round_index in range(rounds):
             remaining = deadline - runtime.clock()
@@ -236,26 +238,25 @@ def run_campaign(
             )
             analysis = analyze_capture(capture)
             campaign = analysis["campaign"]
-            expected_request_ids = set(capture.get("expected_request_ids", ()))
-            observed_counts = Counter(str(value) for value in capture.get("completed_request_ids", ()))
+            report["response_time_ms"].append(analysis["communications"]["response_ms"])
+            runtime_metadata = capture.get("runtime_metadata", {})
+            queue_drained = queue_drained and isinstance(runtime_metadata, Mapping) and runtime_metadata.get("terminal_state") == "drained"
             if (
                 campaign["observed_requests"] != len(blocks)
-                or set(observed_counts) != expected_request_ids
-                or any(count != 1 for count in observed_counts.values())
+                or campaign["missing_requests"] != 0
             ):
                 coverage_error = True
-                all_missing.extend(
-                    f"round-{round_index + 1}:{value}"
-                    for value in campaign["missing_request_ids"]
-                )
             report["request_count"] += int(campaign["observed_requests"])
             report["error_count"] += int(analysis["communications"]["error_count"])
             all_mismatches.extend(_oracle_mismatches(capture, simulator))
             if round_index + 1 < rounds:
                 runtime.wait(float(contract["budget"]["cadence_seconds"]))
         report["cleanup"]["flow_removed"] = True
+        report["queue_drained"] = queue_drained
         if coverage_error:
             report["issue_codes"].append("planned-requests-missing")
+        if not queue_drained:
+            report["issue_codes"].append("node-red-queue-not-drained")
         if report["error_count"]:
             report["issue_codes"].append("node-red-read-errors")
         if all_mismatches:

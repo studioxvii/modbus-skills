@@ -20,13 +20,11 @@ from run_node_red_live_campaign import (  # noqa: E402
     _oracle_mismatches,
     validate_campaign_settings,
 )
-from node_red_live.node_red import (  # noqa: E402
+from modbus_skills.node_red_runtime import (  # noqa: E402
     CampaignError as NodeRedCampaignError,
     NodeRedAdminClient,
     NodeRedRuntime,
     validate_flow,
-)
-from node_red_live.simulator import (  # noqa: E402
     SimulatorClient,
     SimulatorError,
 )
@@ -170,6 +168,7 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
                         json.dumps(
                             {
                                 "expected_request_ids": ["run:block"],
+                                "runtime_metadata": {"terminal_state": "drained"},
                                 "samples": [{"request_id": "run:block"}],
                             }
                         ),

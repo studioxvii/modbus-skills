@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from scripts.run_node_red_live_campaign import load_campaign_contract, run_campaign
-from node_red_live.node_red import NodeRedRuntime
+from modbus_skills.node_red_runtime import NodeRedRuntime
 from modbus_skills.exporters import canonical_map_hash
 from modbus_skills.node_red import export_node_red
 from modbus_skills.read_plan import compile_read_plan
@@ -88,6 +88,7 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         blocks = next(node["modbusSkillsBlocks"] for node in flow if node.get("modbusSkillsBlocks"))
         capture = {
             "schema_version": "capture/v1",
+            "runtime_metadata": {"terminal_state": "drained"},
             "expected_request_ids": [f"run:{block['block_id']}" for block in blocks],
             "completed_request_ids": [f"run:{block['block_id']}" for block in blocks],
             "samples": [
@@ -157,6 +158,8 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         self.assertEqual("passed", report["status"])
         self.assertEqual(30, report["request_count"])
         self.assertEqual(0, report["error_count"])
+        self.assertTrue(report["queue_drained"])
+        self.assertEqual(3, len(report["response_time_ms"]))
         self.assertTrue(report["cleanup"]["flow_removed"])
 
 
