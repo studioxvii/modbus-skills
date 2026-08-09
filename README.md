@@ -74,6 +74,61 @@ route to `$compile-user-map`; focused stage requests route to the matching speci
 
 All skills require explicit invocation. This keeps unrelated skill instructions out of the agent context.
 
+## Fast OEM map compiler
+
+`$compile-user-map` is the default path from an OEM manual to usable engineering
+artifacts. Give it the source and describe the measurements you need; do not manually
+work through extraction, normalization, review, selection, and read planning skills.
+
+```text
+$compile-user-map Use ./manual.pdf to build a user map for temperatures, operating
+status, active alarms, and power. Return the organized map plus JSON and CSV.
+```
+
+The skill automatically:
+
+1. preflights the local source and available PDF capability;
+2. finds likely register pages and reconciles strict and coordinate extraction;
+3. preserves source locations while normalizing the OEM semantics;
+4. selects and organizes the requested measurements;
+5. validates counts, identities, ranges, datatypes, and artifact hashes; and
+6. writes the completed offline bundle before considering optional device targets.
+
+A clean source completes without an approval question. If evidence is genuinely
+ambiguous, the result contains one grouped decision packet with affected counts and
+source references. Device binding, a physical read, and byte-order confirmation remain
+separate gates because they can materially change a requested device-specific output.
+
+Typical output:
+
+```text
+case-directory/
+├── compile-result.json       # state, elapsed time, artifacts, holds, next action
+├── case.json                 # hash-bound resumable case manifest
+└── artifacts/
+    ├── user-map.md           # compact engineer-readable map
+    ├── user-map.json         # canonical machine-readable output
+    ├── user-map.csv          # spreadsheet/import output
+    └── user-map-manifest.json # artifact hashes, lineage, and bundle status
+```
+
+Excluded or quarantined source items remain in the user map's exception annex rather
+than blocking unrelated selected points.
+
+For deterministic runtime use, create a request described in
+[`compile-user-map/references/request.md`](plugins/modbus-skills/skills/compile-user-map/references/request.md)
+and run:
+
+```bash
+python3 plugins/modbus-skills/skills/compile-user-map/scripts/run.py \
+  --request request.json \
+  --output ./compile-case
+```
+
+Re-running the same request is idempotent. A resume accepts only the typed input named
+by `compile-result.json`; stale hashes, broadened decisions, and modified evidence are
+rejected without changing the case.
+
 ## Choose your path
 
 | Starting point or goal | Start here | Typical next step |
@@ -210,9 +265,15 @@ python3 scripts/verify_repo.py
 
 Current evidence:
 
-- The skill corpus passes the repository validator.
+- All 20 skills pass the repository validator.
 - The plugin passes the official OpenAI plugin validator.
-- 254 repository tests pass in the current working tree.
+- 308 repository tests pass in the current working tree.
+- The outcome-compiler transcript suite passes clean structured intake, automatic PDF
+  coordinate fallback, grouped decision/resume, binding preservation, and evidenced
+  contiguous-read scenarios.
+- The tracked 150-point synthetic benchmark completes the offline bundle in under
+  20 ms on the documented macOS arm64 / Python 3.14.6 envelope, against a five-minute
+  local threshold. Timing is diagnostic; transcript behavior is the deterministic gate.
 - The public synthetic human workflow passes 41 of 41 checks.
 - Seven local real-world register maps pass 45 of 45 workflow checks across 31 skill calls.
 - Blind novice, commissioning, and reviewer trials pass.
