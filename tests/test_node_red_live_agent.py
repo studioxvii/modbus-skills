@@ -4,6 +4,7 @@ import json
 import hashlib
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.run_node_red_live_campaign import load_campaign_contract, run_campaign
@@ -88,7 +89,12 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         blocks = next(node["modbusSkillsBlocks"] for node in flow if node.get("modbusSkillsBlocks"))
         capture = {
             "schema_version": "capture/v1",
-            "runtime_metadata": {"terminal_state": "drained"},
+            "runtime_metadata": {
+                "target": "node-red",
+                "terminal_state": "drained",
+                "queue_depth": 0,
+                "max_in_flight": 1,
+            },
             "expected_request_ids": [f"run:{block['block_id']}" for block in blocks],
             "completed_request_ids": [f"run:{block['block_id']}" for block in blocks],
             "samples": [
@@ -115,9 +121,12 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         class Admin:
             restored = False
 
-            def run_flow(self, flow, *, capture_path, environment, timeout_seconds):
-                self.restored = True
-                return capture
+            @contextmanager
+            def campaign_session(self, flow, *, capture_path, environment):
+                try:
+                    yield lambda timeout_seconds: capture
+                finally:
+                    self.restored = True
 
         class Simulator:
             def require_ready(self, expected_fleet):

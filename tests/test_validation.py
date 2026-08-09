@@ -74,6 +74,20 @@ class PointValidationTests(unittest.TestCase):
 
         self.assertIn("point.byte-order-unconfirmed", {item.code for item in findings})
 
+    def test_one_register_byte_order_not_applicable_is_valid(self):
+        candidate = CanonicalPoint.from_mapping(
+            {
+                **point(datatype=DataType.UINT16).to_dict(),
+                "byte_order": None,
+                "byte_order_confirmed": None,
+                "byte_order_status": "not-applicable",
+            }
+        )
+
+        findings = validate_points((candidate,))
+
+        self.assertNotIn("point.byte-order-status-invalid", {item.code for item in findings})
+
     def test_word_span_must_match_known_data_type(self):
         findings = validate_points(
             (point(datatype=DataType.FLOAT64, word_span=2, byte_order="ABCDEFGH"),)

@@ -141,7 +141,7 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
             with self.assertRaises(SimulatorError):
                 client.readiness()
 
-    def test_admin_driver_triggers_once_and_restores_original_flows(self) -> None:
+    def test_admin_driver_deploys_once_for_multiple_rounds_and_restores_once(self) -> None:
         class Response:
             def __init__(self, body=b""):
                 self.body = body
@@ -168,7 +168,12 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
                         json.dumps(
                             {
                                 "expected_request_ids": ["run:block"],
-                                "runtime_metadata": {"terminal_state": "drained"},
+                                "runtime_metadata": {
+                                    "target": "node-red",
+                                    "terminal_state": "drained",
+                                    "queue_depth": 0,
+                                    "max_in_flight": 1,
+                                },
                                 "samples": [{"request_id": "run:block"}],
                             }
                         ),
@@ -177,19 +182,21 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
                 return Response()
 
             admin = NodeRedAdminClient(opener=opener, wait=lambda _: None)
-            capture = admin.run_flow(
-                [
-                    {"id": "tab", "type": "tab", "disabled": True},
-                    {"id": "inject", "type": "inject", "repeat": "", "crontab": "", "once": False},
-                    {"id": "read", "type": "modbus-flex-getter", "fc": 3, "tcpHost": "127.0.0.1"},
-                ],
+            flow = [
+                {"id": "tab", "type": "tab", "disabled": True},
+                {"id": "inject", "type": "inject", "repeat": "", "crontab": "", "once": False},
+                {"id": "read", "type": "modbus-flex-getter", "fc": 3, "tcpHost": "127.0.0.1"},
+            ]
+            with admin.campaign_session(
+                flow,
                 capture_path=capture_path,
                 environment={"MODBUS_CAPTURE_PATH": str(capture_path)},
-                timeout_seconds=1,
-            )
+            ) as run_round:
+                capture = run_round(1)
+                capture = run_round(1)
         self.assertEqual(["run:block"], capture["expected_request_ids"])
         self.assertEqual(2, sum(1 for method, url in calls if method == "POST" and url.endswith("/flows")))
-        self.assertEqual(1, sum(1 for method, url in calls if method == "POST" and "/inject/" in url))
+        self.assertEqual(2, sum(1 for method, url in calls if method == "POST" and "/inject/" in url))
 
 
 if __name__ == "__main__":

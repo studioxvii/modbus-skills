@@ -7,9 +7,10 @@ import json
 import re
 import shutil
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -176,7 +177,7 @@ class NodeRedAdminClient:
         self._request("/flows", method="POST", payload=[dict(node) for node in flow])
 
     def trigger(self, node_id: str) -> None:
-        if not node_id or not all(character.isalnum() for character in node_id):
+        if not node_id.isalnum():
             raise CampaignError("Node-RED inject ID is invalid")
         self._request(f"/inject/{node_id}", method="POST")
 
@@ -208,6 +209,21 @@ class NodeRedAdminClient:
         environment: Mapping[str, str],
         timeout_seconds: float,
     ) -> dict[str, Any]:
+        with self.campaign_session(
+            flow, capture_path=capture_path, environment=environment
+        ) as run_round:
+            return run_round(timeout_seconds)
+
+    @contextmanager
+    def campaign_session(
+        self,
+        flow: Sequence[Mapping[str, Any]],
+        *,
+        capture_path: Path,
+        environment: Mapping[str, str],
+    ) -> Iterator[Callable[[float], dict[str, Any]]]:
+        """Deploy once, run bounded rounds, and restore the prior flow once."""
+
         validate_flow(flow)
         original = self.flows()
         deployed = copy.deepcopy([dict(node) for node in flow])
@@ -222,35 +238,29 @@ class NodeRedAdminClient:
             {"name": name, "value": str(value), "type": "str"}
             for name, value in sorted(environment.items())
         ]
-        try:
-            previous_mtime = capture_path.stat().st_mtime_ns
-        except FileNotFoundError:
-            previous_mtime = None
+
+        def run_round(timeout_seconds: float) -> dict[str, Any]:
+            try:
+                previous_mtime = capture_path.stat().st_mtime_ns
+            except FileNotFoundError:
+                previous_mtime = None
+            self.trigger(str(injects[0]["id"]))
+            return self._wait_for_capture(
+                capture_path,
+                previous_mtime=previous_mtime,
+                timeout_seconds=timeout_seconds,
+            )
+
         try:
             self.deploy(deployed)
-            self.trigger(str(injects[0]["id"]))
-            try:
-                return self._wait_for_capture(
-                    capture_path,
-                    previous_mtime=previous_mtime,
-                    timeout_seconds=timeout_seconds,
-                )
-            except CampaignError:
-                injects[0]["payload"] = json.dumps({"action": "cancel"})
-                injects[0]["payloadType"] = "json"
-                self.deploy(deployed)
-                self.trigger(str(injects[0]["id"]))
-                raise
+            yield run_round
         finally:
             self.deploy(original)
 
 
 @dataclass(frozen=True)
 class SimulatorReady:
-    ready: bool
     modbus_port: int
-    fleet_size: int
-    modbus_host: str
 
 
 def _as_int(value: Any, label: str) -> int:
@@ -330,44 +340,12 @@ class SimulatorClient:
             )
         if not 1 <= port <= 65535:
             raise SimulatorError("simulator reported an invalid Modbus port")
-        return SimulatorReady(
-            ready, port, fleet_size, str(value.get("modbus_host", "127.0.0.1"))
-        )
-
-    def configure_fleet(
-        self, fleet_size: int, *, modbus_port: int | None = None
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "size_counts": {
-                "500": fleet_size,
-                "1000": 0,
-                "1500": 0,
-                "2000": 0,
-                "2500": 0,
-            }
-        }
-        if modbus_port is not None:
-            payload["modbus_port"] = modbus_port
-        return self._request_json("/api/startup", method="POST", payload=payload)
-
-    def fleet_summary(self) -> dict[str, Any]:
-        return self._request_json("/api/fleet/summary")
+        return SimulatorReady(port)
 
     def registers(self, unit_id: int) -> dict[str, Any]:
         if unit_id < 1:
             raise SimulatorError("unit_id must be positive")
         return self._request_json(f"/api/generators/{unit_id}/registers")
-
-    def run_scenario(self, scenario_id: str) -> dict[str, Any]:
-        if scenario_id != "fault-and-reset":
-            raise SimulatorError("only the documented fault-and-reset scenario is allowed")
-        return self._request_json(
-            "/api/scenarios/run", method="POST", payload={"scenario_id": scenario_id}
-        )
-
-    def stop_scenario(self) -> dict[str, Any]:
-        return self._request_json("/api/scenarios/stop", method="POST", payload={})
-
 
 __all__ = [
     "CampaignError",

@@ -261,6 +261,7 @@ def _validate_point(point: CanonicalPoint) -> list[Finding]:
         "assumed",
         "unconfirmed",
         "unresolved",
+        "not-applicable",
     }:
         add(
             "point.byte-order-status-invalid",

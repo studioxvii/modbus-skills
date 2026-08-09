@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -37,6 +40,13 @@ REQUIRED_HASHES = {
 }
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 ENV_PLACEHOLDER = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
+
+
+def _set_status(report: dict[str, Any], status: str) -> None:
+    """Set the canonical status and its serialized compatibility alias together."""
+
+    report["status"] = status
+    report["terminal_state"] = status
 
 
 def load_campaign_contract(path: Path) -> dict[str, Any]:
@@ -96,15 +106,28 @@ def _verify_evidence_artifacts(
         raise CampaignError("all five evidence artifact paths are required")
     for name in sorted(REQUIRED_HASHES):
         path = paths[name]
-        if not path.is_file() or path.is_symlink():
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        if not hasattr(os, "O_NOFOLLOW") and path.is_symlink():
             raise CampaignError(f"{name} evidence artifact is missing or unsafe")
-        data = path.read_bytes()
-        actual = hashlib.sha256(data).hexdigest()
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise CampaignError(f"{name} evidence artifact is missing or unsafe") from exc
+        flow_data = bytearray() if name == "flow_sha256" else None
+        digest = hashlib.sha256()
+        with os.fdopen(descriptor, "rb") as artifact:
+            if not stat.S_ISREG(os.fstat(artifact.fileno()).st_mode):
+                raise CampaignError(f"{name} evidence artifact is missing or unsafe")
+            for chunk in iter(lambda: artifact.read(64 * 1024), b""):
+                digest.update(chunk)
+                if flow_data is not None:
+                    flow_data.extend(chunk)
+        actual = digest.hexdigest()
         if actual != expected_hashes[name]:
             raise CampaignError(f"{name} does not match its supplied hash")
         if name == "flow_sha256":
             try:
-                recorded_flow = json.loads(data.decode("utf-8"))
+                recorded_flow = json.loads(bytes(flow_data or ()).decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise CampaignError("flow evidence artifact is not valid JSON") from exc
             if recorded_flow != flow:
@@ -112,11 +135,34 @@ def _verify_evidence_artifacts(
 
 
 def _oracle_mismatches(capture: Mapping[str, Any], simulator: Any) -> list[dict[str, Any]]:
-    cache: dict[int, Mapping[str, Any]] = {}
-    mismatches: list[dict[str, Any]] = []
-    for sample in capture.get("samples", ()):
-        if not isinstance(sample, Mapping):
+    samples = [sample for sample in capture.get("samples", ()) if isinstance(sample, Mapping)]
+    unit_ids: set[int] = set()
+    for sample in samples:
+        if sample.get("success") is False:
             continue
+        try:
+            unit_id = int(sample.get("unit_id", 0))
+            offset = int(sample.get("protocol_offset", -1))
+        except (TypeError, ValueError):
+            continue
+        route = sample.get("route", sample.get("route_id"))
+        area = sample.get("area")
+        if (
+            unit_id > 0
+            and offset >= 0
+            and route not in (None, "")
+            and area not in (None, "")
+            and isinstance(sample.get("raw_words", ()), list)
+        ):
+            unit_ids.add(unit_id)
+    ordered_unit_ids = sorted(unit_ids)
+    if len(ordered_unit_ids) > 1:
+        with ThreadPoolExecutor(max_workers=min(8, len(ordered_unit_ids))) as executor:
+            cache = dict(zip(ordered_unit_ids, executor.map(simulator.registers, ordered_unit_ids), strict=True))
+    else:
+        cache = {unit_id: simulator.registers(unit_id) for unit_id in ordered_unit_ids}
+    mismatches: list[dict[str, Any]] = []
+    for sample in samples:
         try:
             unit_id = int(sample.get("unit_id", 0))
             offset = int(sample.get("protocol_offset", -1))
@@ -134,8 +180,6 @@ def _oracle_mismatches(capture: Mapping[str, Any], simulator: Any) -> list[dict[
         if unit_id < 1 or offset < 0 or not isinstance(words, list):
             mismatches.append({"sample_id": sample.get("sample_id"), "reason": "identity-incomplete"})
             continue
-        if unit_id not in cache:
-            cache[unit_id] = simulator.registers(unit_id)
         registers = cache[unit_id].get("registers")
         if not isinstance(registers, Mapping):
             mismatches.append({"sample_id": sample.get("sample_id"), "reason": "oracle-registers-missing"})
@@ -187,7 +231,8 @@ def run_campaign(
     selected = next((p for p in contract["profiles"] if p["id"] == profile_id), None) if profile_id else contract["profiles"][0]
     if selected is None:
         raise CampaignError("unknown campaign profile")
-    report: dict[str, Any] = {"schema_version": "node-red-live-report/v1", "run_id": uuid.uuid4().hex, "profile_id": selected["id"], "fleet_size": selected["fleet_size"], "status": "blocked", "terminal_state": "blocked", "issue_codes": [], "request_count": 0, "error_count": 0, "queue_drained": False, "response_time_ms": [], "hashes": _hashes(hashes), "versions": {"campaign": contract["schema_version"]}, "cleanup": {"simulator_reset": False, "flow_removed": False}}
+    report: dict[str, Any] = {"schema_version": "node-red-live-report/v1", "run_id": uuid.uuid4().hex, "profile_id": selected["id"], "fleet_size": selected["fleet_size"], "issue_codes": [], "request_count": 0, "error_count": 0, "queue_drained": False, "response_time_ms": [], "hashes": _hashes(hashes), "versions": {"campaign": contract["schema_version"]}, "cleanup": {"simulator_reset": False, "flow_removed": False}}
+    _set_status(report, "blocked")
     if not authorized:
         report["issue_codes"] = ["authorization-required"]
         return report
@@ -195,7 +240,7 @@ def run_campaign(
     try:
         preflight = runtime.preflight(flow or [])
     except CampaignError as exc:
-        report["status"] = report["terminal_state"] = "failed"
+        _set_status(report, "failed")
         report["issue_codes"] = ["unsafe-flow", str(exc)]
         return report
     report["versions"]["node_red"] = preflight.get("runtime", "unavailable")
@@ -203,7 +248,7 @@ def run_campaign(
         report["issue_codes"] = list(preflight["issue_codes"])
         return report
     if admin is None or simulator is None or capture_path is None or not flow:
-        report["status"] = report["terminal_state"] = "not-run"
+        _set_status(report, "not-run")
         report["issue_codes"] = ["native-driver-not-configured"]
         return report
     if any(value == "unavailable" for value in report["hashes"].values()):
@@ -224,34 +269,34 @@ def run_campaign(
         coverage_error = False
         queue_drained = True
         deadline = runtime.clock() + float(contract["budget"]["max_seconds"])
-        for round_index in range(rounds):
-            remaining = deadline - runtime.clock()
-            if remaining <= 0:
-                raise CampaignError("live campaign time budget exhausted")
-            capture = admin.run_flow(
-                flow,
-                capture_path=capture_path,
-                environment=_flow_environment(
-                    flow, modbus_port=ready.modbus_port, capture_path=capture_path
-                ),
-                timeout_seconds=remaining,
-            )
-            analysis = analyze_capture(capture)
-            campaign = analysis["campaign"]
-            report["response_time_ms"].append(analysis["communications"]["response_ms"])
-            runtime_evidence = analysis["runtime_evidence"]
-            queue_drained = queue_drained and (
-                runtime_evidence["valid"]
-                and runtime_evidence["terminal_state"] == "drained"
-                and runtime_evidence["queue_depth"] == 0
-            )
-            if campaign["observed_requests"] != len(blocks) or not campaign["requests_complete"]:
-                coverage_error = True
-            report["request_count"] += int(campaign["observed_requests"])
-            report["error_count"] += int(analysis["communications"]["error_count"])
-            all_mismatches.extend(_oracle_mismatches(capture, simulator))
-            if round_index + 1 < rounds:
-                runtime.wait(float(contract["budget"]["cadence_seconds"]))
+        with admin.campaign_session(
+            flow,
+            capture_path=capture_path,
+            environment=_flow_environment(
+                flow, modbus_port=ready.modbus_port, capture_path=capture_path
+            ),
+        ) as run_round:
+            for round_index in range(rounds):
+                remaining = deadline - runtime.clock()
+                if remaining <= 0:
+                    raise CampaignError("live campaign time budget exhausted")
+                capture = run_round(remaining)
+                analysis = analyze_capture(capture)
+                campaign = analysis["campaign"]
+                report["response_time_ms"].append(analysis["communications"]["response_ms"])
+                runtime_evidence = analysis["runtime_evidence"]
+                queue_drained = queue_drained and (
+                    runtime_evidence["valid"]
+                    and runtime_evidence["terminal_state"] == "drained"
+                    and runtime_evidence["queue_depth"] == 0
+                )
+                if campaign["observed_requests"] != len(blocks) or not campaign["requests_complete"]:
+                    coverage_error = True
+                report["request_count"] += int(campaign["observed_requests"])
+                report["error_count"] += int(analysis["communications"]["error_count"])
+                all_mismatches.extend(_oracle_mismatches(capture, simulator))
+                if round_index + 1 < rounds:
+                    runtime.wait(float(contract["budget"]["cadence_seconds"]))
         report["cleanup"]["flow_removed"] = True
         report["queue_drained"] = queue_drained
         if coverage_error:
@@ -263,11 +308,9 @@ def run_campaign(
         if all_mismatches:
             report["issue_codes"].append("simulator-oracle-mismatch")
         report["oracle_mismatches"] = all_mismatches[:10]
-        report["status"] = report["terminal_state"] = (
-            "passed" if not report["issue_codes"] else "failed"
-        )
+        _set_status(report, "passed" if not report["issue_codes"] else "failed")
     except (CampaignError, SimulatorError, OSError, ValueError) as exc:
-        report["status"] = report["terminal_state"] = "failed"
+        _set_status(report, "failed")
         report["issue_codes"] = [str(exc)]
     return report
 
@@ -317,7 +360,8 @@ def main(argv: list[str] | None = None) -> int:
             capture_path=args.capture,
         )
     except (OSError, json.JSONDecodeError, CampaignError, SimulatorError) as exc:
-        report = {"schema_version": "node-red-live-report/v1", "status": "failed", "terminal_state": "failed", "issue_codes": [str(exc)]}
+        report = {"schema_version": "node-red-live-report/v1", "issue_codes": [str(exc)]}
+        _set_status(report, "failed")
     print(json.dumps(report, sort_keys=True))
     return 0 if report.get("status") in {"passed", "blocked", "not-run"} else 1
 

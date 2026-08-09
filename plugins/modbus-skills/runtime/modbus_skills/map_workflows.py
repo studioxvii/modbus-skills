@@ -1609,24 +1609,6 @@ def lint_map(canonical_map: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> 
         findings = [finding.to_dict() for finding in validate_points(points)]
     except (TypeError, ValueError) as exc:
         raise MapWorkflowError(f"Canonical map cannot be validated: {exc}") from exc
-    byte_order_not_applicable_ids = {
-        _text(point.get("logical_point_id"))
-        for point in points
-        if isinstance(point, Mapping)
-        and point.get("word_span", point.get("word_count")) == 1
-        and DataType.coerce(point.get("datatype"))
-        in {DataType.BOOL, DataType.UINT16, DataType.INT16}
-        and point.get("byte_order") in (None, "")
-        and point.get("byte_order_status") == "not-applicable"
-    }
-    findings = [
-        finding
-        for finding in findings
-        if not (
-            finding.get("code") == "point.byte-order-status-invalid"
-            and set(finding.get("point_ids", ())).issubset(byte_order_not_applicable_ids)
-        )
-    ]
     findings.extend(metadata_holds)
     findings.extend(_simulator_point_holds(points, simulator_profile))
 
