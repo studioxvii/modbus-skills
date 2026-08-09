@@ -15,6 +15,7 @@ sys.path.insert(0, str(RUNTIME))
 
 from modbus_skills.artifacts import artifact_envelope  # noqa: E402
 from modbus_skills.modscan import export_modscan  # noqa: E402
+from modbus_skills.pymodbus_fallback import pymodbus_fallback_artifact  # noqa: E402
 from modbus_skills.read_plan import compile_read_plan  # noqa: E402
 
 
@@ -59,6 +60,60 @@ def text(result: object, suffix: str) -> str:
 
 
 class ModscanExporterTests(unittest.TestCase):
+    def test_shared_fallback_supports_only_bounded_read_function_codes(self) -> None:
+        blocks = tuple(
+            {
+                "request_id": f"fc{function_code:02d}",
+                "route_id": "default",
+                "unit_id": 1,
+                "function_code": function_code,
+                "start_offset": function_code,
+                "quantity": 1,
+            }
+            for function_code in (1, 2, 3, 4)
+        )
+        script = pymodbus_fallback_artifact(blocks, "fallback.py").as_text()
+        for method in (
+            "read_coils",
+            "read_discrete_inputs",
+            "read_holding_registers",
+            "read_input_registers",
+        ):
+            self.assertIn(method, script)
+        with self.assertRaisesRegex(ValueError, "FC01 through FC04"):
+            pymodbus_fallback_artifact(
+                ({**blocks[0], "function_code": 5},), "fallback.py"
+            )
+
+    def test_includes_bounded_pymodbus_fallback_and_visible_verification_state(self) -> None:
+        canonical_map, read_plan = inputs()
+        result = export_modscan(canonical_map, read_plan)
+        script = text(result, "pymodbus-read-once.py")
+        compile(script, "pymodbus-read-once.py", "exec")
+        self.assertIn('parser.add_argument("--request", required=True', script)
+        self.assertIn('parser.add_argument("--host", required=True)', script)
+        self.assertIn('parser.add_argument("--port", required=True, type=int)', script)
+        self.assertIn('parser.add_argument("--unit", required=True, type=int)', script)
+        self.assertIn('parser.add_argument("--confirm-read", required=True', script)
+        self.assertIn('"function_code": 3', script)
+        self.assertNotIn("while ", script)
+        self.assertNotIn("write_register", script)
+        self.assertNotIn("write_coil", script)
+        setup = json.loads(text(result, "setup-manifest.json"))
+        self.assertEqual("not-run", setup["native_verification"]["status"])
+        self.assertIn("Native ModScan verification was not run", text(result, "README.md"))
+
+    def test_modpoll_and_modscan_use_identical_fallback_implementation(self) -> None:
+        from modbus_skills.modpoll import export_modpoll
+
+        canonical_map, read_plan = inputs()
+        modpoll = export_modpoll(canonical_map, read_plan, profile="gavinying-cli")
+        modscan = export_modscan(canonical_map, read_plan)
+        self.assertEqual(
+            text(modpoll, "pymodbus-read-once.py"),
+            text(modscan, "pymodbus-read-once.py"),
+        )
+
     def test_read_plan_and_message_plan_match_golden_fixtures(self) -> None:
         canonical_map, read_plan = inputs()
         result = export_modscan(canonical_map, read_plan)

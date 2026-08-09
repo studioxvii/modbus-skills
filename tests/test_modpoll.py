@@ -67,6 +67,32 @@ def text(result: object, suffix: str) -> str:
 
 
 class ModpollExporterTests(unittest.TestCase):
+    def test_every_profile_includes_the_same_bounded_pymodbus_fallback(self) -> None:
+        canonical_map, read_plan = inputs()
+        scripts = []
+        for profile in ("gavinying-cli", "witte-desktop", "witte-v12-xml"):
+            with self.subTest(profile=profile):
+                result = export_modpoll(canonical_map, read_plan, profile=profile)
+                script = text(result, "pymodbus-read-once.py")
+                compile(script, "pymodbus-read-once.py", "exec")
+                self.assertIn('parser.add_argument("--request", required=True', script)
+                self.assertIn('parser.add_argument("--host", required=True)', script)
+                self.assertIn('parser.add_argument("--port", required=True, type=int)', script)
+                self.assertIn('parser.add_argument("--unit", required=True, type=int)', script)
+                self.assertIn('parser.add_argument("--confirm-read", required=True', script)
+                self.assertIn('"function_code": 3', script)
+                self.assertIn('"address": 100', script)
+                self.assertIn('"count": 2', script)
+                self.assertNotIn("while ", script)
+                self.assertNotIn("write_register", script)
+                self.assertNotIn("write_coil", script)
+                self.assertIn(
+                    "Native Modpoll verification was not run",
+                    text(result, "README.md"),
+                )
+                scripts.append(script)
+        self.assertEqual(1, len(set(scripts)))
+
     def test_gavinying_documented_csv_matches_golden(self) -> None:
         canonical_map, read_plan = inputs()
         result = export_modpoll(

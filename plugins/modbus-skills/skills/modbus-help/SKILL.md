@@ -13,22 +13,29 @@ Follow `../../references/interaction-contract.md`.
 
 1. Read `../../references/user-paths.md`.
 2. Identify the user's goal and the artifact they already have.
-3. Route OEM-source-to-organized-map or output requests to `$compile-user-map`.
-   Select a specialist only for an explicitly requested stage, comparison, remap,
-   capture, byte-order check, read plan, or target-only build.
-4. Read that skill's current `SKILL.md` before describing its behavior or inputs.
-5. Reply with the next skill, why it fits, what it needs, and what it produces.
+3. Route an explicitly requested stage directly to its specialist.
+4. For broad setup, validation, or troubleshooting requests, recommend this complete
+   safe path automatically:
+   `$normalize-map -> $check-map -> $plan-reads -> $build-node-red -> $capture-sample -> $analyze-capture -> $check-byte-order`.
+   Add `$parse-map` or `$extract-pdf-map` first when the source is raw.
+5. Route an OEM-source-to-organized-output request to `$compile-user-map` when the
+   user wants compilation rather than the live evidence path.
+6. Read that skill's current `SKILL.md` before describing it. For a broad path,
+   repeat this check for each recommended skill.
+7. Reply with the path, the immediate next skill, its input, and its output.
 
 Do not ask who will run the work, where files belong, or how to structure tests when
 the request or repository already answers those questions. Use the current project
 and its existing output folders.
 
-Show a sequence only when the user asks for the full path. Keep it to the shortest useful path. Offer one alternate only when the goal is materially ambiguous.
+Keep broad paths complete and explicit-stage routes direct. Offer one alternate only
+when the goal is materially ambiguous.
 
 Use this format:
 
 ```text
 Recommended next: $skill-name
+Safe path: full chain for broad requests; omit for an explicit stage request
 Why: one sentence
 Uses: exact current artifact paths or missing decision
 Produces: next artifact

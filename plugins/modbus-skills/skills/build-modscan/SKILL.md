@@ -17,7 +17,8 @@ Follow `../../references/interaction-contract.md`.
 3. Require a canonical map, read plan, and `probe` or `final` mode.
 4. Run `python3 <skill-dir>/scripts/run.py --map <map.json> --plan <read-plan.json> --mode <mode> --output <directory>`.
 5. Inspect the setup manifest and generated CSV files.
-6. Load them through the named licensed application before marking native verification complete.
+6. Load them through ModScan when available. Otherwise report native verification
+   as unavailable and use the fallback only for one reviewed request.
 
 ## Output files
 
@@ -25,6 +26,8 @@ Follow `../../references/interaction-contract.md`.
 - `modscan/point-map.csv` - The names and meanings of the returned registers.
 - `modscan/test-message-plan.csv` - Optional protocol test messages for verification.
 - `modscan/README.md` - Start here for setup instructions.
+- `modscan/pymodbus-read-once.py` - Optional cross-platform FC01-04 fallback. It
+  requires one compiled request, endpoint, port, and matching unit ID.
 - The JSON manifest and result files - Normally ignore these. They prove which map and plan produced the CSV files and record any holds.
 
 Completion requires a generated or held status with visible native-verification state.
@@ -34,4 +37,4 @@ Completion requires a generated or held status with visible native-verification 
 - No read plan exists: suggest `$plan-reads`.
 - The user needs several target formats: suggest `$build-tool-pack`.
 
-Generate documented files only. Leave undocumented native project formats to ModScan.
+Preserve documented ModScan files. Never claim native verification when it was not run.

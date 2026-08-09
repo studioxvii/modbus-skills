@@ -37,6 +37,11 @@ from .exporters import (
     target_manifest,
     write_csv_row,
 )
+from .pymodbus_fallback import (
+    FALLBACK_FILENAME,
+    native_verification_not_run,
+    pymodbus_fallback_artifact,
+)
 
 
 ADAPTER_VERSION = "1.0.0"
@@ -105,6 +110,7 @@ def export_modscan(
             "test-message-plan.csv",
             "point-map.csv",
         ],
+        "native_verification": native_verification_not_run("ModScan"),
     }
     manifest = target_manifest(
         target=TARGET,
@@ -120,6 +126,7 @@ def export_modscan(
             "opaque_native_files_bundled": False,
             "native_import_claim": False,
             "routes": route_setup,
+            "native_verification": native_verification_not_run("ModScan"),
         },
     )
     artifacts = (
@@ -158,6 +165,9 @@ def export_modscan(
             "text/markdown",
             _readme(mode),
             "operator-instructions",
+        ),
+        pymodbus_fallback_artifact(
+            blocks, f"modscan/{FALLBACK_FILENAME}"
         ),
     )
     return ExportResult(
@@ -336,6 +346,11 @@ This target contains auditable planning files for ModScan32 or ModScan64. It
 does not contain a synthetic `.tst` or `.cfg` file. WinTECH does not publish a
 stable native import schema on its product page, so this exporter does not
 claim that these CSV files are native ModScan files.
+
+Native ModScan verification was not run, so native verification is unavailable.
+If ModScan is not available, install PyModbus and use `pymodbus-read-once.py` for
+one explicit request. It requires `--request`, `--host`, `--port`, the matching
+`--unit`, and `--confirm-read READ`.
 
 Use `read-plan.csv` to create read documents with functions 01 through 04.
 Protocol offsets are base zero. The common reference column is present only as
