@@ -451,7 +451,7 @@ def _as_mapping(value: Any, *, label: str) -> Mapping[str, Any]:
 def _portable_runtime_map(
     canonical_map: Mapping[str, Any], *, map_digest: str
 ) -> dict[str, Any]:
-    """Return the minimum reviewed map data needed with a portable tool pack."""
+    """Return the minimum validated map data needed with a portable tool pack."""
 
     raw_points = canonical_map.get("points", canonical_map.get("registers", ()))
     points = (

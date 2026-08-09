@@ -55,6 +55,7 @@ def decision_record(
         "reviewed_at": "2026-08-07T12:00:00-04:00",
         "reviewer": "commissioning-engineer",
         "approve_map": approve_map,
+        "hold_decisions": [],
         "decisions": list(decisions),
     }
 
@@ -95,6 +96,71 @@ def byte_order_evidence(canonical_map: dict, datatype: str = "uint32") -> dict:
 
 
 class ReviewDecisionTests(unittest.TestCase):
+    def test_resolves_one_global_source_hold_for_a_complete_batch(self) -> None:
+        canonical = normalize_map(
+            {
+                "holds": [
+                    {
+                        "code": "pdf-human-review-required",
+                        "severity": "hold",
+                        "blocking": True,
+                        "message": "Confirm the bounded extraction as one batch.",
+                    }
+                ],
+                "records": [
+                    {
+                        "logical_point_id": "status",
+                        "route_id": "lab",
+                        "unit_id": 1,
+                        "area": "holding-register",
+                        "protocol_offset": 0,
+                        "datatype": "uint16",
+                        "access": "read-only",
+                    }
+                ],
+            }
+        )
+        record = decision_record(canonical_map=canonical)
+        record["hold_decisions"] = [
+            {
+                "code": "pdf-human-review-required",
+                "reason": "The bounded three-page extraction matches the source.",
+                "evidence_refs": [
+                    "source-sha256:111111;pages:10-12;records:3;exceptions:none"
+                ],
+            }
+        ]
+
+        result = apply_review_decisions(canonical, record)
+
+        self.assertEqual("approved", result["review_status"])
+        self.assertEqual([], result["holds"])
+        self.assertEqual(
+            "resolved", result["source_holds"][0]["disposition"]["status"]
+        )
+        self.assertEqual(
+            "resolve-hold",
+            next(
+                item
+                for item in result["review_decisions"]
+                if item.get("hold_code") == "pdf-human-review-required"
+            )["action"],
+        )
+
+    def test_batch_hold_decision_cannot_bypass_point_specific_holds(self) -> None:
+        canonical = draft_map()
+        record = decision_record(canonical_map=canonical, approve_map=False)
+        record["hold_decisions"] = [
+            {
+                "code": "point.byte-order-unresolved",
+                "reason": "Unsafe attempt to resolve all point holds by code.",
+                "evidence_refs": ["source-map"],
+            }
+        ]
+
+        with self.assertRaisesRegex(ReviewDecisionError, "unknown hold code"):
+            apply_review_decisions(canonical, record)
+
     def test_confirms_byte_order_excludes_write_only_point_and_approves(self) -> None:
         canonical = draft_map()
         evidence = byte_order_evidence(canonical)

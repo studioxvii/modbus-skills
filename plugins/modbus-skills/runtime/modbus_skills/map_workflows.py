@@ -1,4 +1,4 @@
-"""Reviewed map normalization, linting, and evidence workflows."""
+"""Validated map normalization, linting, and evidence workflows."""
 
 from __future__ import annotations
 
@@ -1503,7 +1503,7 @@ def review_parse_evidence(
     *,
     lint_result: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a compact human-review queue from map evidence and findings."""
+    """Build a compact exception-first queue from map evidence and findings."""
 
     candidate_input = "points" not in canonical_map and "records" in canonical_map
     points = canonical_map.get("records", ()) if candidate_input else canonical_map.get("points", ())
@@ -1585,11 +1585,6 @@ def review_parse_evidence(
         )
 
     review_items = []
-    global_blocking = any(
-        finding.get("blocking") is not False
-        and finding.get("severity", "hold") in {"hold", "error"}
-        for finding in global_findings
-    )
     for index, point in enumerate(points):
         identifier = _text(
             point.get("logical_point_id", point.get("point_id", point.get("id")))
@@ -1601,11 +1596,17 @@ def review_parse_evidence(
                 for key, value in point.items()
                 if key != "_source"
             ]
+            point_blocking = any(
+                finding.get("blocking") is not False
+                and finding.get("severity", "hold") in {"hold", "error"}
+                for finding in point_findings
+            )
             review_items.append(
                 {
                     "logical_point_id": identifier,
                     "name": point.get("name"),
-                    "status": "blocked" if global_blocking else "review",
+                    "status": "blocked" if point_blocking else "verified",
+                    "action_required": point_blocking,
                     "input_stage": "extraction-candidate",
                     "normalization_performed": False,
                     "unresolved_fields": [],
@@ -1626,29 +1627,38 @@ def review_parse_evidence(
             unresolved_fields.append("byte_order")
         status = "blocked" if any(
             finding.get("severity") in {"hold", "error"} for finding in point_findings
-        ) else "review"
+        ) else "verified"
         review_items.append(
             {
                 "logical_point_id": identifier,
                 "name": point.get("name"),
                 "status": status,
+                "action_required": status == "blocked",
                 "unresolved_fields": unresolved_fields,
                 "source_location": point.get("source_location", {}),
                 "source_evidence": point.get("source_evidence", []),
                 "findings": point_findings,
             }
         )
-    blocking = sum(item["status"] == "blocked" for item in review_items)
+    blocking = sum(item["action_required"] for item in review_items)
+    decision_groups = _review_decision_groups(review_items, global_findings)
+    source = canonical_map.get("source")
+    batch_scope = {
+        "source": dict(source) if isinstance(source, Mapping) else source,
+        "page_selection": canonical_map.get("page_selection"),
+        "input_hashes": dict(canonical_map.get("input_hashes", {}))
+        if isinstance(canonical_map.get("input_hashes"), Mapping)
+        else {},
+        "item_count": len(review_items),
+    }
     return {
         "contract": "modbus-map-evidence-review/v1",
         "input_stage": "extraction-candidate" if candidate_input else "canonical-map",
         "normalization_performed": False,
-        "review_status": "blocked"
-        if blocking
-        or lint.get("summary", {}).get("blocking", 0)
-        or global_blocking
-        or unresolved_rejected_rows
-        else "ready-for-human-review",
+        "review_status": "blocked" if decision_groups else "ready",
+        "review_mode": "batch-exceptions",
+        "batch_scope": batch_scope,
+        "decision_groups": decision_groups,
         "summary": {
             "points": len(review_items),
             "blocked_points": blocking,
@@ -1656,6 +1666,7 @@ def review_parse_evidence(
             "rejected_rows": len(rejected_rows),
             "unresolved_rejected_rows": len(unresolved_rejected_rows),
             "assumptions": len(canonical_map.get("assumptions", ())),
+            "blocking_decisions": len(decision_groups),
         },
         "items": review_items,
         "global_findings": global_findings,
@@ -1663,6 +1674,109 @@ def review_parse_evidence(
         "assumptions": list(canonical_map.get("assumptions", ())),
         "rejected_rows": rejected_rows,
     }
+
+
+def _review_decision_groups(
+    review_items: Sequence[Mapping[str, Any]],
+    global_findings: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Group blocking findings by root cause instead of by page or record."""
+
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def add(
+        finding: Mapping[str, Any],
+        *,
+        point_ids: Sequence[str],
+        scope: str,
+        affected_count: int,
+    ) -> None:
+        severity = finding.get("severity")
+        if finding.get("blocking") is not True and severity not in {"hold", "error"}:
+            return
+        if finding.get("blocking") is False:
+            return
+        code = str(finding.get("code", "review.exception"))
+        field = str(finding.get("field", ""))
+        key = (scope, code, field)
+        group = grouped.setdefault(
+            key,
+            {
+                "code": code,
+                "field": field or None,
+                "scope": scope,
+                "message": (
+                    "Confirm or correct the complete bounded source scope as one batch "
+                    "after reviewing automated checks and exceptions."
+                    if "human-review-required" in code
+                    else str(
+                        finding.get("message", "Resolve this exception group.")
+                    )
+                ),
+                "point_ids": set(),
+                "source_addresses": set(),
+                "affected_count": 0,
+            },
+        )
+        group["point_ids"].update(point_ids)
+        raw_addresses = finding.get("addresses", ())
+        if isinstance(raw_addresses, Sequence) and not isinstance(
+            raw_addresses, (str, bytes, bytearray)
+        ):
+            group["source_addresses"].update(str(value) for value in raw_addresses)
+        if scope == "artifact":
+            explicit_count = len(group["source_addresses"])
+            group["affected_count"] = max(
+                group["affected_count"], explicit_count or affected_count
+            )
+        else:
+            group["affected_count"] = len(group["point_ids"])
+
+    for finding in global_findings:
+        add(
+            finding,
+            point_ids=(),
+            scope="artifact",
+            affected_count=len(review_items),
+        )
+    for item in review_items:
+        identifier = str(item.get("logical_point_id", ""))
+        raw_findings = item.get("findings", ())
+        if not isinstance(raw_findings, Sequence) or isinstance(
+            raw_findings, (str, bytes, bytearray)
+        ):
+            continue
+        for finding in raw_findings:
+            if isinstance(finding, Mapping):
+                add(
+                    finding,
+                    point_ids=(identifier,) if identifier else (),
+                    scope="points",
+                    affected_count=1,
+                )
+
+    result = []
+    for index, key in enumerate(sorted(grouped), start=1):
+        raw = grouped[key]
+        code = str(raw["code"])
+        result.append(
+            {
+                "decision_id": f"decision-{index:03d}",
+                "code": code,
+                "field": raw["field"],
+                "scope": raw["scope"],
+                "affected_count": raw["affected_count"],
+                "point_ids": sorted(raw["point_ids"]),
+                "source_addresses": sorted(raw["source_addresses"]),
+                "message": raw["message"],
+                "action": (
+                    "confirm-scope-or-correct"
+                    if "human-review-required" in code
+                    else "resolve-exception-group"
+                ),
+            }
+        )
+    return result
 
 
 def diagnose_map(

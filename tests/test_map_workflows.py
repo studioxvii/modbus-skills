@@ -477,7 +477,7 @@ class LintAndReviewTests(unittest.TestCase):
             "code": "pdf-ocr-human-review-required",
             "severity": "hold",
             "blocking": True,
-            "message": "Review every OCR-derived candidate against its source page before normalization.",
+            "message": "Confirm or correct the bounded extraction as one batch.",
         }
         pdf_candidate = {
             "schema_version": "modbus-pdf-extraction/v1",
@@ -524,6 +524,10 @@ class LintAndReviewTests(unittest.TestCase):
         self.assertEqual("extraction-candidate", candidate_review["input_stage"])
         self.assertFalse(candidate_review["normalization_performed"])
         self.assertEqual("blocked", candidate_review["review_status"])
+        self.assertEqual("batch-exceptions", candidate_review["review_mode"])
+        self.assertEqual(1, candidate_review["summary"]["blocking_decisions"])
+        self.assertEqual(1, len(candidate_review["decision_groups"]))
+        self.assertFalse(candidate_review["items"][0]["action_required"])
         self.assertEqual(42, candidate_review["items"][0]["source_location"]["page"])
         self.assertEqual(
             "pdf-ocr-human-review-required",
@@ -614,7 +618,7 @@ class LintAndReviewTests(unittest.TestCase):
 
         self.assertEqual("blocked", blocked["review_status"])
         self.assertEqual(1, blocked["summary"]["unresolved_rejected_rows"])
-        self.assertEqual("ready-for-human-review", disposed["review_status"])
+        self.assertEqual("ready", disposed["review_status"])
 
     def test_diagnose_map_runs_the_complete_chain(self) -> None:
         result = diagnose_map(
@@ -624,7 +628,44 @@ class LintAndReviewTests(unittest.TestCase):
         )
         self.assertEqual(0, result["canonical_map"]["points"][0]["protocol_offset"])
         self.assertEqual(0, result["lint"]["summary"]["blocking"])
-        self.assertEqual("ready-for-human-review", result["review"]["review_status"])
+        self.assertEqual("ready", result["review"]["review_status"])
+
+    def test_global_source_confirmation_is_one_batch_not_one_decision_per_page(self) -> None:
+        source = {
+            "schema_version": "modbus-pdf-extraction/v1",
+            "source": {"filename": "synthetic.pdf", "sha256": "1" * 64},
+            "page_selection": {"first_page": 10, "last_page": 12},
+            "holds": [
+                {
+                    "code": "pdf-human-review-required",
+                    "severity": "hold",
+                    "blocking": True,
+                    "message": "Confirm the bounded extraction as one batch.",
+                }
+            ],
+            "records": [
+                {
+                    "id": f"register-{page}",
+                    "name": f"Register {page}",
+                    "address": str(40000 + page),
+                    "_source": {"page": page, "method": "coordinate-derived"},
+                }
+                for page in (10, 11, 12)
+            ],
+            "rejected_rows": [],
+        }
+
+        review = review_parse_evidence(source)
+
+        self.assertEqual("blocked", review["review_status"])
+        self.assertEqual(1, review["summary"]["blocking_decisions"])
+        self.assertEqual(3, review["decision_groups"][0]["affected_count"])
+        self.assertEqual("artifact", review["decision_groups"][0]["scope"])
+        self.assertTrue(all(not item["action_required"] for item in review["items"]))
+        self.assertEqual(
+            {"first_page": 10, "last_page": 12},
+            review["batch_scope"]["page_selection"],
+        )
 
 
 if __name__ == "__main__":

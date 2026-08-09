@@ -102,6 +102,11 @@ def apply_review_decisions(
         raw_decisions, (str, bytes, bytearray)
     ):
         raise ReviewDecisionError("decisions must be an array")
+    raw_hold_decisions = decision_record.get("hold_decisions", ())
+    if not isinstance(raw_hold_decisions, Sequence) or isinstance(
+        raw_hold_decisions, (str, bytes, bytearray)
+    ):
+        raise ReviewDecisionError("hold_decisions must be an array")
 
     result = deepcopy(dict(canonical_map))
     raw_points = result.get("points")
@@ -198,6 +203,70 @@ def apply_review_decisions(
             }
         )
 
+    prepared_hold_decisions: list[dict[str, Any]] = []
+    seen_hold_codes: set[str] = set()
+    source_hold_codes = {
+        str(hold.get("code", "")).strip()
+        for hold in result.get("source_holds", ())
+        if isinstance(hold, Mapping)
+        and str(hold.get("code", "")).strip()
+        and not _hold_has_point_scope(hold)
+    }
+    active_global_hold_codes = {
+        str(hold.get("code", "")).strip()
+        for hold in result.get("holds", ())
+        if isinstance(hold, Mapping)
+        and str(hold.get("code", "")).strip()
+        and not _hold_has_point_scope(hold)
+    }
+    available_hold_codes = source_hold_codes & active_global_hold_codes
+    for index, raw_decision in enumerate(raw_hold_decisions):
+        if not isinstance(raw_decision, Mapping):
+            raise ReviewDecisionError(f"hold_decisions[{index}] must be an object")
+        unknown = set(raw_decision) - {"code", "reason", "evidence_refs"}
+        if unknown:
+            raise ReviewDecisionError(
+                f"hold_decisions[{index}] has unknown fields: "
+                + ", ".join(sorted(str(value) for value in unknown))
+            )
+        code = _required_text(
+            raw_decision.get("code"), f"hold_decisions[{index}].code"
+        )
+        if code in seen_hold_codes:
+            raise ReviewDecisionError(
+                f"hold_decisions[{index}] duplicates hold code {code!r}"
+            )
+        if code not in available_hold_codes:
+            raise ReviewDecisionError(
+                f"hold_decisions[{index}] references unknown hold code {code!r}"
+            )
+        reason = _required_text(
+            raw_decision.get("reason"), f"hold_decisions[{index}].reason"
+        )
+        evidence_refs = raw_decision.get("evidence_refs", ())
+        if not isinstance(evidence_refs, Sequence) or isinstance(
+            evidence_refs, (str, bytes, bytearray)
+        ):
+            raise ReviewDecisionError(
+                f"hold_decisions[{index}].evidence_refs must be an array"
+            )
+        normalized_refs = [
+            _required_text(reference, f"hold_decisions[{index}].evidence_refs")
+            for reference in evidence_refs
+        ]
+        if not normalized_refs:
+            raise ReviewDecisionError(
+                f"hold_decisions[{index}].evidence_refs needs at least one reference"
+            )
+        seen_hold_codes.add(code)
+        prepared_hold_decisions.append(
+            {
+                "code": code,
+                "reason": reason,
+                "evidence_refs": normalized_refs,
+            }
+        )
+
     # Apply fields in one fixed order. This makes a record with related fields,
     # such as datatype and byte_order, independent of array order.
     for point_id, point in point_index.items():
@@ -272,6 +341,51 @@ def apply_review_decisions(
         )
         normalized_decisions.append(audit)
 
+    resolved_hold_codes = {
+        str(decision["code"]) for decision in prepared_hold_decisions
+    }
+    for decision in prepared_hold_decisions:
+        normalized_decisions.append(
+            {
+                "review_id": review_id,
+                "reviewed_at": reviewed_at,
+                "reviewer": reviewer,
+                "action": "resolve-hold",
+                "hold_code": decision["code"],
+                "reason": decision["reason"],
+                "evidence_refs": deepcopy(decision["evidence_refs"]),
+            }
+        )
+
+    raw_source_holds = result.get("source_holds", ())
+    if isinstance(raw_source_holds, Sequence) and not isinstance(
+        raw_source_holds, (str, bytes, bytearray)
+    ):
+        updated_source_holds = []
+        for hold in raw_source_holds:
+            copied = deepcopy(hold)
+            if (
+                isinstance(copied, Mapping)
+                and copied.get("code") in resolved_hold_codes
+                and not _hold_has_point_scope(copied)
+            ):
+                copied = dict(copied)
+                matching = next(
+                    decision
+                    for decision in prepared_hold_decisions
+                    if decision["code"] == copied.get("code")
+                )
+                copied["disposition"] = {
+                    "status": "resolved",
+                    "review_id": review_id,
+                    "reviewed_at": reviewed_at,
+                    "reviewer": reviewer,
+                    "reason": matching["reason"],
+                    "evidence_refs": deepcopy(matching["evidence_refs"]),
+                }
+            updated_source_holds.append(copied)
+        result["source_holds"] = updated_source_holds
+
     excluded_points = []
     active_points = []
     for point in points:
@@ -303,6 +417,11 @@ def apply_review_decisions(
     for hold in result.get("holds", ()):
         if not isinstance(hold, Mapping):
             unresolved_holds.append(hold)
+            continue
+        if (
+            str(hold.get("code", "")) in resolved_hold_codes
+            and not _hold_has_point_scope(hold)
+        ):
             continue
         point_ids = hold.get("point_ids", ())
         ids = {
@@ -394,7 +513,7 @@ def apply_review_decisions(
     ]
     approved = approve_map and not holds
     result["review_status"] = (
-        "approved" if approved else "blocked" if holds else "ready-for-human-review"
+        "approved" if approved else "blocked" if holds else "ready"
     )
     result["approval"] = (
         {
@@ -417,6 +536,15 @@ def apply_review_decisions(
     )
     result["summary"] = summary
     return result
+
+
+def _hold_has_point_scope(hold: Mapping[str, Any]) -> bool:
+    point_ids = hold.get("point_ids", ())
+    return (
+        isinstance(point_ids, Sequence)
+        and not isinstance(point_ids, (str, bytes, bytearray))
+        and bool(point_ids)
+    )
 
 
 def _required_text(value: Any, label: str) -> str:

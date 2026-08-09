@@ -17,7 +17,18 @@ Build public, read-only Modbus engineering skills and deterministic workflows.
 - Support Modbus reads only. Permit function codes 01, 02, 03, and 04.
 - Do not generate write requests, broadcast requests, discovery scans, or unbounded polling.
 - Keep unresolved address conventions, register areas, unit identifiers, datatypes, and byte orders visible as holds.
-- Require human confirmation before a probe artifact becomes a final artifact.
+- Require one scoped human confirmation before live device use or when unresolved
+  engineering evidence could materially change a final artifact.
+
+## Human-Time Budget
+
+- Optimize for minutes of human attention, not maximum approval ceremony.
+- Complete safe, local, deterministic work without intermediate check-ins.
+- Verify what code and artifacts can prove; never ask a person to repeat that work.
+- Group unresolved items by root cause and ask for all necessary choices together.
+- Never default to page-by-page, row-by-row, point-by-point, or file-by-file approval.
+- Treat a user's clearly scoped confirmation as applying to the whole stated scope and
+  record it once with hashes, counts, and exceptions.
 
 ## Implementation
 
