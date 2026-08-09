@@ -15,7 +15,9 @@ Follow `../../references/interaction-contract.md`.
 2. Require raw 16-bit words and the point, route, unit, area, and protocol-offset identity.
 3. Match the requested datatype width to the sample before decoding. Reject a 32-bit request when only one register was captured.
 4. Run `python3 <skill-dir>/scripts/run.py --input <capture.json> --types uint32,int32,float32 --output <evidence.json>` with the applicable datatype family.
-5. Evaluate every supported layout for the sample width. For one register, state that word order does not apply and compare only AB/BA byte order.
+5. Evaluate every supported layout for the sample width. For one-register integers,
+   state that byte and word order are not applicable and report protocol order `AB`
+   without presenting a misleading `BA` interpretation.
 6. Apply scaling only after raw decoding.
 7. Report NaN, infinity, subnormal, range, and stability evidence.
 8. Eliminate candidates contradicted by explicit engineering constraints. If exactly

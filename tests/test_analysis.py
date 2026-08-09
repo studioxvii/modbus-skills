@@ -307,6 +307,21 @@ class CaptureAnalysisTests(unittest.TestCase):
         self.assertIn("CAMPAIGN_UNIT_ID_MISSING", codes)
         self.assertIn("RUNTIME_METADATA_INVALID", codes)
 
+    def test_runtime_metadata_requires_the_complete_native_evidence_shape(self) -> None:
+        result = analyze_capture(
+            {
+                "schema_version": "capture/v1",
+                "runtime_metadata": {},
+                "samples": [],
+            }
+        )
+
+        self.assertFalse(result["runtime_evidence"]["valid"])
+        finding = next(
+            item for item in result["findings"] if item["code"] == "RUNTIME_METADATA_INVALID"
+        )
+        self.assertEqual(4, finding["count"])
+
 
 if __name__ == "__main__":
     unittest.main()

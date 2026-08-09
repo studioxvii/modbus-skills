@@ -186,6 +186,10 @@ def _runtime_evidence(
         errors.append("runtime_metadata must be an object")
         return evidence, errors
 
+    for field in ("target", "terminal_state", "queue_depth", "max_in_flight"):
+        if field not in raw:
+            errors.append(f"runtime_metadata.{field} is required")
+
     target = raw.get("target")
     if target is not None:
         if isinstance(target, str) and target.strip() == "node-red":

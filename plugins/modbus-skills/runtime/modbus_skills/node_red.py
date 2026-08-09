@@ -822,6 +822,7 @@ def _capture_function(
         "  if (!completedRequestIds.includes(requestId)) completedRequestIds.push(requestId);\n"
         "  flow.set('modbusSkillsCompletedRequestIds', completedRequestIds);\n"
         "}\n"
+        "flow.set('modbusSkillsActiveBlockId', null);\n"
         "return [null, {\n"
         "  modbusSkillsContinue: !retry, modbusSkillsRetry: retry,\n"
         "  modbusSkillsRequest: request, payload: {action: retry ? 'retry' : 'next'}\n"

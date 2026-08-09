@@ -141,6 +141,36 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
             with self.assertRaises(SimulatorError):
                 client.readiness()
 
+    def test_runtime_clients_reject_remote_credentialed_and_redirected_urls(self) -> None:
+        for value in (
+            "http://example.com:1880",
+            "https://127.0.0.1:1880",
+            "http://user@127.0.0.1:1880",
+            "http://127.0.0.1",
+            "http://127.0.0.1:0",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(NodeRedCampaignError):
+                    NodeRedAdminClient(value)
+                with self.assertRaises(SimulatorError):
+                    SimulatorClient(value)
+
+        class RedirectResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def geturl(self):
+                return "http://example.com:1880/flows"
+
+            def read(self):
+                return b"[]"
+
+        with self.assertRaisesRegex(NodeRedCampaignError, "redirected"):
+            NodeRedAdminClient(opener=lambda *_args, **_kwargs: RedirectResponse()).flows()
+
     def test_admin_driver_deploys_once_for_multiple_rounds_and_restores_once(self) -> None:
         class Response:
             def __init__(self, body=b""):
@@ -197,6 +227,46 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
         self.assertEqual(["run:block"], capture["expected_request_ids"])
         self.assertEqual(2, sum(1 for method, url in calls if method == "POST" and url.endswith("/flows")))
         self.assertEqual(2, sum(1 for method, url in calls if method == "POST" and "/inject/" in url))
+
+    def test_admin_session_restores_flow_after_trigger_failure(self) -> None:
+        admin = NodeRedAdminClient(opener=lambda *_args, **_kwargs: None)
+        flow = [
+            {"id": "tab", "type": "tab", "disabled": True},
+            {"id": "inject", "type": "inject", "repeat": "", "crontab": "", "once": False},
+            {"id": "read", "type": "modbus-flex-getter", "fc": 3, "tcpHost": "127.0.0.1"},
+        ]
+        deployments = []
+        with patch.object(admin, "flows", return_value=[{"id": "original"}]), patch.object(
+            admin, "deploy", side_effect=lambda value: deployments.append(value)
+        ), patch.object(admin, "trigger", side_effect=NodeRedCampaignError("trigger failed")):
+            with self.assertRaisesRegex(NodeRedCampaignError, "trigger failed"):
+                with admin.campaign_session(
+                    flow, capture_path=Path("capture.json"), environment={}
+                ) as run_round:
+                    run_round(1)
+        self.assertEqual(2, len(deployments))
+        self.assertEqual([{"id": "original"}], deployments[-1])
+
+    def test_trigger_time_is_charged_to_the_round_deadline(self) -> None:
+        now = [0.0]
+        admin = NodeRedAdminClient(clock=lambda: now[0], wait=lambda _seconds: None)
+        flow = [
+            {"id": "tab", "type": "tab", "disabled": True},
+            {"id": "inject", "type": "inject", "repeat": "", "crontab": "", "once": False},
+            {"id": "read", "type": "modbus-flex-getter", "fc": 3, "tcpHost": "127.0.0.1"},
+        ]
+
+        def slow_trigger(*_args, **_kwargs):
+            now[0] = 2.0
+
+        with patch.object(admin, "flows", return_value=[]), patch.object(
+            admin, "deploy"
+        ), patch.object(admin, "trigger", side_effect=slow_trigger):
+            with self.assertRaisesRegex(NodeRedCampaignError, "did not drain"):
+                with admin.campaign_session(
+                    flow, capture_path=Path("capture.json"), environment={}
+                ) as run_round:
+                    run_round(1)
 
 
 if __name__ == "__main__":

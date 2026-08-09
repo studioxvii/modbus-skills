@@ -289,8 +289,9 @@ def run_campaign(
                     runtime_evidence["valid"]
                     and runtime_evidence["terminal_state"] == "drained"
                     and runtime_evidence["queue_depth"] == 0
+                    and runtime_evidence["max_in_flight"] == 1
                 )
-                if campaign["observed_requests"] != len(blocks) or not campaign["requests_complete"]:
+                if campaign["observed_requests"] != len(blocks) or not campaign["batch_complete"]:
                     coverage_error = True
                 report["request_count"] += int(campaign["observed_requests"])
                 report["error_count"] += int(analysis["communications"]["error_count"])

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import csv
+import contextlib
 from io import StringIO
 import json
 import sys
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +105,64 @@ class ModscanExporterTests(unittest.TestCase):
         setup = json.loads(text(result, "setup-manifest.json"))
         self.assertEqual("not-run", setup["native_verification"]["status"])
         self.assertIn("Native ModScan verification was not run", text(result, "README.md"))
+
+    def test_pymodbus_fallback_executes_one_compiled_read_and_closes(self) -> None:
+        canonical_map, read_plan = inputs()
+        script = text(export_modscan(canonical_map, read_plan), "pymodbus-read-once.py")
+        calls = []
+
+        class Response:
+            registers = [10, 20]
+
+            def isError(self):
+                return False
+
+        class Client:
+            def __init__(self, host, *, port, timeout):
+                calls.append(("init", host, port, timeout))
+
+            def connect(self):
+                return True
+
+            def read_holding_registers(self, *, address, count, device_id):
+                calls.append(("read", address, count, device_id))
+                return Response()
+
+            def close(self):
+                calls.append(("close",))
+
+        pymodbus = types.ModuleType("pymodbus")
+        client_module = types.ModuleType("pymodbus.client")
+        client_module.ModbusTcpClient = Client
+        namespace = {"__name__": "generated_fallback"}
+        with patch.dict(sys.modules, {"pymodbus": pymodbus, "pymodbus.client": client_module}):
+            exec(compile(script, "pymodbus-read-once.py", "exec"), namespace)
+            output = StringIO()
+            request_id = namespace["REQUESTS"][0]["request_id"]
+            argv = [
+                "pymodbus-read-once.py",
+                "--request",
+                request_id,
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "502",
+                "--unit",
+                "1",
+                "--confirm-read",
+                "READ",
+            ]
+            with patch.object(sys, "argv", argv), contextlib.redirect_stdout(output):
+                self.assertEqual(0, namespace["main"]())
+        self.assertEqual(("read", 100, 2, 1), calls[1])
+        self.assertEqual(("close",), calls[-1])
+        self.assertEqual([10, 20], json.loads(output.getvalue())["values"])
+
+    def test_pymodbus_fallback_rejects_incomplete_blocks(self) -> None:
+        with self.assertRaisesRegex(ValueError, "bounded unit, address, and count"):
+            pymodbus_fallback_artifact(
+                ({"request_id": "missing", "function_code": 3},), "fallback.py"
+            )
 
     def test_modpoll_and_modscan_use_identical_fallback_implementation(self) -> None:
         from modbus_skills.modpoll import export_modpoll

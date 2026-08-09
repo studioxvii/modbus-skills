@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -24,6 +25,44 @@ class SimulatorError(RuntimeError):
 
 
 _HOST_PLACEHOLDER = re.compile(r"^\$\{MODBUS(?:_[A-Z0-9_]+)?_HOST\}$")
+
+
+def _loopback_http_url(value: str, label: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{label} must use loopback HTTP with an explicit port") from exc
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+        or port is None
+        or not 1 <= port <= 65535
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise ValueError(f"{label} must use loopback HTTP with an explicit port")
+    return value.rstrip("/")
+
+
+def _same_origin(url: str, expected: str) -> bool:
+    try:
+        actual_url = urlsplit(url)
+        expected_url = urlsplit(expected)
+        return (
+            actual_url.scheme,
+            actual_url.hostname,
+            actual_url.port,
+        ) == (
+            expected_url.scheme,
+            expected_url.hostname,
+            expected_url.port,
+        )
+    except ValueError:
+        return False
 
 
 def validate_flow(flow: Sequence[Mapping[str, Any]]) -> None:
@@ -136,17 +175,23 @@ class NodeRedAdminClient:
         clock: Callable[[], float] = time.monotonic,
         wait: Callable[[float], None] = time.sleep,
     ) -> None:
-        if not base_url.startswith(
-            ("http://127.0.0.1:", "http://localhost:", "http://[::1]:")
-        ):
-            raise CampaignError("Node-RED admin URL must use loopback HTTP")
-        self.base_url = base_url.rstrip("/")
+        try:
+            self.base_url = _loopback_http_url(base_url, "Node-RED admin URL")
+        except ValueError as exc:
+            raise CampaignError(str(exc)) from exc
         self.timeout = timeout
         self._opener = opener
         self._clock = clock
         self._wait = wait
 
-    def _request(self, path: str, *, method: str = "GET", payload: Any = None) -> Any:
+    def _request(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        payload: Any = None,
+        timeout_seconds: float | None = None,
+    ) -> Any:
         body = None
         headers = {"Accept": "application/json"}
         if payload is not None:
@@ -154,7 +199,13 @@ class NodeRedAdminClient:
             headers["Content-Type"] = "application/json"
         request = Request(self.base_url + path, data=body, headers=headers, method=method)
         try:
-            with self._opener(request, timeout=self.timeout) as response:
+            timeout = self.timeout if timeout_seconds is None else min(
+                self.timeout, max(timeout_seconds, 0.001)
+            )
+            with self._opener(request, timeout=timeout) as response:
+                final_url = response.geturl() if hasattr(response, "geturl") else request.full_url
+                if not _same_origin(final_url, self.base_url):
+                    raise CampaignError("Node-RED admin redirected away from loopback")
                 raw = response.read()
         except (HTTPError, URLError, OSError, TimeoutError) as exc:
             raise CampaignError(f"Node-RED admin request failed: {exc}") from exc
@@ -176,15 +227,16 @@ class NodeRedAdminClient:
     def deploy(self, flow: Sequence[Mapping[str, Any]]) -> None:
         self._request("/flows", method="POST", payload=[dict(node) for node in flow])
 
-    def trigger(self, node_id: str) -> None:
+    def trigger(self, node_id: str, *, timeout_seconds: float | None = None) -> None:
         if not node_id.isalnum():
             raise CampaignError("Node-RED inject ID is invalid")
-        self._request(f"/inject/{node_id}", method="POST")
+        self._request(
+            f"/inject/{node_id}", method="POST", timeout_seconds=timeout_seconds
+        )
 
     def _wait_for_capture(
-        self, capture_path: Path, *, previous_mtime: int | None, timeout_seconds: float
+        self, capture_path: Path, *, previous_mtime: int | None, deadline: float
     ) -> dict[str, Any]:
-        deadline = self._clock() + timeout_seconds
         while self._clock() < deadline:
             try:
                 current_mtime = capture_path.stat().st_mtime_ns
@@ -240,15 +292,19 @@ class NodeRedAdminClient:
         ]
 
         def run_round(timeout_seconds: float) -> dict[str, Any]:
+            deadline = self._clock() + timeout_seconds
             try:
                 previous_mtime = capture_path.stat().st_mtime_ns
             except FileNotFoundError:
                 previous_mtime = None
-            self.trigger(str(injects[0]["id"]))
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                raise CampaignError("Node-RED read plan did not drain before the timeout")
+            self.trigger(str(injects[0]["id"]), timeout_seconds=remaining)
             return self._wait_for_capture(
                 capture_path,
                 previous_mtime=previous_mtime,
-                timeout_seconds=timeout_seconds,
+                deadline=deadline,
             )
 
         try:
@@ -277,7 +333,10 @@ class SimulatorClient:
     """Bounded JSON client for the generator simulator control-plane APIs."""
 
     def __init__(self, base_url: str, *, timeout: float = 3.0, opener=urlopen) -> None:
-        self.base_url = base_url.rstrip("/")
+        try:
+            self.base_url = _loopback_http_url(base_url, "simulator URL")
+        except ValueError as exc:
+            raise SimulatorError(str(exc)) from exc
         self.timeout = timeout
         self._opener = opener
 
@@ -294,6 +353,9 @@ class SimulatorClient:
         request = Request(self.base_url + path, data=body, headers=headers, method=method)
         try:
             with self._opener(request, timeout=self.timeout) as response:
+                final_url = response.geturl() if hasattr(response, "geturl") else request.full_url
+                if not _same_origin(final_url, self.base_url):
+                    raise SimulatorError("simulator redirected away from loopback")
                 raw = response.read()
                 status = getattr(response, "status", 200)
         except HTTPError as exc:

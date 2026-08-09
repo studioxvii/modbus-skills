@@ -96,6 +96,7 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
                 "max_in_flight": 1,
             },
             "expected_request_ids": [f"run:{block['block_id']}" for block in blocks],
+            "expected_unit_ids": list(range(1, 11)),
             "completed_request_ids": [f"run:{block['block_id']}" for block in blocks],
             "samples": [
                 {
@@ -163,6 +164,19 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
                 simulator=Simulator(),
                 capture_path=Path(directory) / "capture.json",
             )
+            capture["expected_unit_ids"] = [1, 1, *range(2, 11)]
+            incomplete_report = run_campaign(
+                contract,
+                profile_id="fleet-10",
+                authorized=True,
+                runtime=NodeRedRuntime(which=lambda _: "/tmp/node-red", wait=lambda _: None),
+                flow=flow,
+                hashes=hashes,
+                artifact_paths=artifact_paths,
+                admin=Admin(),
+                simulator=Simulator(),
+                capture_path=Path(directory) / "capture.json",
+            )
         _assert_report_shape(self, report)
         self.assertEqual("passed", report["status"])
         self.assertEqual(30, report["request_count"])
@@ -170,6 +184,8 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         self.assertTrue(report["queue_drained"])
         self.assertEqual(3, len(report["response_time_ms"]))
         self.assertTrue(report["cleanup"]["flow_removed"])
+        self.assertEqual("failed", incomplete_report["status"])
+        self.assertIn("planned-requests-missing", incomplete_report["issue_codes"])
 
 
 if __name__ == "__main__":
