@@ -274,7 +274,7 @@ def export_node_red(
                 "wires": [
                     [read_ids[index], watchdog_id] for index in range(len(routes))
                 ]
-                + [[plan_status_debug_id]],
+                + [[plan_status_debug_id, capture_id]],
             },
         ]
     )
@@ -360,6 +360,7 @@ def export_node_red(
                     map_digest,
                     plan_digest,
                     [block["block_id"] for block in block_specs],
+                    sorted({block["unit_id"] for block in block_specs}),
                 ),
                 "outputs": 2,
                 "timeout": 0,
@@ -646,28 +647,45 @@ def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int) -> 
         "  values[index] = value;\n"
         "  return values;\n"
         "};\n"
-        "const next = () => {\n"
-        "  const queue = flow.get('modbusSkillsQueue') || [];\n"
-        "  if (queue.length === 0) {\n"
-        "    flow.set('modbusSkillsRunning', false);\n"
-        "    return output(statusIndex, {payload: {state: 'complete', request_count: blocks.length}});\n"
+        "const retryLimit = 1;\n"
+        "const finalize = (state) => {\n"
+        "  flow.set('modbusSkillsRunning', false);\n"
+        "  flow.set('modbusSkillsQueue', []);\n"
+        "  flow.set('modbusSkillsActiveBlockId', null);\n"
+        "  return output(statusIndex, {\n"
+        "    modbusSkillsFinalize: true,\n"
+        "    payload: {state, request_count: blocks.length, max_in_flight: 1, retry_limit: 1}\n"
+        "  });\n"
+        "};\n"
+        "const send = (block, attempt) => {\n"
+        "  if (flow.get('modbusSkillsActiveBlockId')) {\n"
+        "    return output(statusIndex, {payload: {state: 'in-flight'}});\n"
         "  }\n"
-        "  const block = queue.shift();\n"
-        "  flow.set('modbusSkillsQueue', queue);\n"
         "  const request = {\n"
         "    block_id: block.block_id, route_id: block.route_id, unit_id: block.unit_id,\n"
         "    area: block.area, function_code: block.function_code,\n"
         "    start_offset: block.start_offset, quantity: block.quantity,\n"
-        "    mode: block.mode, point_specs: block.point_specs, started_at_ms: Date.now()\n"
+        "    mode: block.mode, point_specs: block.point_specs, attempt,\n"
+        "    max_attempts: retryLimit + 1, started_at_ms: Date.now()\n"
         "  };\n"
         "  flow.set('modbusSkillsActiveBlockId', block.block_id);\n"
-        "  const requestMsg = {\n"
+        "  return output(block.route_index, {\n"
         "    topic: block.block_id, modbusSkillsRequest: request,\n"
         "    payload: {fc: block.function_code, unitid: block.unit_id, address: block.start_offset, quantity: block.quantity}\n"
-        "  };\n"
-        "  return output(block.route_index, requestMsg);\n"
+        "  });\n"
         "};\n"
-        "if (msg && msg.payload && msg.payload.action === 'start') {\n"
+        "const next = () => {\n"
+        "  const queue = flow.get('modbusSkillsQueue') || [];\n"
+        "  if (queue.length === 0) {\n"
+        "    return finalize('drained');\n"
+        "  }\n"
+        "  const block = queue.shift();\n"
+        "  flow.set('modbusSkillsQueue', queue);\n"
+        "  return send(block, 0);\n"
+        "};\n"
+        "const action = msg && msg.payload ? msg.payload.action : null;\n"
+        "if (action === 'cancel') return finalize('cancelled');\n"
+        "if (action === 'start') {\n"
         "  if (flow.get('modbusSkillsRunning')) {\n"
         "    return output(statusIndex, {payload: {state: 'already-running'}});\n"
         "  }\n"
@@ -678,6 +696,13 @@ def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int) -> 
         "  flow.set('modbusSkillsActiveBlockId', null);\n"
         "  flow.set('modbusSkillsRunId', `run-${Date.now()}`);\n"
         "  return next();\n"
+        "}\n"
+        "if (msg && msg.modbusSkillsRetry === true) {\n"
+        "  const request = msg.modbusSkillsRequest || {};\n"
+        "  const block = blocks.find((candidate) => candidate.block_id === request.block_id);\n"
+        "  const attempt = Number.isInteger(request.attempt) ? request.attempt + 1 : 1;\n"
+        "  if (!block || attempt > retryLimit) return next();\n"
+        "  return send(block, attempt);\n"
         "}\n"
         "if (msg && msg.modbusSkillsContinue === true) return next();\n"
         "return output(statusIndex, {payload: {state: 'ignored-message'}});"
@@ -736,53 +761,72 @@ def _capture_function(
     map_digest: str,
     plan_digest: str,
     block_ids: list[str],
+    unit_ids: list[int],
 ) -> str:
     return (
         f"const mapHash = {stable_json(map_digest, pretty=False)};\n"
         f"const planHash = {stable_json(plan_digest, pretty=False)};\n"
         f"const expectedBlockIds = {stable_json(block_ids, pretty=False)};\n"
-        "const request = msg.modbusSkillsRequest || {};\n"
+        f"const expectedUnitIds = {stable_json(unit_ids, pretty=False)};\n"
         "const runId = flow.get('modbusSkillsRunId');\n"
+        "if (msg.modbusSkillsFinalize === true) {\n"
+        "  const completedRequestIds = flow.get('modbusSkillsCompletedRequestIds') || [];\n"
+        "  const capture = {\n"
+        "    schema_version: \"capture/v1\", capture_id: runId,\n"
+        "    canonical_map_hash: mapHash, read_plan_hash: planHash,\n"
+        "    expected_request_ids: expectedBlockIds.map((id) => `${runId}:${id}`),\n"
+        "    expected_unit_ids: expectedUnitIds,\n"
+        "    completed_request_ids: completedRequestIds,\n"
+        "    runtime_metadata: {\n"
+        f"      target: 'node-red', adapter_version: {stable_json(ADAPTER_VERSION, pretty=False)},\n"
+        "      terminal_state: msg.payload && msg.payload.state, queue_depth: 0,\n"
+        "      max_in_flight: 1, retry_limit: 1\n"
+        "    },\n"
+        "    samples: flow.get('modbusSkillsCapture') || []\n"
+        "  };\n"
+        "  return [{\n"
+        "    filename: env.get('MODBUS_CAPTURE_PATH') || 'modbus-capture.json',\n"
+        "    payload: JSON.stringify(capture, null, 2)\n"
+        "  }, null];\n"
+        "}\n"
+        "const request = msg.modbusSkillsRequest || {};\n"
         "const requestId = `${runId}:${request.block_id}`;\n"
         "const timestamp = new Date().toISOString();\n"
         "const elapsed = Number.isFinite(request.started_at_ms) ? Date.now() - request.started_at_ms : null;\n"
         "const derived = Array.isArray(msg.payload) ? msg.payload : [];\n"
         "const successful = derived.length > 0 && !msg.error && !msg.modbusError && !msg.modbusSkillsReadError;\n"
         "const points = Array.isArray(request.point_specs) ? request.point_specs : [];\n"
-        "const samples = successful ? derived.map((point) => ({\n"
-        "  sample_id: `${requestId}:${point.point_id}`, request_id: requestId,\n"
+        "const baseSample = (point, suffix = '') => ({\n"
+        "  sample_id: `${requestId}:${point.point_id}${suffix}`, request_id: requestId,\n"
         "  point_id: point.point_id, block_id: request.block_id, route: request.route_id, route_id: request.route_id,\n"
         "  unit_id: request.unit_id, area: request.area,\n"
         "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
-        "  timestamp, response_time_ms: elapsed, status: 'success', success: true, raw_words: point.raw_values || [],\n"
+        "  timestamp, response_time_ms: elapsed\n"
+        "});\n"
+        "const samples = successful ? derived.map((point) => ({\n"
+        "  ...baseSample(point),\n"
+        "  status: 'success', success: true, raw_words: point.raw_values || [],\n"
         "  derived_values: point\n"
         "})) : points.map((point) => ({\n"
-        "  sample_id: `${requestId}:${point.point_id}:error`, request_id: requestId,\n"
-        "  point_id: point.point_id, block_id: request.block_id, route: request.route_id, route_id: request.route_id,\n"
-        "  unit_id: request.unit_id, area: request.area,\n"
-        "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
-        "  timestamp, response_time_ms: elapsed, status: 'error', success: false, raw_words: [],\n"
+        "  ...baseSample(point, ':error'),\n"
+        "  status: 'error', success: false, raw_words: [],\n"
         "  error: (msg.modbusSkillsReadError && msg.modbusSkillsReadError.reason) ||\n"
         "    (msg.payload && msg.payload.state) || (msg.error && msg.error.message) || 'read-failed'\n"
         "}));\n"
         "const existing = flow.get('modbusSkillsCapture') || [];\n"
         "existing.push(...samples);\n"
-        "const combined = existing;\n"
-        "flow.set('modbusSkillsCapture', combined);\n"
-        "const completedRequestIds = flow.get('modbusSkillsCompletedRequestIds') || [];\n"
-        "completedRequestIds.push(requestId);\n"
-        "flow.set('modbusSkillsCompletedRequestIds', completedRequestIds);\n"
-        "const capture = {\n"
-        "  schema_version: \"capture/v1\", capture_id: runId,\n"
-        "  canonical_map_hash: mapHash, read_plan_hash: planHash,\n"
-        "  expected_request_ids: expectedBlockIds.map((id) => `${runId}:${id}`),\n"
-        "  completed_request_ids: completedRequestIds, samples: combined\n"
-        "};\n"
-        "const fileMsg = {\n"
-        "  filename: env.get('MODBUS_CAPTURE_PATH') || 'modbus-capture.json',\n"
-        "  payload: JSON.stringify(capture, null, 2)\n"
-        "};\n"
-        "return [fileMsg, {modbusSkillsContinue: true, payload: {action: 'next'}}];"
+        "flow.set('modbusSkillsCapture', existing);\n"
+        "const retry = !successful && Number(request.attempt || 0) < 1;\n"
+        "if (!retry) {\n"
+        "  const completedRequestIds = flow.get('modbusSkillsCompletedRequestIds') || [];\n"
+        "  if (!completedRequestIds.includes(requestId)) completedRequestIds.push(requestId);\n"
+        "  flow.set('modbusSkillsCompletedRequestIds', completedRequestIds);\n"
+        "}\n"
+        "flow.set('modbusSkillsActiveBlockId', null);\n"
+        "return [null, {\n"
+        "  modbusSkillsContinue: !retry, modbusSkillsRetry: retry,\n"
+        "  modbusSkillsRequest: request, payload: {action: retry ? 'retry' : 'next'}\n"
+        "}];"
     )
 
 
@@ -864,10 +908,10 @@ Set each port to a decimal TCP port. {run_instructions} Import `flow.json`,
 review it, deploy it while it is disabled, and then enable the tab only when
 the endpoint is safe for one bounded read.
 
-Set `MODBUS_CAPTURE_PATH` to the local path for `capture.json`. The flow
-rewrites that file after every response so it always contains a complete
-`capture/v1` document. The flow uses one shared reader per route and keeps one
-request in flight.
+Set `MODBUS_CAPTURE_PATH` to the local path for `capture.json`. The flow writes
+one complete `capture/v1` document only after the queue drains or the run is
+cancelled. The flow uses one shared reader per route, keeps one request in
+flight, and retries a failed block at most once.
 
 The derive nodes keep an immutable copy of the raw values. They also attach
 point datatype, byte-order, scaling, and engineering-unit metadata. For each

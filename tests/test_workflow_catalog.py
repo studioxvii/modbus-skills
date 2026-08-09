@@ -34,6 +34,21 @@ class WorkflowCatalogTests(unittest.TestCase):
         self.assertIn("$compile-user-map", router)
         self.assertIn("explicitly requested stage", router)
 
+    def test_router_defaults_to_complete_safe_chain_but_keeps_direct_stage_routes(self) -> None:
+        router = (
+            ROOT / "plugins" / "modbus-skills" / "skills" / "modbus-help" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        paths = (
+            ROOT / "plugins" / "modbus-skills" / "references" / "user-paths.md"
+        ).read_text(encoding="utf-8")
+        complete_chain = (
+            "$normalize-map -> $check-map -> $plan-reads -> $build-node-red -> "
+            "$capture-sample -> $analyze-capture -> $check-byte-order"
+        )
+        self.assertIn(complete_chain, router)
+        self.assertIn(complete_chain, paths)
+        self.assertIn("Route an explicitly requested stage directly", router)
+
     def test_shared_completion_contract_recommends_one_actionable_next_step(self) -> None:
         contract = (
             ROOT / "plugins" / "modbus-skills" / "references" / "interaction-contract.md"

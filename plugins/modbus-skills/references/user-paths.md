@@ -3,6 +3,17 @@
 Choose the path from the user's outcome and current artifact. Prefer one outcome skill;
 use a specialist only when the user explicitly requests that stage.
 
+## Complete safe path
+
+For broad setup, validation, or troubleshooting help, show this path automatically:
+
+```text
+$normalize-map -> $check-map -> $plan-reads -> $build-node-red -> $capture-sample -> $analyze-capture -> $check-byte-order
+```
+
+Add `$parse-map` or `$extract-pdf-map` before it for raw sources. Each live step is
+bounded and read-only. Route an explicit stage request directly to that stage.
+
 ## I need an organized user map or outputs from an OEM source
 
 ```text
@@ -85,5 +96,5 @@ opaque or undocumented native format -> stop at a documented interchange plan
 Recommend the skill that completes the user's outcome with its available inputs.
 Choose `$compile-user-map` for OEM-source-to-user-output requests. Choose a specialist
 for explicit extraction, parsing, review, comparison, remapping, capture analysis,
-byte-order, planning, or target-only requests. Show a sequence only when asked. Offer
-one alternate only when the current goal is genuinely ambiguous.
+byte-order, planning, or target-only requests. Show the complete safe path for broad
+help. Offer one alternate only when the current goal is genuinely ambiguous.

@@ -23,6 +23,126 @@ FIXTURES = ROOT / "tests" / "fixtures" / "maps"
 
 
 class NormalizeMapTests(unittest.TestCase):
+    def test_datatype_width_must_match_explicit_register_span(self) -> None:
+        result = normalize_map(
+            [
+                {
+                    "logical_point_id": "bad-width",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "protocol_offset": 0,
+                    "datatype": "uint32",
+                    "word_span": 1,
+                }
+            ]
+        )
+
+        self.assertIn(
+            "point.datatype-span-mismatch",
+            {hold["code"] for hold in result["holds"]},
+        )
+        self.assertEqual("pending", result["points"][0]["normalization_status"])
+
+    def test_one_register_integer_byte_order_is_not_applicable(self) -> None:
+        result = normalize_map(
+            [
+                {
+                    "logical_point_id": "one-word",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "protocol_offset": 0,
+                    "datatype": "uint16",
+                    "byte_order": "BA",
+                }
+            ]
+        )
+
+        point = result["points"][0]
+        self.assertIsNone(point["byte_order"])
+        self.assertIsNone(point["byte_order_confirmed"])
+        self.assertEqual("not-applicable", point["byte_order_status"])
+        self.assertNotIn(
+            "point.byte-order-unrecognized",
+            {hold["code"] for hold in result["holds"]},
+        )
+
+    def test_simulator_profile_and_runtime_provenance_are_validated_and_preserved(self) -> None:
+        source_hash = "a" * 64
+        source = {
+            "records": [
+                {
+                    "logical_point_id": "simulated-point",
+                    "route_id": "lab",
+                    "unit_id": 2,
+                    "area": "holding-register",
+                    "protocol_offset": 0,
+                    "datatype": "uint16",
+                }
+            ],
+            "source_map_hash": source_hash,
+            "simulator_profile": {
+                "schema_version": "modbus-simulator-profile/v1",
+                "profile_id": "synthetic-read-only",
+                "supported_areas": ["holding-register"],
+                "supported_datatypes": ["uint16"],
+                "max_unit_id": 10,
+                "max_word_span": 1,
+            },
+            "runtime_observation": {
+                "source_map_hash": source_hash,
+                "observation_id": "observation-001",
+                "observed_values": {"simulated-point": 17},
+            },
+        }
+
+        result = normalize_map(source)
+
+        self.assertEqual(source_hash, result["source_map_hash"])
+        self.assertEqual(source["simulator_profile"], result["simulator_profile"])
+        self.assertEqual(source["runtime_observation"], result["runtime_observation"])
+        self.assertEqual([], result["holds"])
+
+    def test_simulator_semantics_and_stale_runtime_observation_are_held(self) -> None:
+        source = {
+            "records": [
+                {
+                    "logical_point_id": "unsupported-point",
+                    "route_id": "lab",
+                    "unit_id": 11,
+                    "area": "input-register",
+                    "protocol_offset": 0,
+                    "datatype": "float32",
+                    "byte_order": "ABCD",
+                }
+            ],
+            "source_map_hash": "a" * 64,
+            "simulator_profile": {
+                "schema_version": "modbus-simulator-profile/v1",
+                "profile_id": "synthetic-read-only",
+                "supported_areas": ["holding-register"],
+                "supported_datatypes": ["uint16"],
+                "max_unit_id": 10,
+                "max_word_span": 1,
+            },
+            "runtime_observation": {
+                "source_map_hash": "b" * 64,
+                "observation_id": "stale-observation",
+            },
+        }
+
+        result = normalize_map(source)
+        codes = {hold["code"] for hold in result["holds"]}
+        self.assertIn("simulator.point-area-unsupported", codes)
+        self.assertIn("simulator.point-datatype-unsupported", codes)
+        self.assertIn("simulator.point-unit-id-unsupported", codes)
+        self.assertIn("simulator.point-span-unsupported", codes)
+        self.assertIn("runtime-observation.source-map-hash-mismatch", codes)
+
+        lint_codes = {finding["code"] for finding in lint_map(result)["findings"]}
+        self.assertTrue(codes.issubset(lint_codes))
+
     def test_missing_route_is_a_hold_and_is_not_guessed(self) -> None:
         result = normalize_map(
             [

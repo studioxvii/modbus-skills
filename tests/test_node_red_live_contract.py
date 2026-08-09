@@ -5,7 +5,9 @@ import json
 import re
 import unittest
 from pathlib import Path
-from urllib.parse import urlparse
+
+from scripts.run_node_red_live_campaign import validate_campaign_settings
+from modbus_skills.node_red_runtime import CampaignError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,47 +40,12 @@ def _load() -> dict[str, object]:
 def _validate_contract(value: dict[str, object]) -> None:
     """Validate the public campaign contract without contacting a runtime."""
 
-    assert value["schema_version"] == "node-red-live-campaign/v1"
-    profiles = value["profiles"]
-    assert isinstance(profiles, list)
-    assert {profile["fleet_size"] for profile in profiles} == {10, 50}
-    assert {profile["id"] for profile in profiles} == {"fleet-10", "fleet-50"}
-
-    budget = value["budget"]
-    assert budget == {
-        "rounds": 3,
-        "max_compiled_block_reads": 180,
-        "max_seconds": 60,
-        "cadence_seconds": 1,
-        "max_in_flight": 1,
-    }
+    validate_campaign_settings(value)
     assert value["readiness"] == {
         "required": True,
         "endpoint": "/api/ready",
         "fleet_size_must_match": True,
         "reported_modbus_port_required": True,
-    }
-
-    safety = value["safety"]
-    endpoint = urlparse(safety["endpoint"])
-    assert endpoint.hostname in {"127.0.0.1", "localhost", "::1"}
-    assert safety["require_loopback"] is True
-    assert safety["allowed_function_codes"] == [1, 2, 3, 4]
-    for forbidden in (
-        "writes",
-        "broadcasts",
-        "discovery_scans",
-        "scheduled_polling",
-        "deploy_time_triggers",
-        "credentials",
-    ):
-        assert safety[forbidden] is False
-
-    authorization = safety["authorization"]
-    assert authorization == {
-        "required": True,
-        "scope": "named-local-campaign",
-        "per_read": False,
     }
 
     bindings = value["hash_bindings"]
@@ -125,7 +92,7 @@ class NodeRedLiveContractTests(unittest.TestCase):
             with self.subTest(name=name):
                 candidate = copy.deepcopy(contract)
                 mutation(candidate)
-                with self.assertRaises((AssertionError, KeyError)):
+                with self.assertRaises((AssertionError, CampaignError, KeyError)):
                     _validate_contract(candidate)
 
     def test_sanitized_output_rejects_absolute_paths(self) -> None:

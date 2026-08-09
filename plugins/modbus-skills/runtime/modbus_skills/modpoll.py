@@ -41,6 +41,11 @@ from .exporters import (
     target_manifest,
     write_csv_row,
 )
+from .pymodbus_fallback import (
+    FALLBACK_FILENAME,
+    native_verification_not_run,
+    pymodbus_fallback_artifact,
+)
 
 
 ADAPTER_VERSION = "1.0.0"
@@ -201,6 +206,11 @@ def _export_gavinying(
             "operator-command-reference",
         )
     )
+    artifacts.append(
+        pymodbus_fallback_artifact(
+            blocks, f"modpoll/gavinying-cli/{FALLBACK_FILENAME}"
+        )
+    )
     manifest = target_manifest(
         target=TARGET,
         profile=profile,
@@ -213,6 +223,7 @@ def _export_gavinying(
             "format": "gavinying-modpoll-csv",
             "format_documentation": "https://gavinying.github.io/modpoll/configure.html",
             "routes": route_files,
+            "native_verification": native_verification_not_run("Modpoll"),
         },
     )
     artifacts.extend(
@@ -555,6 +566,7 @@ def _export_witte(
         },
         "routes": setup_routes,
         "read_plan": plan_path,
+        "native_verification": native_verification_not_run("Modpoll"),
     }
     artifacts.append(
         Artifact.text(
@@ -585,7 +597,13 @@ def _export_witte(
                 ),
             },
             "routes": setup_routes,
+            "native_verification": native_verification_not_run("Modpoll"),
         },
+    )
+    artifacts.append(
+        pymodbus_fallback_artifact(
+            blocks, f"modpoll/witte-desktop/{FALLBACK_FILENAME}"
+        )
     )
     artifacts.extend(
         [
@@ -756,6 +774,7 @@ def _export_witte_v12_xml(
         "connection_stored_in_documents": False,
         "operator_connection_setup_required": True,
         "opaque_native_files_bundled": False,
+        "native_verification": native_verification_not_run("Modpoll"),
     }
     manifest = target_manifest(
         target=TARGET,
@@ -771,7 +790,13 @@ def _export_witte_v12_xml(
             "minimum_documented_major_version": 12,
             "documents": documents,
             "opaque_native_files_bundled": False,
+            "native_verification": native_verification_not_run("Modpoll"),
         },
+    )
+    artifacts.append(
+        pymodbus_fallback_artifact(
+            blocks, f"modpoll/witte-v12-xml/{FALLBACK_FILENAME}"
+        )
     )
     artifacts.extend(
         [
@@ -1135,6 +1160,11 @@ The CSV files use the documented `device`, `poll`, and `ref` records. Each
 reference is read-only. The command reference uses `--once` so the first run is
 bounded.
 
+Native Modpoll verification was not run, so native verification is unavailable.
+If Modpoll is not available, install PyModbus and use `pymodbus-read-once.py` for
+one explicit request. It requires `--request`, `--host`, `--port`, the matching
+`--unit`, and `--confirm-read READ`.
+
 Review the route environment variables and every CSV row before use. Run each
 route command from the directory that contains its CSV file.
 
@@ -1149,6 +1179,11 @@ def _witte_readme(mode: str, *, live_read_seconds: int) -> str:
 This target does not contain a synthetic `.mbp` or `.mbw` file. The PowerShell
 scripts use the documented `Mbpoll.Application` and `Mbpoll.Document`
 Automation objects. Modbus Poll creates and saves each native `.mbp` document.
+
+Native Modpoll verification was not run, so native verification is unavailable.
+The cross-platform `pymodbus-read-once.py` fallback runs one selected compiled
+request and requires an explicit host, port, matching unit ID, and
+`--confirm-read READ`.
 
 Use this target only on a reviewed Windows test system with a licensed or valid
 evaluation copy of Modbus Poll. Set the route host and port variables. Inspect
@@ -1175,6 +1210,11 @@ def _witte_v12_readme(mode: str) -> str:
 These files follow the human-readable XML structure that Witte publishes for
 Modbus Poll version 12. Each XML file represents one compiled read request.
 The document uses base-zero protocol offsets and is disabled by default.
+
+Native Modpoll verification was not run, so native verification is unavailable.
+The cross-platform `pymodbus-read-once.py` fallback runs one selected compiled
+request and requires an explicit host, port, matching unit ID, and
+`--confirm-read READ`.
 
 The files do not store a connection endpoint. Configure the reviewed Modbus
 TCP or serial connection in Modbus Poll. Inspect the unit ID, function, address,

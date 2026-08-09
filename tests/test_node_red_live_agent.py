@@ -4,10 +4,11 @@ import json
 import hashlib
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.run_node_red_live_campaign import load_campaign_contract, run_campaign
-from node_red_live.node_red import NodeRedRuntime
+from modbus_skills.node_red_runtime import NodeRedRuntime
 from modbus_skills.exporters import canonical_map_hash
 from modbus_skills.node_red import export_node_red
 from modbus_skills.read_plan import compile_read_plan
@@ -88,7 +89,14 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         blocks = next(node["modbusSkillsBlocks"] for node in flow if node.get("modbusSkillsBlocks"))
         capture = {
             "schema_version": "capture/v1",
+            "runtime_metadata": {
+                "target": "node-red",
+                "terminal_state": "drained",
+                "queue_depth": 0,
+                "max_in_flight": 1,
+            },
             "expected_request_ids": [f"run:{block['block_id']}" for block in blocks],
+            "expected_unit_ids": list(range(1, 11)),
             "completed_request_ids": [f"run:{block['block_id']}" for block in blocks],
             "samples": [
                 {
@@ -114,9 +122,12 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         class Admin:
             restored = False
 
-            def run_flow(self, flow, *, capture_path, environment, timeout_seconds):
-                self.restored = True
-                return capture
+            @contextmanager
+            def campaign_session(self, flow, *, capture_path, environment):
+                try:
+                    yield lambda timeout_seconds: capture
+                finally:
+                    self.restored = True
 
         class Simulator:
             def require_ready(self, expected_fleet):
@@ -153,11 +164,28 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
                 simulator=Simulator(),
                 capture_path=Path(directory) / "capture.json",
             )
+            capture["expected_unit_ids"] = [1, 1, *range(2, 11)]
+            incomplete_report = run_campaign(
+                contract,
+                profile_id="fleet-10",
+                authorized=True,
+                runtime=NodeRedRuntime(which=lambda _: "/tmp/node-red", wait=lambda _: None),
+                flow=flow,
+                hashes=hashes,
+                artifact_paths=artifact_paths,
+                admin=Admin(),
+                simulator=Simulator(),
+                capture_path=Path(directory) / "capture.json",
+            )
         _assert_report_shape(self, report)
         self.assertEqual("passed", report["status"])
         self.assertEqual(30, report["request_count"])
         self.assertEqual(0, report["error_count"])
+        self.assertTrue(report["queue_drained"])
+        self.assertEqual(3, len(report["response_time_ms"]))
         self.assertTrue(report["cleanup"]["flow_removed"])
+        self.assertEqual("failed", incomplete_report["status"])
+        self.assertIn("planned-requests-missing", incomplete_report["issue_codes"])
 
 
 if __name__ == "__main__":

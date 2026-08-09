@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 import json
 import re
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -132,10 +134,58 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertIn("modbusSkillsContinue", sequencer["func"])
         self.assertIn('schema_version: "capture/v1"', capture["func"])
         self.assertIn("expected_request_ids", capture["func"])
+        self.assertIn("expected_unit_ids", capture["func"])
         self.assertIn("request_id", capture["func"])
         self.assertIn("MODBUS_CAPTURE_PATH", capture["func"])
+        self.assertIn("runtime_metadata", capture["func"])
+        self.assertIn("queue_depth: 0", capture["func"])
+        self.assertIn("raw_words", capture["func"])
+        self.assertIn("response_time_ms", capture["func"])
+        self.assertIn("msg.modbusSkillsFinalize", capture["func"])
+        self.assertIn("return [null,", capture["func"])
+        self.assertIn("action === 'cancel'", sequencer["func"])
+        self.assertIn("modbusSkillsRetry", sequencer["func"])
+        self.assertIn("retry_limit: 1", sequencer["func"])
+        self.assertIn("finalize('drained')", sequencer["func"])
         self.assertIn(sequencer["id"], capture["wires"][1])
         self.assertEqual(sink["id"], capture["wires"][0][0])
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required to execute generated functions")
+    def test_generated_campaign_executes_retry_drain_and_cancel_states(self) -> None:
+        canonical_map, read_plan = inputs()
+        flow = json.loads(artifact_text(export_node_red(canonical_map, read_plan), "flow.json"))
+        sequencer = next(
+            node["func"]
+            for node in flow
+            if node.get("type") == "function" and node.get("name") == "Run bounded read plan"
+        )
+        capture = next(
+            node["func"]
+            for node in flow
+            if node.get("type") == "function" and node.get("name") == "Build capture/v1"
+        )
+        harness = f"""
+const store = new Map();
+const flow = {{get: (key) => store.get(key), set: (key, value) => store.set(key, value)}};
+const env = {{get: () => null}};
+const seq = (msg) => Function('msg', 'flow', 'env', {json.dumps(sequencer)})(msg, flow, env);
+const sink = (msg) => Function('msg', 'flow', 'env', {json.dumps(capture)})(msg, flow, env);
+let routed = seq({{payload: {{action: 'start'}}}});
+let request = routed.find(Boolean).modbusSkillsRequest;
+let response = sink({{modbusSkillsRequest: request, modbusSkillsReadError: {{reason: 'timeout'}}}})[1];
+if (!response.modbusSkillsRetry || store.get('modbusSkillsActiveBlockId') !== null) throw new Error('retry was not released');
+routed = seq(response);
+request = routed.find(Boolean).modbusSkillsRequest;
+if (request.attempt !== 1) throw new Error('retry attempt was not bounded');
+response = sink({{modbusSkillsRequest: request, modbusSkillsReadError: {{reason: 'timeout'}}}})[1];
+if (!response.modbusSkillsContinue || response.modbusSkillsRetry) throw new Error('second failure did not advance');
+routed = seq(response);
+if (routed.at(-1).payload.state !== 'drained') throw new Error('campaign did not drain');
+seq({{payload: {{action: 'start'}}}});
+routed = seq({{payload: {{action: 'cancel'}}}});
+if (routed.at(-1).payload.state !== 'cancelled' || store.get('modbusSkillsRunning')) throw new Error('campaign did not cancel');
+"""
+        subprocess.run(["node", "-e", harness], check=True, capture_output=True, text=True)
 
     def test_probe_flow_accepts_unresolved_decoding(self) -> None:
         raw_point = point(
