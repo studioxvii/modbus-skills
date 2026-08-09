@@ -19,6 +19,10 @@ Follow `../../references/interaction-contract.md`.
    apply the conversion without another confirmation. Ask once only for ambiguity or
    a lossy/colliding result.
 
+## Output files
+
+- `preview.json` - Review this before replacing address notation. It shows every old and new address, unresolved conversion, and collision. The input map remains unchanged.
+
 Completion requires a collision-free, hash-bound preview before map output.
 
 ## Handoff

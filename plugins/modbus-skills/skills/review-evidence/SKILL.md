@@ -21,6 +21,10 @@ Follow `../../references/interaction-contract.md`.
 6. If the user confirms a bounded extraction, record one decision for the complete
    source hash, page range, record count, and exception list while preserving values.
 
+## Output files
+
+- `report.json` - Open this exception report. It separates verified evidence from the small set of grouped decisions that still need attention. It does not change the source artifact.
+
 Completion requires every item to have a status and every exception group to have a
 decision path. Verified items require no human response.
 

@@ -18,6 +18,12 @@ Follow `../../references/interaction-contract.md`.
 5. Validate escaping, newlines, spreadsheet formulas, and deterministic ordering;
    ask once only when multiple target shapes remain plausible.
 
+## Output files
+
+- `rendered-output.txt` - Open or import this generated data file.
+- `format-config.json` - Keep this small recipe so the same format can be generated again.
+- `evidence.json` - Normally ignore this. It records which example and map produced the output.
+
 Completion requires a validated declarative configuration and deterministic output.
 
 ## Handoff

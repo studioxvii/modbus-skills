@@ -24,6 +24,10 @@ Follow `../../references/interaction-contract.md`.
    with its source hash, page range, record count, checks, and exceptions. Never ask
    for page-by-page confirmation; one scoped confirmation covers the full range.
 
+## Output files
+
+- `pdf-extraction.json` - Open this only when reviewing extraction. It contains the candidate rows, source locations, automated checks, rejected rows, and grouped exceptions. It does not contain page images or full OCR text.
+
 Completion requires traceable candidate rows, a compact automated-check summary, and
 explicit holds only for actual exceptions or one batch source-confirmation scope.
 

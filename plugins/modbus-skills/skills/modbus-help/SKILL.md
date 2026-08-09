@@ -24,13 +24,18 @@ Show a sequence only when the user asks for the full path. Keep it to the shorte
 Use this format:
 
 ```text
-Next: $skill-name
+Recommended next: $skill-name
 Why: one sentence
-Needs: current input or missing decision
+Uses: exact current artifact paths or missing decision
 Produces: next artifact
-Then: optional next step
+Other options: zero or one alternative when materially useful
+Reply `proceed` to continue.
 ```
 
 For writes, broadcasts, discovery, or unbounded polling, explain the read-only boundary and stop.
+
+## Output files
+
+- None. This skill only names the next skill, the input it needs, and the result it will produce.
 
 Completion requires one verified route with its required input and observable output.

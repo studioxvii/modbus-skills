@@ -22,6 +22,13 @@ Follow `../../references/interaction-contract.md`.
 5. Keep unresolved values and excluded rows visible; never ask for blanket approval
    when automated checks find no exception.
 
+## Output files
+
+- `map-draft.json` - Start here if you need the normalized draft map.
+- `review.json` - Open this for the compact evidence status and grouped exceptions.
+- `lint.json` - Detailed deterministic validation findings; normally use it only to investigate a problem.
+- `parsed.json` - The source-shaped candidate rows; normally use it only to trace a value back to parsing.
+
 Completion requires a schema-valid draft, a complete automated review report, and a
 disposition path for every blocking exception. A clean draft is ready without an
 extra approval ritual.

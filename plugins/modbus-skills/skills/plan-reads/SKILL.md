@@ -19,6 +19,10 @@ Follow `../../references/interaction-contract.md`.
 5. Verify `planning_options` and its hash record the gap policy.
 6. For final output, verify the plan's canonical-map hash matches the exact map.
 
+## Output files
+
+- `read-plan.json` - Use this machine-readable list of bounded Modbus requests when building a target tool. It also records which points each request returns and why blocks were split.
+
 Completion requires every active point to be planned once with explicit route, unit, area, offset, and width.
 
 Use `--max-gap 0` without asking. Ask once only when a nonzero sparse-read policy is
