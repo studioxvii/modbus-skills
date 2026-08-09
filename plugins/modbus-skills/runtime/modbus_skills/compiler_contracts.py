@@ -79,6 +79,7 @@ def build_oem_map(
     *,
     source_hash: str,
     source_reference: Mapping[str, Any] | None = None,
+    source_coverage: Mapping[str, Any] | None = None,
     assumptions: Sequence[Any] = (),
     findings: Sequence[Any] = (),
     holds: Sequence[Any] = (),
@@ -93,6 +94,9 @@ def build_oem_map(
             "source_sha256": digest,
             "source_reference": _json_object(
                 source_reference or {}, "source_reference"
+            ),
+            "source_coverage": _json_object(
+                source_coverage or {}, "source_coverage"
             ),
             "points": normalized_points,
         },
@@ -113,6 +117,28 @@ def validate_oem_map(value: Mapping[str, Any]) -> None:
     if value["input_hashes"].get("source") != source_hash:
         raise CompilerContractError("OEM map source hash does not match its input hash")
     points = _array(value.get("points"), "OEM map points")
+    coverage = _mapping(value.get("source_coverage", {}), "source_coverage")
+    if coverage:
+        if coverage.get("status") not in {"complete", "unknown"}:
+            raise CompilerContractError(
+                "source_coverage.status must be complete or unknown"
+            )
+        for field in (
+            "accepted_row_count",
+            "rejected_row_count",
+            "quarantined_row_count",
+        ):
+            count = coverage.get(field)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                raise CompilerContractError(
+                    f"source_coverage.{field} must be a non-negative integer"
+                )
+        for field in ("detected_pages", "detected_regions"):
+            _array(coverage.get(field), f"source_coverage.{field}")
+        if not isinstance(coverage.get("discovery_complete"), bool):
+            raise CompilerContractError(
+                "source_coverage.discovery_complete must be boolean"
+            )
     seen: dict[str, Mapping[str, Any]] = {}
     for raw_point in points:
         point = _mapping(raw_point, "OEM point")

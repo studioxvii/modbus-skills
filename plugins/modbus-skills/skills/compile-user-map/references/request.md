@@ -46,3 +46,5 @@ runtime validation remains authoritative.
 Treat `compile-result.json` as the status interface. Report completed artifacts first,
 then grouped exclusions or holds, then the one permitted next action. Never replay
 completed stages manually or turn one decision packet into page, row, or point prompts.
+The three human deliverables are the only files in `output/`. A result is not complete
+when source coverage is unknown or any selected point still has a blocking hold.

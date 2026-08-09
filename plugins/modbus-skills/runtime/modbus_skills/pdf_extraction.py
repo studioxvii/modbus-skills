@@ -53,6 +53,8 @@ _REQUIRED_FLAGS = ("-f", "-l", "-layout", "-bbox-layout", "-enc")
 _MAX_PAGE = 100_000
 _MAX_PAGE_SPAN = 256
 _MAX_TOOL_OUTPUT_BYTES = 32_000_000
+_MAX_CHUNK_SCAN_PAGES = 4_096
+_MAX_CHUNK_RECORDS = 50_000
 _MAX_OCR_EVIDENCE_BYTES = 10_000_000
 _MAX_OCR_PAGE_TEXT_BYTES = 1_000_000
 _GRID_RECOVERY_FINDING = {
@@ -321,13 +323,16 @@ def _preflight(path: Path, source: bytes, page_range: tuple[int, int] | None) ->
     return executable, capability, None
 
 
-def _identity(record: Mapping[str, Any]) -> tuple[int, str]:
+def _identity(record: Mapping[str, Any]) -> tuple[int, str, str]:
     source = record.get("_source", {})
     page = int(source.get("page", 0)) if isinstance(source, Mapping) else 0
+    address = record.get(
+        "address",
+        record.get("protocol_offset", record.get("display_address", "")),
+    )
+    normalized_address = re.sub(r"\s+", "", str(address).casefold())
     name = re.sub(r"\W+", "", str(record.get("name", "")).casefold())
-    if not name:
-        name = str(record.get("address", record.get("protocol_offset", record.get("display_address", "")))).casefold()
-    return page, name
+    return page, normalized_address, name
 
 
 def _equivalent(field: str, left: Any, right: Any) -> bool:
@@ -342,20 +347,71 @@ def _equivalent(field: str, left: Any, right: Any) -> bool:
     return normalized(left) == normalized(right)
 
 
+def _name_identity(record: Mapping[str, Any]) -> tuple[int, str]:
+    identity = _identity(record)
+    return identity[0], identity[2]
+
+
+def _address_identity(record: Mapping[str, Any]) -> tuple[int, str]:
+    identity = _identity(record)
+    return identity[0], identity[1]
+
+
 def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    strict_by_id = {_identity(record): record for record in strict}
-    coordinate_by_id = {_identity(record): record for record in coordinate}
     accepted: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
-    for identity in sorted(set(strict_by_id) | set(coordinate_by_id)):
-        left, right = strict_by_id.get(identity), coordinate_by_id.get(identity)
-        if left is None:
-            accepted.append(dict(right or {}))
-            continue
-        if right is None:
+    unmatched_right = set(range(len(coordinate)))
+    left_name_counts: dict[tuple[int, str], int] = {}
+    right_name_counts: dict[tuple[int, str], int] = {}
+    left_address_counts: dict[tuple[int, str], int] = {}
+    right_address_counts: dict[tuple[int, str], int] = {}
+    for record in strict:
+        key = _name_identity(record)
+        left_name_counts[key] = left_name_counts.get(key, 0) + 1
+        address_key = _address_identity(record)
+        left_address_counts[address_key] = left_address_counts.get(address_key, 0) + 1
+    for record in coordinate:
+        key = _name_identity(record)
+        right_name_counts[key] = right_name_counts.get(key, 0) + 1
+        address_key = _address_identity(record)
+        right_address_counts[address_key] = right_address_counts.get(address_key, 0) + 1
+    for left in strict:
+        exact = [
+            index
+            for index in unmatched_right
+            if _identity(coordinate[index]) == _identity(left)
+        ]
+        match_index = exact[0] if len(exact) == 1 else None
+        address_key = _address_identity(left)
+        if (
+            match_index is None
+            and address_key[1]
+            and left_address_counts[address_key] == 1
+            and right_address_counts.get(address_key) == 1
+        ):
+            match_index = next(
+                index
+                for index in unmatched_right
+                if _address_identity(coordinate[index]) == address_key
+            )
+        name_key = _name_identity(left)
+        if (
+            match_index is None
+            and name_key[1]
+            and left_name_counts[name_key] == 1
+            and right_name_counts.get(name_key) == 1
+        ):
+            match_index = next(
+                index
+                for index in unmatched_right
+                if _name_identity(coordinate[index]) == name_key
+            )
+        if match_index is None:
             accepted.append(dict(left))
             continue
+        unmatched_right.remove(match_index)
+        right = coordinate[match_index]
         row_conflicts = []
         for field in sorted(_MATERIAL_FIELDS & (set(left) & set(right))):
             if not _equivalent(field, left[field], right[field]):
@@ -367,9 +423,11 @@ def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -
         merged["_claims"] = [*left.get("_claims", []), *right.get("_claims", [])]
         if row_conflicts:
             quarantined.append(merged)
-            conflicts.append({"identity": {"page": identity[0], "name": identity[1]}, "fields": row_conflicts, "source_regions": [left["_source"]["region"], right["_source"]["region"]]})
+            identity = _identity(left)
+            conflicts.append({"identity": {"page": identity[0], "address": identity[1], "name": identity[2]}, "fields": row_conflicts, "source_regions": [left["_source"]["region"], right["_source"]["region"]]})
         else:
             accepted.append(merged)
+    accepted.extend(dict(coordinate[index]) for index in sorted(unmatched_right))
     return accepted, quarantined, conflicts
 
 
@@ -436,17 +494,35 @@ def _envelope(
     quarantined: Sequence[Mapping[str, Any]] = (),
     ocr_tool: Mapping[str, str] | None = None,
     ocr_evidence: Mapping[str, Any] | None = None,
+    discovery_complete: bool = True,
 ) -> dict[str, Any]:
     page_selection = {"first_page": page_range[0], "last_page": page_range[1]} if page_range else None
+    coverage = _source_coverage(
+        records, rejected, quarantined, discovered_pages, discovery_complete
+    )
+    effective_holds = list(holds)
+    if records and coverage["status"] != "complete" and not any(
+        str(hold.get("code", "")) == "pdf-source-coverage-unproven"
+        for hold in effective_holds
+    ):
+        effective_holds.append(
+            {
+                "code": "pdf-source-coverage-unproven",
+                "severity": "hold",
+                "blocking": True,
+                "message": "The extracted rows are useful, but independent parsers did not establish complete source coverage. Review the grouped source exception or supply a bounded page range.",
+            }
+        )
     return artifact_envelope(
         {
-            "status": "held" if holds else "candidate",
+            "status": "held" if effective_holds else "candidate",
             "source": {"filename": path.name, "sha256": stable_input_hash(source)},
             "page_selection": page_selection,
             "discovered_register_pages": list(discovered_pages),
+            "source_coverage": coverage,
             "extractor": dict(capability) if capability else None,
             "ocr_tool": dict(ocr_tool) if ocr_tool else None,
-            "review_strategy": {"mode": "batch-exceptions", "record_count": len(records), "rejected_row_count": len(rejected), "quarantined_record_count": len(quarantined), "page_selection": page_selection},
+            "review_strategy": {"mode": "batch-exceptions", "record_count": coverage["accepted_row_count"], "rejected_row_count": coverage["rejected_row_count"], "quarantined_record_count": coverage["quarantined_row_count"], "page_selection": page_selection},
             "records": records,
             "quarantined_records": list(quarantined),
             "rejected_rows": rejected,
@@ -455,8 +531,46 @@ def _envelope(
         schema_version="modbus-pdf-extraction/v1",
         inputs={"source": source, "ocr_evidence": ocr_evidence, "page_selection": page_selection},
         findings=findings,
-        holds=holds,
+        holds=effective_holds,
     )
+
+
+def _source_coverage(
+    records: Sequence[Mapping[str, Any]],
+    rejected: Sequence[Mapping[str, Any]],
+    quarantined: Sequence[Mapping[str, Any]],
+    discovered_pages: Sequence[int],
+    discovery_complete: bool,
+) -> dict[str, Any]:
+    parser_sets: list[set[str]] = []
+    regions: set[str] = set()
+    for record in records:
+        source = record.get("_source", {})
+        parsers = {
+            str(claim.get("parser_id"))
+            for claim in record.get("_claims", ())
+            if isinstance(claim, Mapping) and claim.get("parser_id")
+        }
+        if isinstance(source, Mapping):
+            if source.get("parser_id"):
+                parsers.add(str(source["parser_id"]))
+            if source.get("region"):
+                regions.add(str(source["region"]))
+        parser_sets.append(parsers)
+    complete = discovery_complete and bool(records) and not rejected and not quarantined
+    independently_supported = sum(len(parsers) >= 2 for parsers in parser_sets)
+    return {
+        "status": "complete" if complete else "unknown",
+        "accepted_row_count": len(records),
+        "rejected_row_count": len(rejected),
+        "quarantined_row_count": len(quarantined),
+        "detected_pages": sorted(set(discovered_pages)),
+        "detected_regions": sorted(regions),
+        "basis": "bounded-discovery" if complete else "incomplete-or-conflicting-discovery",
+        "discovery_complete": discovery_complete,
+        "independent_parser_row_count": independently_supported,
+        "single_parser_row_count": len(parser_sets) - independently_supported,
+    }
 
 
 def extract_pdf(
@@ -493,7 +607,14 @@ def extract_pdf(
     except subprocess.TimeoutExpired:
         fallback = _hold_result(path, source, "pdf-text-extraction-timeout", "PDF text extraction exceeded the 60 second limit.", page_range=page_range, capability=capability)
         return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
-    except (OSError, PdfExtractionError) as exc:
+    except PdfExtractionError as exc:
+        if page_range is None:
+            return _extract_large_pdf_in_chunks(
+                path, source, executable=executable, capability=capability
+            )
+        fallback = _hold_result(path, source, "pdf-text-extraction-resource-limit", str(exc), page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
+    except OSError as exc:
         fallback = _hold_result(path, source, "pdf-text-extraction-resource-limit", str(exc), page_range=page_range, capability=capability)
         return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     if layout.returncode != 0:
@@ -574,10 +695,190 @@ def extract_pdf(
     return _envelope(path, source, records, rejected, findings, holds, page_range, capability=capability, discovered_pages=discovered, quarantined=quarantined)
 
 
+def _extract_large_pdf_in_chunks(
+    path: Path,
+    source: bytes,
+    *,
+    executable: str,
+    capability: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Recover an oversized manual without requiring manual page selection."""
+
+    records: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    quarantined: list[dict[str, Any]] = []
+    conflicts: list[dict[str, Any]] = []
+    discovered_pages: list[int] = []
+    deadline = time.monotonic() + 180
+    scan_complete = False
+    for first_page in range(1, _MAX_CHUNK_SCAN_PAGES + 1, _MAX_PAGE_SPAN):
+        last_page = first_page + _MAX_PAGE_SPAN - 1
+        remaining = int(deadline - time.monotonic())
+        if remaining <= 0:
+            break
+        base = [
+            executable,
+            "-enc",
+            "UTF-8",
+            "-f",
+            str(first_page),
+            "-l",
+            str(last_page),
+        ]
+        try:
+            layout = _call(
+                [*base, "-layout", str(path), "-"],
+                timeout=min(30, remaining),
+            )
+        except (OSError, PdfExtractionError, subprocess.TimeoutExpired):
+            break
+        if layout.returncode != 0 or not layout.stdout.strip():
+            break
+        text = layout.stdout.decode("utf-8", errors="replace")
+        page_count = _extracted_page_count(text)
+        chunk_pages = discover_register_pages(text, first_page=first_page)
+        discovered_pages.extend(chunk_pages)
+        if chunk_pages:
+            page_filter = set(chunk_pages)
+            strict, chunk_rejected = parse_layout_rows(
+                text, first_page=first_page, pages=page_filter
+            )
+            rejected.extend(chunk_rejected)
+            remaining = int(deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            try:
+                bbox_result = _call(
+                    [
+                        executable,
+                        "-enc",
+                        "UTF-8",
+                        "-f",
+                        str(min(chunk_pages)),
+                        "-l",
+                        str(max(chunk_pages)),
+                        "-bbox-layout",
+                        str(path),
+                        "-",
+                    ],
+                    timeout=min(30, remaining),
+                )
+                coordinate = (
+                    parse_bbox_rows(
+                        bbox_result.stdout.decode("utf-8", errors="replace"),
+                        first_page=min(chunk_pages),
+                    )
+                    if bbox_result.returncode == 0
+                    else []
+                )
+            except (OSError, PdfExtractionError, subprocess.TimeoutExpired):
+                coordinate = []
+            coordinate = [
+                record
+                for record in coordinate
+                if record.get("_source", {}).get("page") in page_filter
+            ]
+            chunk_records, chunk_quarantined, chunk_conflicts = _reconcile(
+                strict, coordinate
+            )
+            remaining = int(deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            try:
+                grid, _ = _recover_grid_rows(
+                    path,
+                    pages=chunk_pages,
+                    timeout_seconds=min(60, remaining),
+                )
+            except PdfTableExtractionError:
+                grid = []
+            if grid:
+                chunk_records, grid_quarantined, grid_conflicts = _reconcile(
+                    chunk_records, grid
+                )
+                chunk_quarantined.extend(grid_quarantined)
+                chunk_conflicts.extend(grid_conflicts)
+            records.extend(chunk_records)
+            quarantined.extend(chunk_quarantined)
+            conflicts.extend(chunk_conflicts)
+            if (
+                len(records) + len(rejected) + len(quarantined) + len(conflicts)
+                > _MAX_CHUNK_RECORDS
+            ):
+                remaining = _MAX_CHUNK_RECORDS
+                records = records[:remaining]
+                remaining -= len(records)
+                rejected = rejected[:remaining]
+                remaining -= len(rejected)
+                quarantined = quarantined[:remaining]
+                remaining -= len(quarantined)
+                conflicts = conflicts[:remaining]
+                break
+        if page_count < _MAX_PAGE_SPAN:
+            scan_complete = True
+            break
+    holds: list[dict[str, Any]] = []
+    if not scan_complete:
+        holds.append(
+            {
+                "code": "pdf-chunk-scan-limit",
+                "severity": "hold",
+                "blocking": True,
+                "message": f"Automatic discovery stopped after {_MAX_CHUNK_SCAN_PAGES} pages or 180 seconds; extracted rows remain available as one grouped exception.",
+            }
+        )
+    if conflicts:
+        holds.append(
+            {
+                "code": "pdf-material-claim-conflict",
+                "severity": "hold",
+                "blocking": True,
+                "message": "Resolve the listed material field conflicts as one localized decision; unaffected rows remain available.",
+                "conflicts": conflicts,
+            }
+        )
+    if not records:
+        holds.append(
+            {
+                "code": "pdf-register-pages-unavailable",
+                "severity": "hold",
+                "blocking": True,
+                "message": "Bounded chunk discovery found no independently verified register rows.",
+            }
+        )
+    return _envelope(
+        path,
+        source,
+        records,
+        rejected,
+        [{
+            "code": "pdf-bounded-chunk-discovery-used",
+            "severity": "info",
+            "blocking": False,
+            "message": "The manual exceeded one-pass extraction limits, so register pages were discovered in bounded chunks.",
+        }],
+        holds,
+        None,
+        capability=capability,
+        discovered_pages=sorted(set(discovered_pages)),
+        quarantined=quarantined,
+        discovery_complete=scan_complete,
+    )
+
+
+def _extracted_page_count(text: str) -> int:
+    return max(1, text.count("\f") + (0 if text.endswith("\f") else 1))
+
+
 def _recover_grid_rows(
-    path: Path, *, pages: Sequence[int] | None = None
+    path: Path,
+    *,
+    pages: Sequence[int] | None = None,
+    timeout_seconds: int = 60,
 ) -> tuple[list[dict[str, Any]], list[int]]:
-    records = extract_pdf_table_rows(path, pages=pages)
+    records = extract_pdf_table_rows(
+        path, pages=pages, timeout_seconds=timeout_seconds
+    )
     if not records:
         raise PdfTableExtractionError("table geometry contained no register rows")
     discovered = sorted({int(record["_source"]["page"]) for record in records})

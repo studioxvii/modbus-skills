@@ -12,7 +12,7 @@
 - [Check Map](skills/check-map.html): Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
 - [Compare Maps](skills/compare-maps.html): Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
 - [Compile User Map](skills/compile-user-map.html): Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run.
-- [Extract PDF Map](skills/extract-pdf-map.html): Extract traceable Modbus register candidates and page evidence from a bounded PDF manual or page range.
+- [Extract PDF Map](skills/extract-pdf-map.html): Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.
 - [Modbus Help](skills/modbus-help.html): Choose the next Modbus skill or short workflow from the user's goal and current artifact.
 - [Normalize Map](skills/normalize-map.html): Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
 - [Parse Map](skills/parse-map.html): Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds.

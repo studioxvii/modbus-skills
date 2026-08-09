@@ -98,7 +98,7 @@ The skill automatically:
 
 1. preflights the local source and available PDF capability;
 2. finds likely register pages, reconciles text coordinates, and automatically falls
-   back to drawn-table grid extraction for merged OEM layouts;
+   back to drawn-table grid extraction or bounded large-manual discovery;
 3. preserves source locations while normalizing the OEM semantics;
 4. selects and organizes the requested measurements;
 5. validates counts, identities, ranges, datatypes, and artifact hashes; and
@@ -113,17 +113,23 @@ Typical output:
 
 ```text
 case-directory/
-├── compile-result.json       # state, elapsed time, artifacts, holds, next action
-├── case.json                 # hash-bound resumable case manifest
-└── artifacts/
-    ├── user-map.md           # compact engineer-readable map
-    ├── user-map.json         # canonical machine-readable output
-    ├── user-map.csv          # spreadsheet/import output
-    └── user-map-manifest.json # artifact hashes, lineage, and bundle status
+├── output/                   # open this folder
+│   ├── user-map.md           # compact engineer-readable map
+│   ├── user-map.json         # canonical machine-readable output
+│   └── user-map.csv          # spreadsheet/import output
+├── compile-result.json       # Codex reads this status receipt
+├── case.json                 # Codex uses this to resume safely
+├── artifacts/                # provenance; normally ignore
+└── control/                  # resumable workflow state; normally ignore
 ```
 
 Excluded or quarantined source items remain in the user map's exception annex rather
 than blocking unrelated selected points.
+
+`offline-complete` means bounded source discovery finished without rejected or
+quarantined rows and no selected point has a blocking hold. Parser agreement remains
+visible evidence, not an extra approval step. Producing valid JSON by itself is not
+completion.
 
 For a complete catalog rather than a measurement subset, use selection mode
 `all-readable`. It is resolved after extraction, so callers do not need to know OEM

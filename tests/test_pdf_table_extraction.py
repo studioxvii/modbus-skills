@@ -19,6 +19,22 @@ from modbus_skills.pdf_table_extraction import (  # noqa: E402
 
 
 class PdfTableExtractionTests(unittest.TestCase):
+    def test_same_address_in_different_tables_has_distinct_source_identity(self) -> None:
+        table = [
+            ["Address", "Access", "Format", "Description"],
+            ["001", "R", "UInt", "Status"],
+        ]
+
+        raw_first = parse_pdf_table(table, page_number=4, table_index=0)[0]
+        raw_second = parse_pdf_table(table, page_number=4, table_index=1)[0]
+        first, second = prepare_pdf_records(
+            {"records": [raw_first, raw_second]}
+        )["records"]
+
+        self.assertNotEqual(first["logical_point_id"], second["logical_point_id"])
+        self.assertEqual("p4:t0:r1", first["_source"]["region"])
+        self.assertEqual("p4:t1:r1", second["_source"]["region"])
+
     def test_parses_oem_grid_with_pairs_stars_and_merged_cells(self) -> None:
         table = [
             [
@@ -73,6 +89,8 @@ class PdfTableExtractionTests(unittest.TestCase):
         self.assertNotIn("protocol_offset", prepared[0])
         self.assertEqual("uint32", prepared[0]["datatype"])
         self.assertEqual(2, prepared[0]["word_count"])
+        self.assertEqual("ABCD", prepared[0]["byte_order"])
+        self.assertTrue(prepared[0]["byte_order_confirmed"])
 
     def test_selected_page_and_worker_time_are_bounded(self) -> None:
         with self.assertRaisesRegex(PdfTableExtractionError, "256 selected pages"):

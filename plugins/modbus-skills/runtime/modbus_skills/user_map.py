@@ -34,6 +34,8 @@ _POINT_FIELDS = (
     "source_register",
     "datatype",
     "word_span",
+    "byte_order",
+    "byte_order_confirmed",
     "scale",
     "engineering_offset",
     "engineering_unit",

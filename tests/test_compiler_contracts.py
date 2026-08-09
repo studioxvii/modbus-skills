@@ -79,6 +79,53 @@ def selection_entries() -> dict[str, list[dict[str, object]]]:
 
 
 class CompilerContractTests(unittest.TestCase):
+    def test_oem_map_preserves_source_coverage_contract(self) -> None:
+        coverage = {
+            "status": "complete",
+            "accepted_row_count": 1,
+            "rejected_row_count": 0,
+            "quarantined_row_count": 0,
+            "detected_pages": [2],
+            "detected_regions": ["p2:t0:r4"],
+            "basis": "bounded-discovery",
+            "discovery_complete": True,
+            "independent_parser_row_count": 1,
+            "single_parser_row_count": 0,
+        }
+
+        artifact = build_oem_map(
+            [oem_points()[0]], source_hash="a" * 64, source_coverage=coverage
+        )
+
+        self.assertEqual(coverage, artifact["source_coverage"])
+        validate_oem_map(artifact)
+
+    def test_oem_map_rejects_invalid_source_coverage(self) -> None:
+        valid = {
+            "status": "complete",
+            "accepted_row_count": 1,
+            "rejected_row_count": 0,
+            "quarantined_row_count": 0,
+            "detected_pages": [2],
+            "detected_regions": ["p2:t0:r4"],
+            "basis": "bounded-discovery",
+            "discovery_complete": True,
+        }
+        invalid_cases = (
+            {**valid, "status": "maybe"},
+            {**valid, "accepted_row_count": -1},
+            {**valid, "detected_pages": "2"},
+            {**valid, "discovery_complete": "yes"},
+        )
+
+        for coverage in invalid_cases:
+            with self.subTest(coverage=coverage), self.assertRaises(CompilerContractError):
+                build_oem_map(
+                    [oem_points()[0]],
+                    source_hash="a" * 64,
+                    source_coverage=coverage,
+                )
+
     def test_contracts_are_deterministic_and_hash_bound(self) -> None:
         first_oem = build_oem_map(
             list(reversed(oem_points())),

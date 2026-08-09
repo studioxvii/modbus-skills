@@ -1,6 +1,6 @@
 ---
 name: extract-pdf-map
-description: Extract traceable Modbus register candidates and page evidence from a bounded PDF manual or page range.
+description: Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.
 ---
 
 # Extract PDF Map
@@ -15,9 +15,9 @@ Follow `../../references/interaction-contract.md`.
 2. Locate the bundled workspace dependency runtime and use its Python executable when
    it provides `pdfplumber`. Do not install dependencies during extraction.
 3. Record the source hash, physical page indexes, and printed page labels separately.
-4. Run `<selected-python> <skill-dir>/scripts/run.py --input <manual.pdf> --pages <page-or-range> --output <directory>` for a bounded range.
+4. Run `<selected-python> <skill-dir>/scripts/run.py --input <manual.pdf> --output <directory>`. Add `--pages <page-or-range>` only when the user already supplied a bounded range.
 5. For scanned pages, add a local `modbus-ocr-evidence/v1` file with `--ocr-evidence <ocr.json>`.
-6. Automatically check page coverage, record counts, unique addresses, row widths,
+6. Automatically check source coverage, record counts, stable source-row identities,
    source locations, rejected rows, and cross-page consistency.
 7. Keep uncertain rows as candidates and group them by exception type.
 8. When source confirmation is still required, present the bounded extraction once
