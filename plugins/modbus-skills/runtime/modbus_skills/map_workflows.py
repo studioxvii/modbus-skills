@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .address import format_modicon_reference, resolve_address
+from .byte_order import datatype_width_compatible
 from .models import AddressConvention, DataType, RegisterArea
 from .parsers import parse_source
 from .validation import READ_FUNCTION_BY_AREA, validate_points
@@ -146,6 +147,7 @@ _ACCESS_ALIASES = {
     "write-only": "write-only",
 }
 _RESOLVED_DISPOSITIONS = frozenset({"accepted", "corrected", "excluded", "resolved"})
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 _KNOWN_SOURCE_FIELDS = {
     "logical_point_id",
@@ -207,6 +209,135 @@ def _text(value: Any) -> str | None:
         return None
     result = str(value).strip()
     return result or None
+
+
+def _json_evidence(value: Any, label: str) -> Any:
+    """Copy JSON evidence while rejecting non-portable or non-finite values."""
+
+    try:
+        encoded = json.dumps(value, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        return json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must contain only finite JSON values") from exc
+
+
+def _map_metadata(
+    source: Mapping[str, Any],
+) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]]]:
+    """Validate evidence metadata without allowing it to supply point semantics."""
+
+    holds: list[dict[str, Any]] = []
+    raw_hash = source.get("source_map_hash")
+    source_map_hash = str(raw_hash).lower() if isinstance(raw_hash, str) else None
+    if raw_hash not in (None, "") and (
+        source_map_hash is None or _SHA256_RE.fullmatch(source_map_hash) is None
+    ):
+        source_map_hash = None
+        holds.append(
+            _hold(
+                "source-map-hash.invalid",
+                "source_map_hash must be a SHA-256 digest.",
+                "source_map_hash",
+                severity="error",
+            )
+        )
+
+    profile: dict[str, Any] | None = None
+    raw_profile = source.get("simulator_profile")
+    if raw_profile not in (None, ""):
+        try:
+            if not isinstance(raw_profile, Mapping):
+                raise ValueError("simulator_profile must be an object")
+            profile = _json_evidence(raw_profile, "simulator_profile")
+            if profile.get("schema_version") != "modbus-simulator-profile/v1":
+                raise ValueError("simulator_profile schema_version must be modbus-simulator-profile/v1")
+            if not _text(profile.get("profile_id")):
+                raise ValueError("simulator_profile profile_id must not be empty")
+            for field, aliases in (
+                ("supported_areas", _AREA_ALIASES),
+                ("supported_datatypes", _DATATYPE_ALIASES),
+            ):
+                values = profile.get(field)
+                if not isinstance(values, list) or not values:
+                    raise ValueError(f"simulator_profile {field} must be a non-empty array")
+                normalized = [_alias(value, aliases) for value in values]
+                if any(value is None for value in normalized) or len(set(normalized)) != len(normalized):
+                    raise ValueError(f"simulator_profile {field} contains unsupported or duplicate values")
+                profile[field] = normalized
+            for field, maximum in (("max_unit_id", 247), ("max_word_span", 125)):
+                profile[field] = _integer(profile.get(field), minimum=1, maximum=maximum)
+                if profile[field] is None:
+                    raise ValueError(f"simulator_profile {field} is required")
+        except (TypeError, ValueError) as exc:
+            profile = None
+            holds.append(
+                _hold(
+                    "simulator-profile.invalid",
+                    str(exc),
+                    "simulator_profile",
+                    severity="error",
+                )
+            )
+
+    observation: dict[str, Any] | None = None
+    raw_observation = source.get("runtime_observation")
+    if raw_observation not in (None, ""):
+        try:
+            if not isinstance(raw_observation, Mapping):
+                raise ValueError("runtime_observation must be an object")
+            observation = _json_evidence(raw_observation, "runtime_observation")
+            observed_hash = observation.get("source_map_hash")
+            if not isinstance(observed_hash, str) or _SHA256_RE.fullmatch(observed_hash.lower()) is None:
+                raise ValueError("runtime_observation source_map_hash must be a SHA-256 digest")
+            observation["source_map_hash"] = observed_hash.lower()
+            if source_map_hash is None or observation["source_map_hash"] != source_map_hash:
+                holds.append(
+                    _hold(
+                        "runtime-observation.source-map-hash-mismatch",
+                        "runtime_observation is not bound to the supplied source_map_hash.",
+                        "runtime_observation.source_map_hash",
+                        severity="error",
+                    )
+                )
+                observation = None
+        except (TypeError, ValueError) as exc:
+            observation = None
+            holds.append(
+                _hold(
+                    "runtime-observation.invalid",
+                    str(exc),
+                    "runtime_observation",
+                    severity="error",
+                )
+            )
+    return source_map_hash, profile, observation, holds
+
+
+def _simulator_point_holds(
+    points: Sequence[Mapping[str, Any]], profile: Mapping[str, Any] | None
+) -> list[dict[str, Any]]:
+    if profile is None:
+        return []
+    holds: list[dict[str, Any]] = []
+    for point in points:
+        point_id = _text(point.get("logical_point_id")) or "<unresolved>"
+        checks = (
+            (point.get("area") not in profile["supported_areas"], "simulator.point-area-unsupported", "area"),
+            (point.get("datatype") not in profile["supported_datatypes"], "simulator.point-datatype-unsupported", "datatype"),
+            (isinstance(point.get("unit_id"), int) and point["unit_id"] > profile["max_unit_id"], "simulator.point-unit-id-unsupported", "unit_id"),
+            (isinstance(point.get("word_span"), int) and point["word_span"] > profile["max_word_span"], "simulator.point-span-unsupported", "word_span"),
+        )
+        for failed, code, field in checks:
+            if failed:
+                holds.append(
+                    _hold(
+                        code,
+                        f"Point {field} is outside simulator profile {profile['profile_id']!r}.",
+                        field,
+                        point_id=point_id,
+                    )
+                )
+    return holds
 
 
 def _alias(value: Any, aliases: Mapping[str, str]) -> str | None:
@@ -771,12 +902,30 @@ def _normalize_one(
             )
         )
         word_source = "datatype"
+    if (
+        word_span is not None
+        and datatype_enum.bit_width is not None
+        and not datatype_width_compatible(datatype_enum, word_span * 16)
+    ):
+        holds.append(
+            _hold(
+                "point.datatype-span-mismatch",
+                f"{datatype_enum.value} requires {datatype_enum.span} register(s), not {word_span}.",
+                "word_span",
+                source=source,
+                severity="error",
+            )
+        )
     evidence.append({"field": "word_span", "source_field": word_source, "source_value": word_raw, "value": word_span})
 
     byte_raw, byte_source, byte_status_raw, byte_confirmed_raw = _byte_order_input(
         record, defaults
     )
-    byte_order = _byte_order(byte_raw, word_span)
+    byte_order_applicable = not (
+        word_span == 1
+        and datatype_enum in {DataType.BOOL, DataType.UINT16, DataType.INT16}
+    )
+    byte_order = _byte_order(byte_raw, word_span) if byte_order_applicable else None
     normalized_byte_status = (
         str(byte_status_raw).strip().lower().replace("_", "-")
         if isinstance(byte_status_raw, str) and byte_status_raw.strip()
@@ -828,16 +977,16 @@ def _normalize_one(
                 source=source,
             )
         )
-    byte_order_confirmed = (
+    byte_order_confirmed = None if not byte_order_applicable else (
         explicit_confirmation
         if explicit_confirmation is not None
         else status_confirmation
         if status_confirmation is not None
         else byte_order is not None
     )
-    if status_confirmation is False:
+    if byte_order_applicable and status_confirmation is False:
         byte_order_confirmed = False
-    if byte_raw not in (None, "") and byte_order is None:
+    if byte_order_applicable and byte_raw not in (None, "") and byte_order is None:
         holds.append(
             _hold(
                 "point.byte-order-unrecognized",
@@ -861,7 +1010,7 @@ def _normalize_one(
                     source=source,
                 )
             )
-    if byte_order is not None and byte_order_confirmed is False:
+    if byte_order_applicable and byte_order is not None and byte_order_confirmed is False:
         holds.append(
             _hold(
                 "point.byte-order-unconfirmed",
@@ -1294,7 +1443,13 @@ def _normalize_one(
         "word_count": word_span,
         "byte_order": byte_order,
         "byte_order_confirmed": byte_order_confirmed,
-        "byte_order_status": "confirmed" if byte_order_confirmed is True else "pending",
+        "byte_order_status": (
+            "not-applicable"
+            if not byte_order_applicable
+            else "confirmed"
+            if byte_order_confirmed is True
+            else "pending"
+        ),
         "scale": numeric_values["scale"],
         "engineering_offset": numeric_values["engineering_offset"],
         "offset": numeric_values["engineering_offset"],
@@ -1337,6 +1492,9 @@ def normalize_map(
 
     defaults = dict(defaults or {})
     if isinstance(source, Mapping):
+        source_map_hash, simulator_profile, runtime_observation, metadata_holds = (
+            _map_metadata(source)
+        )
         raw_records = source.get("records", source.get("points", source.get("registers", ())))
         warnings = list(source.get("warnings", ()))
         rejected = list(source.get("rejected_rows", ()))
@@ -1347,6 +1505,10 @@ def normalize_map(
         )
         source_findings = list(source.get("source_findings", source.get("findings", ())))
     else:
+        source_map_hash = None
+        simulator_profile = None
+        runtime_observation = None
+        metadata_holds = []
         raw_records = source
         warnings = []
         rejected = []
@@ -1361,7 +1523,7 @@ def normalize_map(
         raise MapWorkflowError("Every source record must be an object.")
 
     points: list[dict[str, Any]] = []
-    holds: list[dict[str, Any]] = list(unresolved_source_holds)
+    holds: list[dict[str, Any]] = [*unresolved_source_holds, *metadata_holds]
     points_by_id: dict[str, list[dict[str, Any]]] = {}
     generated_ids: set[str] = set()
     for record in raw_records:
@@ -1389,7 +1551,17 @@ def normalize_map(
         holds.append(collision_hold)
         for point in matching_points:
             point["normalization_status"] = "pending"
-    return {
+    simulator_holds = _simulator_point_holds(points, simulator_profile)
+    holds.extend(simulator_holds)
+    held_simulator_point_ids = {
+        point_id
+        for hold in simulator_holds
+        for point_id in hold.get("point_ids", ())
+    }
+    for point in points:
+        if point["logical_point_id"] in held_simulator_point_ids:
+            point["normalization_status"] = "pending"
+    result = {
         "schema_version": "modbus-map/v1",
         "source_format": source_format,
         "points": points,
@@ -1410,6 +1582,13 @@ def normalize_map(
             "rejected_rows": len(rejected),
         },
     }
+    if source_map_hash is not None:
+        result["source_map_hash"] = source_map_hash
+    if simulator_profile is not None:
+        result["simulator_profile"] = simulator_profile
+    if runtime_observation is not None:
+        result["runtime_observation"] = runtime_observation
+    return result
 
 
 def lint_map(canonical_map: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -1418,15 +1597,38 @@ def lint_map(canonical_map: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> 
     if isinstance(canonical_map, Mapping):
         points = canonical_map.get("points", canonical_map.get("records", ()))
         _, workflow_holds = _source_hold_items(canonical_map.get("holds", ()))
+        _, simulator_profile, _, metadata_holds = _map_metadata(canonical_map)
     else:
         points = canonical_map
         workflow_holds = []
+        simulator_profile = None
+        metadata_holds = []
     if not isinstance(points, Sequence) or isinstance(points, (str, bytes, bytearray)):
         raise MapWorkflowError("Canonical map must contain a points array.")
     try:
         findings = [finding.to_dict() for finding in validate_points(points)]
     except (TypeError, ValueError) as exc:
         raise MapWorkflowError(f"Canonical map cannot be validated: {exc}") from exc
+    byte_order_not_applicable_ids = {
+        _text(point.get("logical_point_id"))
+        for point in points
+        if isinstance(point, Mapping)
+        and point.get("word_span", point.get("word_count")) == 1
+        and DataType.coerce(point.get("datatype"))
+        in {DataType.BOOL, DataType.UINT16, DataType.INT16}
+        and point.get("byte_order") in (None, "")
+        and point.get("byte_order_status") == "not-applicable"
+    }
+    findings = [
+        finding
+        for finding in findings
+        if not (
+            finding.get("code") == "point.byte-order-status-invalid"
+            and set(finding.get("point_ids", ())).issubset(byte_order_not_applicable_ids)
+        )
+    ]
+    findings.extend(metadata_holds)
+    findings.extend(_simulator_point_holds(points, simulator_profile))
 
     for point in points:
         if not isinstance(point, Mapping):

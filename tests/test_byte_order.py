@@ -5,6 +5,7 @@ from modbus_skills.byte_order import (
     RawSample,
     all_modbus_layouts,
     candidate_for,
+    datatype_width_compatible,
     evaluate_byte_orders,
 )
 from modbus_skills.models import DataType
@@ -17,14 +18,25 @@ class ByteOrderEvaluationTests(unittest.TestCase):
             ("ABCD", "BADC", "CDAB", "DCBA"),
         )
 
-    def test_16_bit_sample_evaluates_ab_and_ba_without_selecting_a_winner(self):
+    def test_16_bit_integer_reports_byte_order_not_applicable(self):
         result = evaluate_byte_orders(RawSample("word", (0x1234,)))
 
-        self.assertEqual(all_modbus_layouts(16), ("AB", "BA"))
-        self.assertEqual(len(result.candidates), 4)
+        self.assertEqual(all_modbus_layouts(16), ("AB",))
+        self.assertFalse(result.byte_order_applicable)
+        self.assertEqual(result.to_dict()["byte_order_status"], "not-applicable")
+        self.assertEqual(len(result.candidates), 2)
         self.assertEqual(candidate_for(result, "AB", "uint16").decoded_value, 0x1234)
-        self.assertEqual(candidate_for(result, "BA", "uint16").decoded_value, 0x3412)
+        with self.assertRaises(KeyError):
+            candidate_for(result, "BA", "uint16")
+        with self.assertRaisesRegex(ValueError, "not applicable"):
+            evaluate_byte_orders(RawSample("swapped-word", (0x1234,)), layouts="BA")
         self.assertNotIn("winner", result.to_dict())
+
+    def test_datatype_width_compatibility_is_an_explicit_gate(self):
+        self.assertTrue(datatype_width_compatible("uint16", 16))
+        self.assertTrue(datatype_width_compatible(DataType.FLOAT32, 32))
+        self.assertFalse(datatype_width_compatible("uint32", 16))
+        self.assertFalse(datatype_width_compatible("unknown", 16))
 
     def test_one_sample_produces_every_32_bit_type_and_layout(self):
         sample = RawSample("sample-001", (0x3F80, 0x0000))

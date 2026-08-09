@@ -79,12 +79,17 @@ class ByteOrderEvaluation:
 
     schema_version: str
     sample: RawSample
+    byte_order_applicable: bool
     candidates: tuple[ByteOrderCandidate, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "sample": self.sample.to_dict(),
+            "byte_order_applicable": self.byte_order_applicable,
+            "byte_order_status": (
+                "candidate-evidence" if self.byte_order_applicable else "not-applicable"
+            ),
             "candidates": [candidate.to_dict() for candidate in self.candidates],
         }
 
@@ -92,7 +97,9 @@ class ByteOrderEvaluation:
 def all_modbus_layouts(bit_width: int) -> tuple[str, ...]:
     """Return explicit layouts for register permutations and byte swapping.
 
-    For 16 bits this returns ``AB`` and ``BA``. For 32 bits this returns
+    For 16 bits this returns only the protocol-order ``AB`` representation;
+    byte order is not an applicable map choice for a one-register integer.
+    For 32 bits this returns
     ``ABCD``, ``BADC``, ``CDAB``, and ``DCBA``.
     For 64 bits it returns 48 explicit layouts: every ordering of the four
     16-bit source words, with consistent normal or swapped byte order inside
@@ -102,6 +109,8 @@ def all_modbus_layouts(bit_width: int) -> tuple[str, ...]:
 
     if bit_width not in {16, 32, 64}:
         raise ValueError("bit width must be 16, 32, or 64")
+    if bit_width == 16:
+        return ("AB",)
     word_count = bit_width // 16
     labels = "ABCDEFGH"[: bit_width // 8]
     words = tuple(labels[index : index + 2] for index in range(0, len(labels), 2))
@@ -133,19 +142,6 @@ def evaluate_byte_orders(
     scale = _finite_number(scale, "scale")
     engineering_offset = _finite_number(engineering_offset, "engineering_offset")
 
-    selected_layouts = (
-        (layouts,)
-        if isinstance(layouts, str)
-        else tuple(layouts)
-        if layouts is not None
-        else all_modbus_layouts(sample.bit_width)
-    )
-    selected_layouts = tuple(
-        _validate_layout(layout, sample.bit_width) for layout in selected_layouts
-    )
-    if len(set(selected_layouts)) != len(selected_layouts):
-        raise ValueError("byte layouts must be unique")
-
     if datatypes is None:
         selected_types = (
             (DataType.UINT16, DataType.INT16)
@@ -165,10 +161,25 @@ def evaluate_byte_orders(
     if len(set(selected_types)) != len(selected_types):
         raise ValueError("data types must be unique")
     for datatype in selected_types:
-        if datatype.bit_width != sample.bit_width:
+        if not datatype_width_compatible(datatype, sample.bit_width):
             raise ValueError(
                 f"{datatype.value} does not match the {sample.bit_width}-bit sample"
             )
+
+    selected_layouts = (
+        (layouts,)
+        if isinstance(layouts, str)
+        else tuple(layouts)
+        if layouts is not None
+        else all_modbus_layouts(sample.bit_width)
+    )
+    selected_layouts = tuple(
+        _validate_layout(layout, sample.bit_width) for layout in selected_layouts
+    )
+    if len(set(selected_layouts)) != len(selected_layouts):
+        raise ValueError("byte layouts must be unique")
+    if sample.bit_width == 16 and selected_layouts != ("AB",):
+        raise ValueError("byte order is not applicable to a one-register integer sample")
 
     source_bytes = b"".join(word.to_bytes(2, "big") for word in sample.words)
     source_labels = "ABCDEFGH"[: len(source_bytes)]
@@ -197,8 +208,16 @@ def evaluate_byte_orders(
     return ByteOrderEvaluation(
         schema_version="modbus-byte-order-evidence/v1",
         sample=sample,
+        byte_order_applicable=sample.bit_width > 16,
         candidates=tuple(candidates),
     )
+
+
+def datatype_width_compatible(datatype: DataType | str, bit_width: int) -> bool:
+    """Return whether a fixed-width datatype can decode exactly ``bit_width`` bits."""
+
+    normalized = DataType.coerce(datatype)
+    return normalized is not DataType.UNKNOWN and normalized.bit_width == bit_width
 
 
 def candidate_for(
