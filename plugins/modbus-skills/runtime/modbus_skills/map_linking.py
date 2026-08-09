@@ -8,6 +8,7 @@ from typing import Any
 from .artifacts import artifact_envelope, stable_input_hash
 from .compiler_contracts import (
     CompilerContractError,
+    bound_point_identity,
     validate_device_binding,
     validate_oem_map,
     validate_user_map,
@@ -143,13 +144,14 @@ def _linked_point(
     offset = point.get("protocol_offset")
     if isinstance(offset, bool) or not isinstance(offset, int):
         raise MapLinkError(f"selected OEM point {point_id!r} has no resolved protocol offset")
-    point["canonical_identity"] = [
-        binding["route_id"],
-        binding["unit_id"],
-        area.value,
-        offset,
-        point_id,
-    ]
+    point["area"] = area.value
+    point["canonical_identity"] = list(
+        bound_point_identity(
+            point,
+            route_id=binding["route_id"],
+            unit_id=binding["unit_id"],
+        )
+    )
     return point
 
 

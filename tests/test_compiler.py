@@ -270,8 +270,10 @@ class CompilerTests(unittest.TestCase):
             "modbus_skills.pdf_extraction.subprocess.run", side_effect=effects
         ) as run_mock:
             result = compile_user_map(compile_request, self.root / "pdf-case")
+            replay = compile_user_map(copy.deepcopy(compile_request), self.root / "pdf-case")
 
         self.assertEqual("offline-complete", result["state"])
+        self.assertEqual(result, replay)
         self.assertEqual("none", result["next_action"]["kind"])
         self.assertEqual(4, run_mock.call_count)
 

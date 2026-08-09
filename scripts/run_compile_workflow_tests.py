@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
-import hashlib
 import json
 import os
 import platform
@@ -66,7 +65,7 @@ def validate_transcript(transcript: Mapping[str, Any]) -> None:
 
 
 def fixture_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return stable_input_hash(path.read_bytes())
 
 
 def load_benchmark_rows(path: Path) -> list[dict[str, str]]:
@@ -94,13 +93,14 @@ def _point(point_id: str, offset: int, measurement: str) -> dict[str, Any]:
 
 
 def _selection(source: Mapping[str, Any], point_ids: list[str], *, quality: str = "exact") -> dict[str, Any]:
+    offsets = {point["oem_point_id"]: point["protocol_offset"] for point in source["points"]}
     entries = [
         {
             "oem_point_id": point_id,
             "matched_intent": point_id,
             "match_quality": quality,
             "reason": "Synthetic requested measurement",
-            "evidence_refs": [f"row-{next(point['protocol_offset'] for point in source['points'] if point['oem_point_id'] == point_id)}"],
+            "evidence_refs": [f"row-{offsets[point_id]}"],
         }
         for point_id in point_ids
     ]

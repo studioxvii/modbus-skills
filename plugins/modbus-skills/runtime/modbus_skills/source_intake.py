@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 from typing import Any
 
 from .artifacts import stable_input_hash
@@ -61,11 +62,7 @@ def compile_source_descriptor(
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise SourceIntakeError("source.path must be non-empty local path text")
     path = Path(raw_path).expanduser()
-    if path.is_symlink() or not path.is_file():
-        raise SourceIntakeError("source.path must name an existing non-symlink file")
-    data = path.read_bytes()
-    if len(data) > _MAX_SOURCE_BYTES:
-        raise SourceIntakeError(f"source exceeds the {_MAX_SOURCE_BYTES} byte intake limit")
+    data = _read_bounded_source(path)
     raw_format = descriptor.get("format")
     source_format = (
         str(raw_format).strip().lower().lstrip(".")
@@ -100,7 +97,7 @@ def compile_source_descriptor(
     except (PdfExtractionError, ParseError, MapWorkflowError) as exc:
         raise SourceIntakeError(str(exc)) from exc
 
-    source_hash = hashlib.sha256(data).hexdigest()
+    source_hash = stable_input_hash(data)
     points = [_oem_point(point, index) for index, point in enumerate(canonical["points"])]
     holds = [
         _portable_hold(hold)
@@ -141,6 +138,48 @@ def compile_source_descriptor(
         **({"defaults": dict(defaults)} if defaults else {}),
     }
     return oem_map, normalized_descriptor
+
+
+def source_request_identity(descriptor: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a cheap path-free identity without parsing or extracting the source."""
+
+    if not isinstance(descriptor, Mapping):
+        raise SourceIntakeError("source descriptor must be an object")
+    raw_path = descriptor.get("path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise SourceIntakeError("source.path must be non-empty local path text")
+    path = Path(raw_path).expanduser()
+    data = _read_bounded_source(path)
+    result = {str(key): value for key, value in descriptor.items() if key != "path"}
+    result.update({"filename": path.name, "source_sha256": stable_input_hash(data)})
+    return result
+
+
+def _read_bounded_source(path: Path) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise SourceIntakeError(
+            "source.path must name an existing non-symlink file"
+        ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise SourceIntakeError("source.path must name a regular file")
+        if metadata.st_size > _MAX_SOURCE_BYTES:
+            raise SourceIntakeError(
+                f"source exceeds the {_MAX_SOURCE_BYTES} byte intake limit"
+            )
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(_MAX_SOURCE_BYTES + 1)
+        if len(data) > _MAX_SOURCE_BYTES:
+            raise SourceIntakeError(
+                f"source exceeds the {_MAX_SOURCE_BYTES} byte intake limit"
+            )
+        return data
+    finally:
+        os.close(descriptor)
 
 
 def _parse_structured_source(
@@ -289,4 +328,5 @@ __all__ = [
     "SourceIntakeError",
     "bind_selection_template",
     "compile_source_descriptor",
+    "source_request_identity",
 ]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
 import re
 import shutil
 import subprocess
@@ -11,7 +10,12 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
-from .artifacts import ArtifactContractError, artifact_envelope, assert_artifact_envelope
+from .artifacts import (
+    ArtifactContractError,
+    artifact_envelope,
+    assert_artifact_envelope,
+    stable_input_hash,
+)
 
 
 class PdfExtractionError(ValueError):
@@ -402,7 +406,7 @@ def _envelope(
     return artifact_envelope(
         {
             "status": "held" if holds else "candidate",
-            "source": {"filename": path.name, "sha256": hashlib.sha256(source).hexdigest()},
+            "source": {"filename": path.name, "sha256": stable_input_hash(source)},
             "page_selection": page_selection,
             "discovered_register_pages": list(discovered_pages),
             "extractor": dict(capability) if capability else None,
@@ -429,7 +433,7 @@ def extract_pdf(
 ) -> dict[str, Any]:
     """Extract a bounded map while retaining independently sourced claims."""
 
-    source_sha256 = hashlib.sha256(source).hexdigest()
+    source_sha256 = stable_input_hash(source)
     if ocr_evidence is not None:
         records, rejected, tool = _ocr_rows(ocr_evidence, source_sha256=source_sha256, page_range=page_range)
         code = "pdf-ocr-human-review-required" if records else "pdf-ocr-structured-rows-unavailable"

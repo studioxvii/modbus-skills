@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -34,6 +33,7 @@ from .source_intake import (
     SourceIntakeError,
     bind_selection_template,
     compile_source_descriptor,
+    source_request_identity,
 )
 from .tool_pack import SUPPORTED_TARGETS, build_tool_pack
 from .user_map import UserMapError, compile_user_map_bundle
@@ -116,16 +116,17 @@ def compile_user_map(
     if request is None:
         raise CompilerError("a new compile requires a request")
 
-    normalized = _validate_request(request)
     if case_path.exists():
         case = _read_case(root)
-        stored = _read_indexed_json(root, case, "request")
-        if stable_input_hash(stored) != stable_input_hash(normalized):
+        stored_identity = _read_indexed_json(root, case, "request_identity")
+        if stable_input_hash(stored_identity) != stable_input_hash(_request_identity(request)):
             raise CompilerError("case root belongs to a different request")
         return _read_result(root)
     if root.exists() and any(root.iterdir()):
         raise CompilerError("case root is not empty and has no compiler case")
 
+    normalized = _validate_request(request)
+    request_identity = _request_identity(request)
     _prepare_directory(root)
     oem_map = normalized["oem_map"]
     request_hash = stable_input_hash(normalized)
@@ -136,9 +137,16 @@ def compile_user_map(
         state="running",
     )["case_id"]
     index: dict[str, dict[str, str]] = {}
+    _store_json(
+        root,
+        index,
+        "request_identity",
+        "control/request-identity.json",
+        request_identity,
+    )
     _store_json(root, index, "request", "control/request.json", normalized)
     _store_json(root, index, "oem_map", "artifacts/oem-map.json", oem_map)
-    if oem_map.get("holds"):
+    if "source" in normalized and _blocking_holds(oem_map):
         packet = _source_decision_packet(case_id, oem_map)
         _store_json(
             root,
@@ -560,6 +568,35 @@ def _source_decision_packet(
     )
 
 
+def _blocking_holds(value: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return [
+        hold
+        for hold in value.get("holds", ())
+        if isinstance(hold, Mapping)
+        and hold.get("blocking", True) is not False
+        and str(hold.get("severity", "hold")).lower() in {"error", "hold"}
+    ]
+
+
+def _request_identity(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CompilerError("compile request must be an object")
+    _assert_safe(value)
+    identity = _json_copy(value)
+    source = value.get("source")
+    if source is not None:
+        if not isinstance(source, Mapping):
+            raise CompilerError("source must be an object")
+        try:
+            identity["source"] = source_request_identity(source)
+        except SourceIntakeError as exc:
+            raise CompilerError(str(exc)) from exc
+    return {
+        "schema_version": "modbus-compile-request-identity/v1",
+        "request": identity,
+    }
+
+
 def _commit(
     root: Path,
     request: Mapping[str, Any],
@@ -610,9 +647,10 @@ def _commit(
             ]
         ),
     )
-    _atomic_write(root, "compile-result.json", stable_json(result).encode("utf-8"))
+    result_bytes = stable_json(result).encode("utf-8")
+    _atomic_write(root, "compile-result.json", result_bytes)
     index["compile_result"] = _record(
-        "compile-result.json", stable_json(result).encode("utf-8"), COMPILE_RESULT_SCHEMA_VERSION
+        "compile-result.json", result_bytes, COMPILE_RESULT_SCHEMA_VERSION
     )
     case = build_compile_case(
         source_hash=oem_map["source_sha256"],
@@ -793,7 +831,7 @@ def _read_indexed_json(
     if target.is_symlink() or not target.is_file():
         raise CompilerError(f"case artifact is missing or unsafe: {relative}")
     data = target.read_bytes()
-    if hashlib.sha256(data).hexdigest() != record.get("sha256"):
+    if stable_input_hash(data) != record.get("sha256"):
         raise CompilerError(f"compile case {name} artifact hash is stale")
     try:
         value = json.loads(data.decode("utf-8"))
@@ -858,7 +896,7 @@ def _store_bytes(
 def _record(relative: str, data: bytes, schema_version: str) -> dict[str, str]:
     return {
         "path": relative,
-        "sha256": hashlib.sha256(data).hexdigest(),
+        "sha256": stable_input_hash(data),
         "schema_version": schema_version,
     }
 
