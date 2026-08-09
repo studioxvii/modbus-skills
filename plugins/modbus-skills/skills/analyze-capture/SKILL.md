@@ -7,6 +7,8 @@ description: Analyze bounded Modbus samples and report communication, timing, si
 
 Turn supplied samples into bounded evidence.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Require a bounded `capture/v1`, CSV, or JSON input.

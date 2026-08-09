@@ -1,22 +1,28 @@
 ---
 name: review-evidence
-description: Review Modbus source evidence, rejected rows, inferences, warnings, and holds before a human map decision.
+description: Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
 ---
 
 # Review Evidence
 
-Turn source evidence into a clear human decision queue.
+Turn source evidence into a compact exception queue.
+
+Follow `../../references/interaction-contract.md`.
 
 ## Process
 
 1. Read `references/evidence-status.md`.
 2. Run `python3 <skill-dir>/scripts/run.py --input <artifact.json> --output <report.json>`.
-3. Separate confirmed, inferred, unresolved, and rejected items.
-4. Include source location and match method when present.
-5. Present one blocking decision at a time.
-6. Record each choice as new evidence while preserving the source value.
+3. Run deterministic checks over the full input and separate verified items from
+   inferred, unresolved, and rejected exceptions.
+4. Group exceptions by code, field, match method, and shared source scope.
+5. Present all independent blocking decision groups together. Do not turn a global
+   source hold into one decision per page, row, or point.
+6. If the user confirms a bounded extraction, record one decision for the complete
+   source hash, page range, record count, and exception list while preserving values.
 
-Completion requires every reviewed item to have a status and every blocking item to have a decision path.
+Completion requires every item to have a status and every exception group to have a
+decision path. Verified items require no human response.
 
 ## Handoff
 

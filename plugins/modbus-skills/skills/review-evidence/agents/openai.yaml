@@ -1,6 +1,6 @@
 interface:
   display_name: "Review Evidence"
-  short_description: "Turn map evidence into decisions"
-  default_prompt: "Use $review-evidence to review these source findings and holds."
+  short_description: "Group map evidence into exceptions"
+  default_prompt: "Use $review-evidence to automate checks and group these source exceptions."
 policy:
   allow_implicit_invocation: false

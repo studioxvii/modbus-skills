@@ -7,14 +7,17 @@ description: Normalize Modbus candidates into explicit offsets, areas, units, da
 
 Convert only fields supported by source evidence or explicit confirmation.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Run `python3 <skill-dir>/scripts/run.py --input <candidate.json> --output <normalized.json>`.
-2. Review every assumption and hold.
-3. Ask for one blocking engineering choice at a time.
-4. Rerun after each confirmed choice.
+2. Validate all deterministic conversions automatically.
+3. Group remaining assumptions and holds by shared root cause and affected scope.
+4. Ask once for all independent blocking engineering choices, then rerun once.
 
-Completion requires every source field to be normalized, held, or rejected with evidence.
+Completion requires every source field to be normalized, held, or rejected with
+evidence; clean deterministic normalization needs no human approval.
 
 ## Handoff
 

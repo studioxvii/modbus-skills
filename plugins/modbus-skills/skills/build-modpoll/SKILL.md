@@ -7,6 +7,8 @@ description: Build deterministic read-only artifacts for gavinying/modpoll or su
 
 Generate artifacts for one explicit Modpoll product profile.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Read `references/profiles.md` and select `gavinying-cli`, `witte-desktop`, or `witte-v12-xml`.

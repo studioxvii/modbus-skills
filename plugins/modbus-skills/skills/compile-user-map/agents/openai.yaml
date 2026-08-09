@@ -1,0 +1,6 @@
+interface:
+  display_name: "Compile User Map"
+  short_description: "Compile an OEM map into ready user outputs"
+  default_prompt: "Use $compile-user-map to turn this OEM map and measurement intent into organized user-map outputs."
+policy:
+  allow_implicit_invocation: false

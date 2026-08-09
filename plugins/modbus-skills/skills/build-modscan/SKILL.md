@@ -7,10 +7,13 @@ description: Build deterministic read-only ModScan setup, poll-plan, point-map, 
 
 Generate documented, version-neutral setup files.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Read `references/options.md` before using options or making a version claim.
-2. Ask whether native verification will use ModScan32 or ModScan64.
+2. Infer ModScan32 or ModScan64 from the request or available installation; ask once
+   only when the target genuinely affects the output and cannot be discovered.
 3. Require a canonical map, read plan, and `probe` or `final` mode.
 4. Run `python3 <skill-dir>/scripts/run.py --map <map.json> --plan <read-plan.json> --mode <mode> --output <directory>`.
 5. Inspect the setup manifest and generated CSV files.

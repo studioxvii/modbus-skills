@@ -7,12 +7,15 @@ description: Parse structured Modbus register maps into candidate rows with sour
 
 Preserve source values and produce traceable candidates.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Identify CSV, JSON, XML, XLSX, or structured-text input.
 2. Read `references/format-support.md` when the shape is unclear.
 3. Run `python3 <skill-dir>/scripts/run.py --input <path> --output <path>`.
-4. Inspect rejected rows, assumptions, warnings, and holds.
+4. Validate the whole parse, then summarize rejected rows, assumptions, warnings, and
+   holds by cause instead of presenting rows one at a time.
 
 Completion requires a schema-valid candidate map and parse report. Engineering fields can remain unresolved.
 

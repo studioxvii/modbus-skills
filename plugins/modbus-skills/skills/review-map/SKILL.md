@@ -1,25 +1,34 @@
 ---
 name: review-map
-description: Review a raw or messy Modbus register map through parsing, normalization, checks, evidence, and human decisions.
+description: Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome.
 ---
 
 # Review Map
 
-Turn a source map into a traceable draft and decision queue.
+Turn a source map into a traceable draft and compact exception queue.
+
+Use `$compile-user-map` instead when the requested outcome is an organized user map,
+JSON, CSV, or target output.
+
+Follow `../../references/interaction-contract.md`.
 
 ## Process
 
 1. For a PDF source, start with `$extract-pdf-map`.
 2. Run `python3 <skill-dir>/scripts/run.py --input <path> --output <directory>`.
-3. Inspect the candidate map, `map-draft.json`, lint report, evidence review, rejected rows, assumptions, and holds.
-4. Present one blocking engineering decision at a time.
-5. Keep unresolved values and excluded rows visible.
+3. Run parsing, normalization, linting, and evidence review through without pausing.
+4. Group rejected rows, assumptions, and holds by shared cause and present all
+   independent blocking choices together.
+5. Keep unresolved values and excluded rows visible; never ask for blanket approval
+   when automated checks find no exception.
 
-Completion requires a schema-valid draft, a complete review report, and a disposition path for every blocking hold. The draft is not approved.
+Completion requires a schema-valid draft, a complete automated review report, and a
+disposition path for every blocking exception. A clean draft is ready without an
+extra approval ritual.
 
 ## Handoff
 
 - The user confirms values or exclusions: suggest `$apply-review`.
 - The user only wants deterministic checks on an existing normalized map: suggest `$check-map`.
 
-Keep stage artifacts visible. Final target generation starts only from a reviewed map.
+Keep stage artifacts visible. Final target generation starts only from a validated map.

@@ -78,8 +78,15 @@ def validate() -> list[str]:
             errors.append(f"{skill_dir.name}: invalid or mismatched name")
         if len(description) < 40:
             errors.append(f"{skill_dir.name}: description is too short")
-        if "TODO" in skill_md.read_text(encoding="utf-8"):
+        skill_text = skill_md.read_text(encoding="utf-8")
+        if "TODO" in skill_text:
             errors.append(f"{skill_dir.name}: contains TODO placeholder")
+        if "Completion requires" not in skill_text:
+            errors.append(f"{skill_dir.name}: must name one observable completion criterion")
+        if "../../references/interaction-contract.md" not in skill_text:
+            errors.append(
+                f"{skill_dir.name}: must reference the shared fast interaction contract"
+            )
         if not openai_yaml.exists():
             errors.append(f"{skill_dir.name}: missing agents/openai.yaml")
             continue
@@ -96,6 +103,25 @@ def validate() -> list[str]:
             )
         if name != "modbus-help" and not (skill_dir / "scripts" / "run.py").exists():
             errors.append(f"{skill_dir.name}: missing deterministic script wrapper")
+
+    outcome = SKILLS / "compile-user-map"
+    if outcome.exists():
+        outcome_text = (outcome / "SKILL.md").read_text(encoding="utf-8")
+        wrapper_text = (outcome / "scripts" / "run.py").read_text(encoding="utf-8")
+        if "references/request.md" not in outcome_text:
+            errors.append("compile-user-map: must progressively disclose the request contract")
+        if 'run_cli("compile-user-map"' not in wrapper_text:
+            errors.append("compile-user-map: wrapper must call the outcome command directly")
+        forbidden_routes = {
+            "$extract-pdf-map", "$parse-map", "$normalize-map", "$review-evidence",
+            "$apply-review", "$plan-reads", "$build-tool-pack",
+        }
+        leaked = sorted(forbidden_routes & set(re.findall(r"\$[a-z0-9-]+", outcome_text)))
+        if leaked:
+            errors.append(
+                "compile-user-map: clean path must not expose specialist stage handoffs: "
+                + ", ".join(leaked)
+            )
     return errors
 
 

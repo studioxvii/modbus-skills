@@ -2,18 +2,27 @@
   "schema_version": "workflow-catalog/v2",
   "workflows": [
     {
+      "id": "compile-user-map",
+      "name": "Compile an OEM map into user outputs",
+      "goal": "Produce an organized user map and requested offline outputs in one resumable outcome run.",
+      "steps": [
+        {"id": "compile", "kind": "skill", "skill": "compile-user-map", "inputs": ["modbus-compile-request/v1"], "output": "modbus-compile-result/v1"}
+      ],
+      "stop_conditions": ["one grouped source decision is required", "a requested target needs device binding", "a separate physical read or byte-order decision is required", "write, broadcast, scan, credentials, or live polling requested"]
+    },
+    {
       "id": "review-register-map",
       "name": "Review a register map",
-      "goal": "Produce a reviewed Modbus map without silent engineering guesses.",
+      "goal": "Produce a validated Modbus map quickly without silent engineering guesses or serial approval loops.",
       "steps": [
         {"id": "parse", "kind": "skill", "skill": "parse-map", "inputs": ["source-bundle/v1"], "output": "candidate-map/v1"},
         {"id": "normalize", "kind": "skill", "skill": "normalize-map", "inputs": ["candidate-map/v1"], "output": "modbus-map/v1"},
         {"id": "lint", "kind": "skill", "skill": "check-map", "inputs": ["modbus-map/v1"], "output": "modbus-map-lint/v1"},
         {"id": "review", "kind": "skill", "skill": "review-evidence", "inputs": ["modbus-map/v1", "modbus-map-lint/v1"], "output": "modbus-map-evidence-review/v1"},
-        {"id": "confirm-map", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-map-evidence-review/v1"], "output": "modbus-review-decisions/v1", "instruction": "Resolve every blocking hold and state each value or exclusion with a reason and evidence reference."},
+        {"id": "confirm-map", "kind": "human-gate", "condition": "decision_groups is non-empty", "inputs": ["modbus-map/v1", "modbus-map-evidence-review/v1"], "output": "modbus-review-decisions/v1", "instruction": "Skip this gate when the review status is ready. Otherwise resolve all independent exception groups in one batch with reasons and shared-scope evidence references; never ask page by page or row by row."},
         {"id": "apply-decisions", "kind": "skill", "skill": "apply-review", "inputs": ["modbus-map/v1", "modbus-review-decisions/v1"], "output": "modbus-map/v1"}
       ],
-      "stop_conditions": ["unresolved route or address convention", "unresolved register area", "unresolved unit identifier", "unreviewed rejected rows", "unconfirmed multi-register byte order"]
+      "stop_conditions": ["unresolved route or address convention", "unresolved register area", "unresolved unit identifier", "unresolved rejected-row group", "unconfirmed multi-register byte order"]
     },
     {
       "id": "determine-byte-order",
@@ -21,7 +30,7 @@
       "goal": "Compare explicit layouts from one immutable raw sample and record human confirmation.",
       "steps": [
         {"id": "evaluate", "kind": "skill", "skill": "check-byte-order", "inputs": ["capture/v1"], "output": "modbus-byte-order-evidence/v1"},
-        {"id": "confirm-layout", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-review-decisions/v1", "instruction": "Confirm one explicit layout with engineering evidence. Keep the raw sample and all candidates."},
+        {"id": "confirm-layout", "kind": "human-gate", "inputs": ["modbus-map/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-review-decisions/v1", "instruction": "Present eliminated candidates, the complete remaining shortlist, and distinguishing evidence in one decision. Confirm one explicit layout and keep the raw sample and all candidates."},
         {"id": "apply-layout", "kind": "skill", "skill": "apply-review", "inputs": ["modbus-map/v1", "modbus-review-decisions/v1", "modbus-byte-order-evidence/v1"], "output": "modbus-map/v1"}
       ],
       "stop_conditions": ["no raw words", "ambiguous sample identity", "no human confirmation"]
@@ -45,7 +54,7 @@
     {
       "id": "build-tool-pack",
       "name": "Build a multi-target tool pack",
-      "goal": "Generate any selected combination of Node-RED, Modpoll, and ModScan from one reviewed map and one read plan.",
+      "goal": "Generate any selected combination of Node-RED, Modpoll, and ModScan from one validated map and one read plan.",
       "steps": [
         {"id": "lint", "kind": "skill", "skill": "check-map", "inputs": ["modbus-map/v1"], "output": "modbus-map-lint/v1"},
         {"id": "plan", "kind": "skill", "skill": "plan-reads", "inputs": ["modbus-map/v1"], "output": "modbus-read-plan/v1"},
@@ -59,7 +68,7 @@
       "goal": "Find communication and signal-quality problems without issuing control commands.",
       "steps": [
         {"id": "analyze", "kind": "skill", "skill": "analyze-capture", "inputs": ["capture/v1"], "output": "modbus-capture-analysis/v1"},
-        {"id": "review-findings", "kind": "human-gate", "inputs": ["modbus-capture-analysis/v1"], "output": "review-disposition/v1", "instruction": "Review thresholds, sample window, missing metadata, and alternative causes before acting on a finding."}
+        {"id": "review-findings", "kind": "human-gate", "condition": "a finding requires a consequential follow-up", "inputs": ["modbus-capture-analysis/v1"], "output": "review-disposition/v1", "instruction": "Present all threshold, metadata, and alternative-cause exceptions together before a consequential follow-up. Skip this gate for a report-only request."}
       ],
       "stop_conditions": ["unbounded capture", "write request detected", "missing sample identity", "timezone missing from a timestamp"]
     },
@@ -71,7 +80,7 @@
         {"id": "review-before", "kind": "workflow", "workflow": "review-register-map", "inputs": ["before-source-bundle/v1"], "output": "before-modbus-map/v1"},
         {"id": "review-after", "kind": "workflow", "workflow": "review-register-map", "inputs": ["after-source-bundle/v1"], "output": "after-modbus-map/v1"},
         {"id": "compare", "kind": "skill", "skill": "compare-maps", "inputs": ["before-modbus-map/v1", "after-modbus-map/v1"], "output": "modbus-map-diff/v1"},
-        {"id": "review-diff", "kind": "human-gate", "inputs": ["modbus-map-diff/v1"], "output": "review-disposition/v1", "instruction": "Review moved, added, removed, and changed points before accepting a new map revision."}
+        {"id": "review-diff", "kind": "human-gate", "condition": "the user asks to accept or deploy the new revision", "inputs": ["modbus-map-diff/v1"], "output": "review-disposition/v1", "instruction": "Group moved, added, removed, and changed points by cause and request one acceptance decision only when acceptance or deployment is in scope."}
       ],
       "stop_conditions": ["map schema mismatch", "unresolved composite identity", "unreviewed source-map holds"]
     }

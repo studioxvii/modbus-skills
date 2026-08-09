@@ -7,6 +7,8 @@ description: Compare two reviewed Modbus maps and report added, removed, moved, 
 
 Compare normalized maps while preserving evidence from both sides.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Normalize both inputs without changing unresolved engineering values.

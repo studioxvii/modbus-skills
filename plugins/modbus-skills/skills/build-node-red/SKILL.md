@@ -7,6 +7,8 @@ description: Build deterministic read-only Node-RED Modbus flow JSON from a cano
 
 Generate a disabled manual-read flow in `probe` or `final` mode.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Require a canonical map and read plan.

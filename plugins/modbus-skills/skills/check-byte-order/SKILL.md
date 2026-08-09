@@ -7,6 +7,8 @@ description: Evaluate every supported byte and word layout from one immutable ra
 
 Decode one sample into a complete candidate table.
 
+Follow `../../references/interaction-contract.md`.
+
 ## Process
 
 1. Read `references/sample-identity.md` and `references/layouts.md`.
@@ -15,7 +17,9 @@ Decode one sample into a complete candidate table.
 4. Evaluate every supported layout for the sample width.
 5. Apply scaling only after raw decoding.
 6. Report NaN, infinity, subnormal, range, and stability evidence.
-7. Ask the user to confirm one layout with engineering evidence.
+7. Eliminate candidates contradicted by explicit engineering constraints. If exactly
+   one remains, present the proof and one scoped confirmation; otherwise ask once with
+   the complete shortlist and distinguishing evidence needed.
 
 Completion requires every candidate to share one `sample_id`; the evidence selects no winner.
 

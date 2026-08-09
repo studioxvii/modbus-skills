@@ -9,10 +9,17 @@ Use a JSON object with these top-level fields:
 - `reviewer`: A person or review-role identifier.
 - `approve_map`: `true` only when the reviewer intends to approve the result.
 - `decisions`: An array of point decisions.
+- `hold_decisions`: An optional array that resolves global holds by exact `code`.
 
 A set decision contains `point_id`, `field`, `value`, `reason`, and at least one `evidence_refs` entry. Supported fields are route, unit, area, protocol offset, datatype, word span, byte order, scale, engineering offset, engineering unit, access, and read function code.
 
 An exclusion decision contains `point_id`, `action: "exclude"`, `reason`, and optional `evidence_refs`. Exclusion removes the point from the active read map and retains it under `excluded_points` with its disposition.
+
+A hold decision contains `code`, `reason`, and at least one `evidence_refs` entry. Use
+one hold decision for a shared source-confirmation scope such as a bounded PDF
+extraction. The canonical map hash already binds the decision to the exact map; the
+evidence reference should identify the source hash, page range, record count, and any
+exceptions. Do not create one hold decision per page or row.
 
 The command creates a new artifact. It never edits the input map. A byte-order decision also sets its confirmation state. The output status is `approved` only when `approve_map` is true and no blocking hold remains.
 
@@ -28,6 +35,7 @@ Use the exact JSON field names in this template:
   "reviewed_at": "2026-08-07T12:00:00-04:00",
   "reviewer": "commissioning-engineer",
   "approve_map": true,
+  "hold_decisions": [],
   "decisions": [
     {
       "point_id": "runtime",

@@ -15,7 +15,7 @@ class WorkflowCatalogTests(unittest.TestCase):
             "analyze-capture", "apply-review", "build-custom-export", "build-modpoll",
             "build-modscan", "build-node-red", "build-tool-pack", "capture-sample",
             "check-byte-order", "check-map", "compare-maps", "extract-pdf-map",
-            "modbus-help", "normalize-map", "parse-map", "plan-reads",
+            "compile-user-map", "modbus-help", "normalize-map", "parse-map", "plan-reads",
             "remap-addresses", "review-evidence", "review-map",
         }
         skill_root = ROOT / "plugins" / "modbus-skills" / "skills"
@@ -31,7 +31,8 @@ class WorkflowCatalogTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("../../references/user-paths.md", router)
         self.assertIn("Read that skill's current `SKILL.md`", router)
-        self.assertIn("Select one next skill", router)
+        self.assertIn("$compile-user-map", router)
+        self.assertIn("explicitly requested stage", router)
 
     def test_skill_handoffs_reference_existing_skills(self) -> None:
         skill_root = ROOT / "plugins" / "modbus-skills" / "skills"
@@ -39,14 +40,13 @@ class WorkflowCatalogTests(unittest.TestCase):
         for skill_id in skill_ids - {"modbus-help"}:
             text = (skill_root / skill_id / "SKILL.md").read_text(encoding="utf-8")
             with self.subTest(skill=skill_id):
-                self.assertIn("## Handoff", text)
                 for target in re.findall(r"\$([a-z0-9]+(?:-[a-z0-9]+)*)", text):
                     self.assertIn(target, skill_ids)
 
     def test_workflows_reference_existing_skills(self) -> None:
-        skills = json.loads((ROOT / "catalog" / "skills.json").read_text(encoding="utf-8"))
         workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
-        skill_ids = {skill["id"] for skill in skills["skills"]}
+        skill_root = ROOT / "plugins" / "modbus-skills" / "skills"
+        skill_ids = {path.name for path in skill_root.iterdir() if path.is_dir()}
         workflow_ids = {workflow["id"] for workflow in workflows["workflows"]}
         self.assertTrue(workflows["workflows"])
         for workflow in workflows["workflows"]:
@@ -65,6 +65,24 @@ class WorkflowCatalogTests(unittest.TestCase):
                         self.assertIn(step["workflow"], workflow_ids)
                     else:
                         self.assertTrue(step["instruction"])
+
+    def test_primary_outcome_is_one_skill_step_without_stage_choreography(self) -> None:
+        workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
+        workflow = next(item for item in workflows["workflows"] if item["id"] == "compile-user-map")
+        self.assertEqual(1, len(workflow["steps"]))
+        self.assertEqual("compile-user-map", workflow["steps"][0]["skill"])
+
+        skill = (
+            ROOT / "plugins" / "modbus-skills" / "skills" / "compile-user-map" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("## Handoff", skill)
+        for stage in ("$extract-pdf-map", "$normalize-map", "$review-evidence", "$plan-reads"):
+            self.assertNotIn(stage, skill)
+
+        wrapper = (
+            ROOT / "plugins" / "modbus-skills" / "skills" / "compile-user-map" / "scripts" / "run.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('run_cli("compile-user-map"', wrapper)
 
     def test_byte_order_workflow_probes_before_final_generation(self) -> None:
         workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
