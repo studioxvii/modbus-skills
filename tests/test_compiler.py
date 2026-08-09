@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,6 +124,194 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(
             stat.S_IMODE((case_root / "case.json").stat().st_mode), 0o600
         )
+
+    def test_clean_structured_source_reaches_offline_bundle_in_one_call(self) -> None:
+        source = self.root / "clean.csv"
+        source.write_text(
+            "logical_point_id,name,protocol_offset,area,datatype,access\n"
+            "temperature,Temperature,10,holding-register,uint16,read-only\n",
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["temperature"],
+                "included": [
+                    {
+                        "oem_point_id": "temperature",
+                        "matched_intent": "temperature",
+                        "match_quality": "exact",
+                        "reason": "Typed exact selection",
+                        "evidence_refs": ["csv:row:2"],
+                    }
+                ],
+                "suggested": [],
+                "excluded": [],
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "source-case")
+
+        self.assertEqual("offline-complete", result["state"])
+        self.assertEqual("none", result["next_action"]["kind"])
+        user_map = json.loads(
+            (self.root / "source-case" / "artifacts" / "user-map.json").read_text()
+        )
+        self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
+
+    def test_existing_candidate_map_records_are_valid_structured_input(self) -> None:
+        source = self.root / "candidate-map.json"
+        source.write_text(
+            json.dumps(
+                {
+                    "schema_version": "candidate-map/v1",
+                    "format": "json",
+                    "records": [
+                        {
+                            "logical_point_id": "status",
+                            "name": "Status",
+                            "protocol_offset": 20,
+                            "area": "holding-register",
+                            "datatype": "uint16",
+                            "access": "read-only",
+                            "_source": {"format": "json", "index": 0},
+                        }
+                    ],
+                    "warnings": [],
+                    "rejected_rows": [],
+                    "assumptions": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source)},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["status"],
+                "included": [{
+                    "oem_point_id": "status",
+                    "matched_intent": "status",
+                    "match_quality": "exact",
+                    "reason": "Typed exact selection",
+                    "evidence_refs": ["json:0"],
+                }],
+                "suggested": [],
+                "excluded": [],
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "candidate-source-case")
+
+        self.assertEqual("offline-complete", result["state"])
+
+    def test_clean_pdf_source_uses_bounded_ladder_without_page_question(self) -> None:
+        source = self.root / "clean; map.pdf"
+        source.write_bytes(b"%PDF-1.4\n% synthetic rights-safe fixture\n")
+        layout = subprocess.CompletedProcess(
+            [], 0,
+            b"Protocol Offset  Name  Data Type  Area  Access\n10  Temperature  uint16  holding-register  read-only\n",
+            b"",
+        )
+        bbox = subprocess.CompletedProcess(
+            [], 0,
+            (
+                b'<doc><page><word xMin="10" yMin="10" xMax="50" yMax="18">Protocol</word>'
+                b'<word xMin="55" yMin="10" xMax="90" yMax="18">Offset</word>'
+                b'<word xMin="100" yMin="10" xMax="140" yMax="18">Name</word>'
+                b'<word xMin="200" yMin="10" xMax="230" yMax="18">Data</word>'
+                b'<word xMin="235" yMin="10" xMax="270" yMax="18">Type</word>'
+                b'<word xMin="300" yMin="10" xMax="340" yMax="18">Area</word>'
+                b'<word xMin="430" yMin="10" xMax="470" yMax="18">Access</word>'
+                b'<word xMin="10" yMin="25" xMax="30" yMax="33">10</word>'
+                b'<word xMin="100" yMin="25" xMax="170" yMax="33">Temperature</word>'
+                b'<word xMin="200" yMin="25" xMax="250" yMax="33">uint16</word>'
+                b'<word xMin="300" yMin="25" xMax="390" yMax="33">holding-register</word>'
+                b'<word xMin="430" yMin="25" xMax="490" yMax="33">read-only</word>'
+                b'</page></doc>'
+            ),
+            b"",
+        )
+        effects = [
+            subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n"),
+            subprocess.CompletedProcess([], 0, b"", b"-f -l -layout -bbox-layout -enc\n"),
+            layout,
+            bbox,
+        ]
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "pdf"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["temperature"],
+                "included": [{
+                    "exact_name": "Temperature",
+                    "matched_intent": "temperature",
+                    "match_quality": "exact",
+                    "reason": "Typed exact-name selection",
+                    "evidence_refs": ["pdf:p1"],
+                }],
+                "suggested": [],
+                "excluded": [],
+            },
+            "targets": [],
+            "target_options": {},
+        }
+        with mock.patch(
+            "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
+        ), mock.patch(
+            "modbus_skills.pdf_extraction.subprocess.run", side_effect=effects
+        ) as run_mock:
+            result = compile_user_map(compile_request, self.root / "pdf-case")
+
+        self.assertEqual("offline-complete", result["state"])
+        self.assertEqual("none", result["next_action"]["kind"])
+        self.assertEqual(4, run_mock.call_count)
+
+    def test_source_normalization_exceptions_form_one_grouped_packet(self) -> None:
+        source = self.root / "missing-datatype.csv"
+        source.write_text(
+            "logical_point_id,name,protocol_offset,area,access\n"
+            "temperature,Temperature,10,holding-register,read-only\n",
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["temperature"],
+                "included": [{
+                    "oem_point_id": "temperature",
+                    "matched_intent": "temperature",
+                    "match_quality": "exact",
+                    "reason": "Typed exact selection",
+                    "evidence_refs": ["csv:row:2"],
+                }],
+                "suggested": [],
+                "excluded": [],
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "held-source-case")
+
+        self.assertEqual("awaiting-source-decision", result["state"])
+        self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
+        packet = json.loads(
+            (self.root / "held-source-case" / "control" / "source-packet.json").read_text()
+        )
+        self.assertEqual("source", packet["phase"])
+        self.assertEqual(1, len(packet["decisions"]))
+        self.assertFalse((self.root / "held-source-case" / "artifacts" / "user-map.json").exists())
 
     def test_target_waits_for_one_binding_resume_without_losing_offline_map(self) -> None:
         case_root = self.root / "case"

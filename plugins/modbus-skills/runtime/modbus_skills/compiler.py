@@ -23,12 +23,18 @@ from .compiler_contracts import (
 from .decision_packets import (
     DECISION_CANDIDATE_SCHEMA_VERSION,
     DecisionPacketError,
+    build_compiler_decision_packet,
     decision_reply_fingerprint,
     validate_decision_candidate,
 )
 from .exporters import ExporterInputError, stable_json
 from .map_linking import MapLinkError, link_selected_map
 from .read_plan import compile_read_plan
+from .source_intake import (
+    SourceIntakeError,
+    bind_selection_template,
+    compile_source_descriptor,
+)
 from .tool_pack import SUPPORTED_TARGETS, build_tool_pack
 from .user_map import UserMapError, compile_user_map_bundle
 
@@ -42,7 +48,9 @@ _REQUEST_FIELDS = frozenset(
     {
         "schema_version",
         "oem_map",
+        "source",
         "selection_candidate",
+        "selection_template",
         "targets",
         "target_options",
         "binding",
@@ -130,6 +138,34 @@ def compile_user_map(
     index: dict[str, dict[str, str]] = {}
     _store_json(root, index, "request", "control/request.json", normalized)
     _store_json(root, index, "oem_map", "artifacts/oem-map.json", oem_map)
+    if oem_map.get("holds"):
+        packet = _source_decision_packet(case_id, oem_map)
+        _store_json(
+            root,
+            index,
+            "source_packet",
+            "control/source-packet.json",
+            packet,
+        )
+        return _commit(
+            root,
+            normalized,
+            case_id=case_id,
+            state="awaiting-source-decision",
+            index=index,
+            receipts=[],
+            target_statuses=[],
+            next_action={
+                "kind": "provide-corrected-source",
+                "accepted_schema": COMPILE_REQUEST_SCHEMA_VERSION,
+                "packet_id": packet["packet_id"],
+                "reason": "material source exceptions remain grouped in one packet",
+                "starts_new_case": True,
+            },
+            active_packet=packet,
+            started=started,
+            timer=timer,
+        )
     return _advance(
         normalized,
         root,
@@ -481,6 +517,49 @@ def _selection_candidate_from_decision(
     }
 
 
+def _source_decision_packet(
+    case_id: str, oem_map: Mapping[str, Any]
+) -> dict[str, Any]:
+    subjects = sorted(
+        {
+            str(point_id)
+            for hold in oem_map.get("holds", ())
+            if isinstance(hold, Mapping)
+            for point_id in hold.get("point_ids", ())
+            if isinstance(point_id, str) and point_id
+        }
+    )
+    if not subjects:
+        subjects = ["source-document"]
+    evidence_refs = sorted(
+        {
+            str(reference.get("region_id", reference.get("record_id", "")))
+            for point in oem_map.get("points", ())
+            if isinstance(point, Mapping)
+            for reference in point.get("source_refs", ())
+            if isinstance(reference, Mapping)
+            and reference.get("region_id", reference.get("record_id"))
+        }
+    )
+    if not evidence_refs:
+        evidence_refs = [f"source-sha256:{oem_map['source_sha256']}"]
+    return build_compiler_decision_packet(
+        case_id=case_id,
+        phase="source",
+        source_hash=oem_map["source_sha256"],
+        input_hashes={"oem_map": stable_input_hash(oem_map)},
+        decisions=[
+            {
+                "decision_id": "source.resolve-exceptions",
+                "subject_ids": subjects,
+                "prompt": "Supply one corrected local source or typed replacement that resolves this grouped source exception packet.",
+                "permitted_dispositions": ["supply-corrected-source"],
+                "evidence_refs": evidence_refs,
+            }
+        ],
+    )
+
+
 def _commit(
     root: Path,
     request: Mapping[str, Any],
@@ -590,14 +669,41 @@ def _validate_request(value: Mapping[str, Any]) -> dict[str, Any]:
         raise CompilerError("compile request has unknown fields: " + ", ".join(sorted(map(str, unknown))))
     if value.get("schema_version") != COMPILE_REQUEST_SCHEMA_VERSION:
         raise CompilerError(f"schema_version must be {COMPILE_REQUEST_SCHEMA_VERSION}")
-    oem_map = value.get("oem_map")
+    raw_oem_map = value.get("oem_map")
+    raw_source = value.get("source")
+    if (raw_oem_map is None) == (raw_source is None):
+        raise CompilerError("compile request needs exactly one of oem_map or source")
+    source_descriptor: Mapping[str, Any] | None = None
+    if raw_source is not None:
+        if not isinstance(raw_source, Mapping):
+            raise CompilerError("source must be an object")
+        try:
+            oem_map, source_descriptor = compile_source_descriptor(raw_source)
+        except SourceIntakeError as exc:
+            raise CompilerError(str(exc)) from exc
+    else:
+        oem_map = raw_oem_map
     candidate = value.get("selection_candidate")
-    if not isinstance(oem_map, Mapping) or not isinstance(candidate, Mapping):
-        raise CompilerError("compile request needs OEM map and typed selection candidate objects")
+    template = value.get("selection_template")
+    if raw_source is None and template is not None:
+        raise CompilerError("selection_template is accepted only with a local source descriptor")
+    if (candidate is None) == (template is None):
+        raise CompilerError("compile request needs exactly one typed selection_candidate or selection_template")
+    if not isinstance(oem_map, Mapping):
+        raise CompilerError("compile request OEM map must be an object")
     try:
         validate_oem_map(oem_map)
     except CompilerContractError as exc:
         raise CompilerError(str(exc)) from exc
+    if template is not None:
+        if not isinstance(template, Mapping):
+            raise CompilerError("selection_template must be an object")
+        try:
+            candidate = bind_selection_template(template, oem_map)
+        except SourceIntakeError as exc:
+            raise CompilerError(str(exc)) from exc
+    if not isinstance(candidate, Mapping):
+        raise CompilerError("selection_candidate must be a typed object")
     targets = _targets(value.get("targets", ()))
     options = value.get("target_options", {})
     if not isinstance(options, Mapping) or any(not isinstance(item, Mapping) for item in options.values()):
@@ -617,6 +723,7 @@ def _validate_request(value: Mapping[str, Any]) -> dict[str, Any]:
             "schema_version": COMPILE_REQUEST_SCHEMA_VERSION,
             "oem_map": oem_map,
             "selection_candidate": candidate,
+            **({"source": source_descriptor} if source_descriptor is not None else {}),
             "targets": targets,
             "target_options": {str(key): dict(options[key]) for key in sorted(options)},
             **({"binding": binding} if binding is not None else {}),
