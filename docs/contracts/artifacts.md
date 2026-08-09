@@ -12,7 +12,7 @@ Every top-level JSON workflow artifact must contain:
 
 A derived artifact must also contain `input_hashes` when its inputs have stable serialized forms. Empty collections stay present. This makes the stop state and the absence of findings explicit.
 
-A final target requires `input_hashes.canonical_map` in its read plan. The value must be a valid SHA-256 hash and must match the exact map supplied to the target. A compiled plan also shows its `planning_options`. The options hash must match `input_hashes.planning_options`. This makes every approved sparse-read gap visible and testable. Missing, malformed, and stale hashes stop generation. Probe mode can use an unbound raw plan, but it rejects malformed or mismatched provenance when provenance is present.
+A final target requires `input_hashes.canonical_map` in its read plan. The value must be a valid SHA-256 hash and must match the exact map supplied to the target. A compiled plan also shows its `planning_options`. The options hash must match `input_hashes.planning_options`. Sparse reads require an explicit `readable_islands` entry bound to route, unit, area, read function, inclusive offsets, reason, and evidence references. `unsafe_intervals` always split reads, while `max_quantities` can reduce protocol limits. `max_gap` remains a compatibility field but does not authorize reading an unknown gap. Each bridged range records its exact offsets, island ID, reason, and evidence references. Missing, malformed, and stale hashes stop generation. Probe mode can use an unbound raw plan, but it rejects malformed or mismatched provenance when provenance is present.
 
 Hash canonical JSON with sorted keys and compact separators. Exclude clocks and local paths from deterministic content.
 

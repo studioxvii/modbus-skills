@@ -15,6 +15,12 @@ import re
 from typing import Any, Iterable, Mapping, Sequence
 
 from .artifacts import artifact_envelope, stable_input_hash
+from .read_plan import (
+    ReadableIsland,
+    UnsafeInterval,
+    normalize_readable_islands,
+    normalize_unsafe_intervals,
+)
 
 
 TARGET_MANIFEST_SCHEMA_VERSION = "modbus-target-manifest/v1"
@@ -460,8 +466,9 @@ def _validate_map_bound_plan(
     canonical_map: Mapping[str, Any],
     read_plan: Mapping[str, Any],
     *,
-    max_gap: int,
     max_quantities: Mapping[str, int],
+    readable_islands: Sequence[ReadableIsland],
+    unsafe_intervals: Sequence[UnsafeInterval],
 ) -> list[Finding]:
     """Require each map-bound request to have one exact canonical purpose."""
 
@@ -587,19 +594,59 @@ def _validate_map_bound_plan(
             for _, _, point_start, width in exact_points
         )
         prior_stop = ordered_ranges[0][1]
+        expected_bridges: list[dict[str, Any]] = []
         for point_start, point_stop in ordered_ranges[1:]:
             gap = max(0, point_start - prior_stop)
-            if gap > max_gap:
+            if gap:
+                function_code = block_function_code(block)
+                island = _authorized_readable_island(
+                    route,
+                    unit,
+                    area,
+                    function_code,
+                    start,
+                    stop - 1,
+                    readable_islands,
+                    unsafe_intervals,
+                )
+                if island is None:
+                    findings.append(
+                        Finding(
+                            "error",
+                            "BLOCK_GAP_NOT_EVIDENCED",
+                            f"Read block {identifier!r} bridges addresses without one explicit safe readable island.",
+                            path,
+                        )
+                    )
+                else:
+                    expected_bridges.append(
+                        {
+                            "start_offset": prior_stop,
+                            "end_offset": point_start - 1,
+                            "quantity": gap,
+                            "readable_island_id": island.island_id,
+                            "reason": island.reason,
+                            "evidence_refs": list(island.evidence_refs),
+                        }
+                    )
+            prior_stop = max(prior_stop, point_stop)
+        if expected_bridges or block.get("bridged_ranges"):
+            raw_bridges = block.get("bridged_ranges", ())
+            actual_bridges = (
+                list(raw_bridges)
+                if isinstance(raw_bridges, Sequence)
+                and not isinstance(raw_bridges, (str, bytes, bytearray))
+                else []
+            )
+            if actual_bridges != expected_bridges:
                 findings.append(
                     Finding(
                         "error",
-                        "BLOCK_GAP_EXCEEDS_PLAN_OPTION",
-                        f"Read block {identifier!r} contains an unapproved gap of {gap} addresses; the plan permits {max_gap}.",
-                        path,
+                        "BLOCK_BRIDGE_TRACE_MISMATCH",
+                        f"Read block {identifier!r} does not exactly trace its evidenced bridged ranges.",
+                        f"{path}.bridged_ranges",
                     )
                 )
-                break
-            prior_stop = max(prior_stop, point_stop)
 
         selected_ids = {item[0] for item in exact_points}
         for point_index, point in enumerate(points):
@@ -678,10 +725,47 @@ def _validate_map_bound_plan(
     return findings
 
 
+def _authorized_readable_island(
+    route_id: str,
+    unit_id: int,
+    area: str,
+    function_code: int | None,
+    start_offset: int,
+    end_offset: int,
+    islands: Sequence[ReadableIsland],
+    unsafe_intervals: Sequence[UnsafeInterval],
+) -> ReadableIsland | None:
+    for island in islands:
+        if (
+            island.route_id == route_id
+            and island.unit_id == unit_id
+            and island.area.value == area
+            and island.function_code == function_code
+            and island.start_offset <= start_offset
+            and end_offset <= island.end_offset
+            and not any(
+                interval.route_id == route_id
+                and interval.unit_id == unit_id
+                and interval.area.value == area
+                and start_offset <= interval.end_offset
+                and interval.start_offset <= end_offset
+                for interval in unsafe_intervals
+            )
+        ):
+            return island
+    return None
+
+
 def _bound_plan_options(
     read_plan: Mapping[str, Any],
-) -> tuple[int, dict[str, int], list[Finding]]:
-    """Validate and return visible gap and per-area quantity limits."""
+) -> tuple[
+    int,
+    dict[str, int],
+    tuple[ReadableIsland, ...],
+    tuple[UnsafeInterval, ...],
+    list[Finding],
+]:
+    """Validate and return visible read-authority and quantity limits."""
 
     findings: list[Finding] = []
     raw_options = read_plan.get("planning_options")
@@ -701,7 +785,7 @@ def _bound_plan_options(
                     "planning_options",
                 )
             )
-        return 0, {}, findings
+        return 0, {}, (), (), findings
     if not isinstance(raw_options, Mapping):
         findings.append(
             Finding(
@@ -711,8 +795,13 @@ def _bound_plan_options(
                 "planning_options",
             )
         )
-        return 0, {}, findings
-    unknown = set(raw_options) - {"max_gap", "max_quantities"}
+        return 0, {}, (), (), findings
+    unknown = set(raw_options) - {
+        "max_gap",
+        "max_quantities",
+        "readable_islands",
+        "unsafe_intervals",
+    }
     if unknown:
         findings.append(
             Finding(
@@ -777,6 +866,34 @@ def _bound_plan_options(
                 )
                 continue
             normalized_quantities[area] = raw_limit
+    try:
+        readable_islands = normalize_readable_islands(
+            raw_options.get("readable_islands", ())
+        )
+    except (TypeError, ValueError) as exc:
+        readable_islands = ()
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_INVALID",
+                f"planning_options.readable_islands is invalid: {exc}",
+                "planning_options.readable_islands",
+            )
+        )
+    try:
+        unsafe_intervals = normalize_unsafe_intervals(
+            raw_options.get("unsafe_intervals", ())
+        )
+    except (TypeError, ValueError) as exc:
+        unsafe_intervals = ()
+        findings.append(
+            Finding(
+                "error",
+                "PLAN_OPTIONS_INVALID",
+                f"planning_options.unsafe_intervals is invalid: {exc}",
+                "planning_options.unsafe_intervals",
+            )
+        )
     if recorded_hash is None:
         findings.append(
             Finding(
@@ -807,7 +924,7 @@ def _bound_plan_options(
                 "input_hashes.planning_options",
             )
         )
-    return max_gap, normalized_quantities, findings
+    return max_gap, normalized_quantities, readable_islands, unsafe_intervals, findings
 
 
 def preflight_common(
@@ -835,7 +952,7 @@ def preflight_common(
             Finding(
                 "error",
                 "PLAN_MAP_HASH_MISSING",
-                "The final read plan must identify the exact canonical map used to compile it. Rebuild the plan from the reviewed map.",
+                "The final read plan must identify the exact canonical map used to compile it. Rebuild the plan from the validated map.",
                 "input_hashes.canonical_map",
             )
         )
@@ -1076,14 +1193,21 @@ def preflight_common(
                 findings.append(Finding("error", "POINT_NOT_PLANNED", f"Point {identifier!r} is not covered by the read plan.", f"points[{index}]"))
 
     if plan_is_bound:
-        max_gap, max_quantities, option_findings = _bound_plan_options(read_plan)
+        (
+            _max_gap,
+            max_quantities,
+            readable_islands,
+            unsafe_intervals,
+            option_findings,
+        ) = _bound_plan_options(read_plan)
         findings.extend(option_findings)
         findings.extend(
             _validate_map_bound_plan(
                 canonical_map,
                 read_plan,
-                max_gap=max_gap,
                 max_quantities=max_quantities,
+                readable_islands=readable_islands,
+                unsafe_intervals=unsafe_intervals,
             )
         )
 

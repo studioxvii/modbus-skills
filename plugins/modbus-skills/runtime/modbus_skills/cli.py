@@ -37,7 +37,11 @@ from .modscan import export_modscan
 from .node_red import export_node_red
 from .parsers import parse_source
 from .pdf_extraction import PdfExtractionError, extract_pdf, parse_page_range
-from .read_plan import compile_read_plan
+from .read_plan import (
+    compile_read_plan,
+    normalize_readable_islands,
+    normalize_unsafe_intervals,
+)
 from .tool_pack import ToolPack, build_tool_pack, group_blocking_findings
 
 
@@ -130,6 +134,8 @@ def _parser(command: str) -> argparse.ArgumentParser:
     elif command == "compile-read-plan":
         parser.add_argument("--max-gap", type=int, default=0)
         parser.add_argument("--max-quantity", action="append", default=[], metavar="AREA=COUNT")
+        parser.add_argument("--readable-islands", help="JSON array of evidenced readable islands")
+        parser.add_argument("--unsafe-intervals", help="JSON array of reserved or unsafe intervals")
     elif command in {"generate-node-red", "generate-modpoll", "generate-modscan"}:
         parser.add_argument("--map", required=True)
         parser.add_argument("--plan", required=True)
@@ -998,9 +1004,26 @@ def _max_quantities(values: Sequence[str]) -> Mapping[str, int] | None:
     return result
 
 
+def _constraint_array(path: str | None, label: str) -> list[Mapping[str, Any]]:
+    if path is None:
+        return []
+    value = _read_json(path, label=label)
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise CliError(f"{label} must be a JSON array")
+    if any(not isinstance(item, Mapping) for item in value):
+        raise CliError(f"each {label} entry must be an object")
+    return [dict(item) for item in value]
+
+
 def _handle_plan(args: argparse.Namespace) -> dict[str, Any]:
     canonical = _read_json(args.input)
     max_quantities = _max_quantities(args.max_quantity)
+    readable_islands = normalize_readable_islands(
+        _constraint_array(args.readable_islands, "readable islands")
+    )
+    unsafe_intervals = normalize_unsafe_intervals(
+        _constraint_array(args.unsafe_intervals, "unsafe intervals")
+    )
     points = _map_points(canonical)
     source_holds = canonical.get("holds", ()) if isinstance(canonical, Mapping) else ()
     if not isinstance(source_holds, Sequence) or isinstance(
@@ -1040,10 +1063,14 @@ def _handle_plan(args: argparse.Namespace) -> dict[str, Any]:
         plannable_points,
         max_gap=args.max_gap,
         max_quantities=max_quantities,
+        readable_islands=readable_islands,
+        unsafe_intervals=unsafe_intervals,
     ).to_dict()
     planning_options = {
         "max_gap": args.max_gap,
         "max_quantities": dict(max_quantities or {}),
+        "readable_islands": [item.to_dict() for item in readable_islands],
+        "unsafe_intervals": [item.to_dict() for item in unsafe_intervals],
     }
     raw_result["planning_options"] = planning_options
     findings = list(raw_result.get("findings", ()))

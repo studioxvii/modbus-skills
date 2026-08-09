@@ -389,6 +389,38 @@ class ReadPointTrace:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadBridgeTrace:
+    """An unselected interval read under explicit continuous-read evidence."""
+
+    start_offset: int
+    end_offset: int
+    readable_island_id: str
+    reason: str
+    evidence_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
+        if self.end_offset < self.start_offset:
+            raise ValueError("a bridged read range cannot end before it starts")
+        if not self.readable_island_id or not self.reason or not self.evidence_refs:
+            raise ValueError("a bridged read range needs island identity and evidence")
+
+    @property
+    def quantity(self) -> int:
+        return self.end_offset - self.start_offset + 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "start_offset": self.start_offset,
+            "end_offset": self.end_offset,
+            "quantity": self.quantity,
+            "readable_island_id": self.readable_island_id,
+            "reason": self.reason,
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ReadRequest:
     request_id: str
     route_id: str
@@ -398,10 +430,13 @@ class ReadRequest:
     start_offset: int
     quantity: int
     points: tuple[ReadPointTrace, ...]
+    readable_island_id: str | None = None
+    bridged_ranges: tuple[ReadBridgeTrace, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "area", RegisterArea.coerce(self.area))
         object.__setattr__(self, "points", tuple(self.points))
+        object.__setattr__(self, "bridged_ranges", tuple(self.bridged_ranges))
         expected_function = {
             RegisterArea.COIL: 1,
             RegisterArea.DISCRETE_INPUT: 2,
@@ -440,7 +475,7 @@ class ReadRequest:
         return self.start_offset + self.quantity - 1
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "request_id": self.request_id,
             "route_id": self.route_id,
             "unit_id": self.unit_id,
@@ -451,6 +486,11 @@ class ReadRequest:
             "end_offset": self.end_offset,
             "points": [point.to_dict() for point in self.points],
         }
+        if self.readable_island_id is not None:
+            result["readable_island_id"] = self.readable_island_id
+        if self.bridged_ranges:
+            result["bridged_ranges"] = [item.to_dict() for item in self.bridged_ranges]
+        return result
 
 
 @dataclass(frozen=True, slots=True)

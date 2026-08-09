@@ -275,7 +275,7 @@ class ExporterContractTests(unittest.TestCase):
                 }
                 self.assertIn(expected_code, codes)
 
-    def test_map_bound_gap_requires_visible_hashed_planning_option(self) -> None:
+    def test_map_bound_gap_requires_visible_hashed_readable_island(self) -> None:
         first = sample_point()
         second = sample_point(
             logical_point_id="temperature",
@@ -285,8 +285,24 @@ class ExporterContractTests(unittest.TestCase):
             byte_order=None,
         )
         canonical_map = sample_map(first, second)
-        options = {"max_gap": 8, "max_quantities": {}}
-        plan = compile_read_plan((first, second), max_gap=8).to_dict()
+        readable_island = {
+            "island_id": "pressure-table",
+            "route_id": "default",
+            "unit_id": 1,
+            "area": "holding-register",
+            "function_code": 3,
+            "start_offset": 100,
+            "end_offset": 110,
+            "reason": "OEM table is continuously readable",
+            "evidence_refs": ["manual:table-pressure"],
+        }
+        options = {
+            "max_gap": 0,
+            "max_quantities": {},
+            "readable_islands": [readable_island],
+            "unsafe_intervals": [],
+        }
+        plan = compile_read_plan((first, second), readable_islands=[readable_island]).to_dict()
         plan["planning_options"] = options
         plan = artifact_envelope(
             plan,
@@ -301,11 +317,12 @@ class ExporterContractTests(unittest.TestCase):
             finding.code
             for finding in preflight_common(canonical_map, plan, mode="final")
         }
-        self.assertNotIn("BLOCK_GAP_EXCEEDS_PLAN_OPTION", accepted)
+        self.assertNotIn("BLOCK_GAP_NOT_EVIDENCED", accepted)
+        self.assertNotIn("BLOCK_BRIDGE_TRACE_MISMATCH", accepted)
         self.assertNotIn("PLAN_OPTIONS_HASH_MISMATCH", accepted)
 
         tampered = copy.deepcopy(plan)
-        tampered["planning_options"]["max_gap"] = 0
+        tampered["planning_options"]["readable_islands"] = []
         tampered_codes = {
             finding.code
             for finding in preflight_common(
@@ -313,7 +330,7 @@ class ExporterContractTests(unittest.TestCase):
             )
         }
         self.assertIn("PLAN_OPTIONS_HASH_MISMATCH", tampered_codes)
-        self.assertIn("BLOCK_GAP_EXCEEDS_PLAN_OPTION", tampered_codes)
+        self.assertIn("BLOCK_GAP_NOT_EVIDENCED", tampered_codes)
 
         hidden = copy.deepcopy(plan)
         hidden.pop("planning_options")
@@ -322,7 +339,15 @@ class ExporterContractTests(unittest.TestCase):
             for finding in preflight_common(canonical_map, hidden, mode="final")
         }
         self.assertIn("PLAN_OPTIONS_MISSING", hidden_codes)
-        self.assertIn("BLOCK_GAP_EXCEEDS_PLAN_OPTION", hidden_codes)
+        self.assertIn("BLOCK_GAP_NOT_EVIDENCED", hidden_codes)
+
+        bad_trace = copy.deepcopy(plan)
+        bad_trace["requests"][0]["bridged_ranges"][0]["end_offset"] = 108
+        bad_trace_codes = {
+            finding.code
+            for finding in preflight_common(canonical_map, bad_trace, mode="final")
+        }
+        self.assertIn("BLOCK_BRIDGE_TRACE_MISMATCH", bad_trace_codes)
 
     def test_map_bound_quantity_obeys_visible_area_limit(self) -> None:
         first = sample_point()
@@ -334,6 +359,8 @@ class ExporterContractTests(unittest.TestCase):
         options = {
             "max_gap": 0,
             "max_quantities": {"holding-register": 2},
+            "readable_islands": [],
+            "unsafe_intervals": [],
         }
         plan = compile_read_plan((first, second)).to_dict()
         plan["planning_options"] = options
