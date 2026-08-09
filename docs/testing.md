@@ -19,6 +19,33 @@ Tracked fixtures are synthetic. They cover all four Modbus data areas, multiple 
 
 Do not add a vendor manual, a complete vendor register map, customer data, or a private product artifact to this repository. A non-synthetic fixture needs a documented redistribution right before it can be tracked.
 
+## Outcome compiler transcripts
+
+Run the deterministic human-time contract with:
+
+```bash
+python3 scripts/run_compile_workflow_tests.py \
+  --output /tmp/modbus-compile-workflow
+```
+
+The suite covers clean structured intake, automatic PDF coordinate fallback, one
+grouped selection decision and resume, preserved offline artifacts across a binding
+gate, and minimum safe reads inside an evidenced readable island. It fails on page or
+row approval loops, dependency installation, stage-skill handoffs, repeated holds, or
+more than one source-phase decision packet.
+
+The optional local timing profile uses the tracked 150-row synthetic fixture:
+
+```bash
+python3 scripts/run_compile_workflow_tests.py \
+  --output /tmp/modbus-compile-benchmark \
+  --benchmark
+```
+
+Normal CI asserts transcript shape rather than wall time. The benchmark separately
+records its fixture hash, machine and Python versions, elapsed time, and selected-point
+count, and applies the five-minute offline threshold.
+
 ## Human workflow tests with local maps
 
 Run a separate, local-only corpus when testing against real register maps. Keep that corpus outside the repository and out of source control. The corpus owner must have the right to use each source for local test work.
@@ -72,7 +99,10 @@ Test at least these roles:
 - A commissioning engineer who needs one or more read-only target artifacts.
 - A reviewer who compares map revisions and explains holds.
 
-Pass only when the agent chooses the correct skill chain, preserves holds, requests human confirmation where required, creates no write request, and names the output artifacts and remaining limits clearly.
+Pass only when the agent chooses the shortest safe skill chain, preserves genuine
+holds, batches human confirmation only where required, creates no write request, and
+names the output artifacts and remaining limits clearly. Page-by-page, row-by-row, or
+point-by-point confirmation fails unless each unit requires a distinct decision.
 
 ## Native acceptance and limits
 
