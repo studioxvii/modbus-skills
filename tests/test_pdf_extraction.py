@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+ROOT = Path(__file__).resolve().parents[1]
+RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
+sys.path.insert(0, str(RUNTIME))
+
+from modbus_skills.pdf_extraction import extract_pdf  # noqa: E402
+
+
+VERSION = subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n")
+HELP = subprocess.CompletedProcess(
+    [],
+    0,
+    b"",
+    b"-f <int> -l <int> -layout -bbox-layout -enc <string>\n",
+)
+
+
+def completed(stdout: bytes = b"", *, stderr: bytes = b"", code: int = 0):
+    return subprocess.CompletedProcess([], code, stdout, stderr)
+
+
+def bbox(*rows: tuple[str, str, str]) -> bytes:
+    body = []
+    y = 10
+    for address, name, datatype in (("Address", "Name", "Data Type"), *rows):
+        body.extend(
+            (
+                f'<word xMin="10" yMin="{y}" xMax="50" yMax="{y + 8}">{address}</word>',
+                f'<word xMin="100" yMin="{y}" xMax="180" yMax="{y + 8}">{name}</word>',
+                f'<word xMin="250" yMin="{y}" xMax="320" yMax="{y + 8}">{datatype}</word>',
+            )
+        )
+        y += 12
+    return (
+        '<doc><page width="600" height="800"><flow><block><line>'
+        + "</line><line>".join(body)
+        + "</line></block></flow></page></doc>"
+    ).encode()
+
+
+class PdfExtractionTests(unittest.TestCase):
+    def extract(self, effects, *, name: str = "map.pdf"):
+        with mock.patch(
+            "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
+        ), mock.patch(
+            "modbus_skills.pdf_extraction.subprocess.run", side_effect=effects
+        ) as run_mock:
+            result = extract_pdf(Path(name), b"%PDF synthetic")
+        return result, run_mock
+
+    def test_clean_strict_and_coordinate_claims_need_no_human_hold(self) -> None:
+        layout = b"Address  Name  Data Type\n40001  Tank Level  float32\n"
+        result, _ = self.extract([VERSION, HELP, completed(layout), completed(bbox(("40001", "Tank Level", "float32")))])
+
+        self.assertEqual("candidate", result["status"])
+        self.assertEqual([], result["holds"])
+        self.assertEqual("25.06.0", result["extractor"]["version"])
+        self.assertIn("-bbox-layout", result["extractor"]["features"])
+        self.assertEqual(1, len(result["records"]))
+        parser_ids = {claim["parser_id"] for claim in result["records"][0]["_claims"]}
+        self.assertEqual({"pdftotext-layout/v1", "pdftotext-bbox-layout/v1"}, parser_ids)
+
+    def test_merged_cell_layout_falls_back_to_coordinate_rows_without_hold(self) -> None:
+        layout = b"Address Name Data Type\n40001 Tank Level float32\n"
+        result, _ = self.extract([VERSION, HELP, completed(layout), completed(bbox(("40001", "Tank Level", "float32")))])
+
+        self.assertEqual("candidate", result["status"])
+        self.assertEqual([], result["holds"])
+        self.assertEqual("pdftotext-bbox-layout/v1", result["records"][0]["_source"]["parser_id"])
+        self.assertIn("pdf-strict-parser-no-rows", {item["code"] for item in result["findings"]})
+
+    def test_only_material_conflict_is_quarantined(self) -> None:
+        layout = (
+            b"Address  Name  Data Type\n"
+            b"40001  Tank Level  float32\n"
+            b"40003  Tank Temp  int16\n"
+        )
+        coordinates = bbox(("40002", "Tank Level", "float32"), ("40003", "Tank Temp", "int16"))
+        result, _ = self.extract([VERSION, HELP, completed(layout), completed(coordinates)])
+
+        self.assertEqual("held", result["status"])
+        self.assertEqual("pdf-material-claim-conflict", result["holds"][0]["code"])
+        self.assertEqual(1, len(result["records"]))
+        self.assertEqual("Tank Temp", result["records"][0]["name"])
+        self.assertEqual(1, len(result["quarantined_records"]))
+
+    def test_discovers_register_pages_before_coordinate_fallback(self) -> None:
+        layout = b"Introduction only\fAddress Name Data Type\n40001 Tank Level float32\n"
+        result, run_mock = self.extract(
+            [VERSION, HELP, completed(layout), completed(bbox(("40001", "Tank Level", "float32")))]
+        )
+
+        self.assertEqual([2], result["discovered_register_pages"])
+        bbox_argv = run_mock.call_args_list[3].args[0]
+        self.assertEqual("2", bbox_argv[bbox_argv.index("-f") + 1])
+        self.assertEqual("2", bbox_argv[bbox_argv.index("-l") + 1])
+
+    def test_missing_or_incompatible_capability_fails_once(self) -> None:
+        with mock.patch("modbus_skills.pdf_extraction.shutil.which", return_value=None):
+            missing = extract_pdf(Path("map.pdf"), b"pdf")
+        self.assertEqual(["pdf-text-extractor-unavailable"], [h["code"] for h in missing["holds"]])
+
+        result, run_mock = self.extract([VERSION, completed(stderr=b"-layout -f -l -enc")])
+        self.assertEqual(["pdf-text-extractor-incompatible"], [h["code"] for h in result["holds"]])
+        self.assertEqual(2, run_mock.call_count)
+
+    def test_timeout_and_malformed_bbox_are_bounded_failures(self) -> None:
+        timeout = subprocess.TimeoutExpired(["pdftotext"], timeout=60)
+        timed_out, _ = self.extract([VERSION, HELP, timeout])
+        self.assertEqual("pdf-text-extraction-timeout", timed_out["holds"][0]["code"])
+
+        layout = b"Address Name Data Type\n40001 Tank Level float32\n"
+        malformed, _ = self.extract([VERSION, HELP, completed(layout), completed(b"not xml")])
+        self.assertEqual("pdf-coordinate-output-malformed", malformed["holds"][0]["code"])
+
+    def test_shell_metacharacter_filename_is_passed_as_one_argv_item(self) -> None:
+        filename = "map; touch SHOULD_NOT_EXIST.pdf"
+        result, run_mock = self.extract(
+            [VERSION, HELP, completed(b"Address  Name\n40001  Level\n"), completed(bbox(("40001", "Level", "uint16")))],
+            name=filename,
+        )
+        self.assertEqual("candidate", result["status"])
+        for call in run_mock.call_args_list:
+            self.assertIsInstance(call.args[0], list)
+            self.assertFalse(call.kwargs.get("shell", False))
+        self.assertIn(filename, run_mock.call_args_list[2].args[0])
+
+
+if __name__ == "__main__":
+    unittest.main()

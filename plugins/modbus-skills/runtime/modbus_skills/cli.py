@@ -8,7 +8,6 @@ import hashlib
 import io
 import json
 import re
-import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -19,9 +18,7 @@ from typing import Any, Callable
 from .address import format_modicon_reference, resolve_address
 from .analysis import analyze_capture
 from .artifacts import (
-    ArtifactContractError,
     artifact_envelope,
-    assert_artifact_envelope,
     stable_input_hash,
 )
 from .byte_order import RawSample, evaluate_byte_orders
@@ -39,6 +36,7 @@ from .modpoll import export_modpoll
 from .modscan import export_modscan
 from .node_red import export_node_red
 from .parsers import parse_source
+from .pdf_extraction import PdfExtractionError, extract_pdf, parse_page_range
 from .read_plan import compile_read_plan
 from .tool_pack import ToolPack, build_tool_pack, group_blocking_findings
 
@@ -343,232 +341,14 @@ def _handle_parse(args: argparse.Namespace) -> dict[str, Any]:
     return {"status": "parsed", "records": len(output["records"]), "output": Path(args.output).name}
 
 
-_PDF_HEADER_ALIASES = {
-    "address": "address",
-    "register": "address",
-    "register address": "address",
-    "protocol offset": "protocol_offset",
-    "display address": "display_address",
-    "name": "name",
-    "tag": "name",
-    "description": "description",
-    "data type": "datatype",
-    "datatype": "datatype",
-    "area": "area",
-    "unit id": "unit_id",
-    "word count": "word_count",
-    "byte order": "byte_order",
-}
-
-
-def _pdf_header(line: str) -> list[str] | None:
-    raw = re.split(r"\s{2,}", line.strip())
-    if len(raw) < 2:
-        return None
-    names = [_PDF_HEADER_ALIASES.get(re.sub(r"\s+", " ", item.strip().lower())) for item in raw]
-    if None in names or not ({"address", "protocol_offset", "display_address"} & set(names)):
-        return None
-    return [str(name) for name in names]
-
-
-def _structured_pdf_rows(
-    text: str, *, first_page: int = 1
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    records: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-    for page_number, page in enumerate(text.split("\f"), start=first_page):
-        header: list[str] | None = None
-        for line_number, line in enumerate(page.splitlines(), start=1):
-            candidate_header = _pdf_header(line)
-            if candidate_header is not None:
-                header = candidate_header
-                continue
-            if header is None or not line.strip():
-                continue
-            parts = re.split(r"\s{2,}", line.strip())
-            if len(parts) != len(header):
-                continue
-            record = dict(zip(header, (value.strip() for value in parts), strict=True))
-            address = record.get("address", record.get("protocol_offset", record.get("display_address")))
-            if not re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|\d+)", str(address or "")):
-                rejected.append({"code": "pdf-row-address-invalid", "page": page_number, "line": line_number})
-                continue
-            record["_source"] = {
-                "format": "pdf",
-                "page": page_number,
-                "line": line_number,
-                "excerpt": line.strip()[:300],
-            }
-            records.append(record)
-    return records, rejected
-
-
-_PDF_PAGE_TOKEN = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
-_MAX_PDF_PAGE = 100_000
-_MAX_PDF_PAGE_SPAN = 256
 _MAX_OCR_EVIDENCE_BYTES = 10_000_000
-_MAX_OCR_PAGE_TEXT_BYTES = 1_000_000
-
-
-def _pdf_page_range(value: str | None) -> tuple[int, int] | None:
-    if value is None:
-        return None
-    if not value or any(character.isspace() for character in value):
-        raise CliError("--pages must use comma-separated page numbers or ranges without spaces")
-    selected: set[int] = set()
-    selected_count = 0
-    for token in value.split(","):
-        match = _PDF_PAGE_TOKEN.fullmatch(token)
-        if match is None:
-            raise CliError("--pages must use syntax such as 42-48 or 42,43-48")
-        first = int(match.group(1))
-        last = int(match.group(2) or first)
-        if last < first:
-            raise CliError("--pages ranges must increase")
-        if last > _MAX_PDF_PAGE:
-            raise CliError(f"--pages must not exceed {_MAX_PDF_PAGE}")
-        span = last - first + 1
-        if span > _MAX_PDF_PAGE_SPAN:
-            raise CliError(
-                f"--pages can select at most {_MAX_PDF_PAGE_SPAN} contiguous pages"
-            )
-        selected_count += span
-        selected.update(range(first, last + 1))
-    if len(selected) != selected_count:
-        raise CliError("--pages must not contain duplicate or overlapping pages")
-    first = min(selected)
-    last = max(selected)
-    if len(selected) != last - first + 1:
-        raise CliError("--pages must resolve to one contiguous range")
-    if len(selected) > _MAX_PDF_PAGE_SPAN:
-        raise CliError(
-            f"--pages can select at most {_MAX_PDF_PAGE_SPAN} contiguous pages"
-        )
-    return first, last
-
-
-def _ocr_text_rows(
-    value: Mapping[str, Any],
-    *,
-    source_sha256: str,
-    page_range: tuple[int, int] | None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
-    if page_range is None:
-        raise CliError("--ocr-evidence requires an explicit bounded --pages selection")
-    try:
-        assert_artifact_envelope(value)
-    except ArtifactContractError as exc:
-        raise CliError(f"OCR evidence common envelope is invalid: {exc}") from exc
-    if value.get("schema_version") != "modbus-ocr-evidence/v1":
-        raise CliError("OCR evidence must use schema_version modbus-ocr-evidence/v1")
-    if value.get("artifact_type") != "modbus-ocr-evidence":
-        raise CliError("OCR evidence artifact_type must be modbus-ocr-evidence")
-    input_hashes = value["input_hashes"]
-    if input_hashes.get("source_pdf") != source_sha256:
-        raise CliError("OCR evidence input_hashes.source_pdf does not match the input PDF")
-    if str(value.get("source_sha256", "")).lower() != source_sha256:
-        raise CliError("OCR evidence source_sha256 does not match the input PDF")
-
-    raw_tool = value.get("tool")
-    if not isinstance(raw_tool, Mapping):
-        raise CliError("OCR evidence tool must contain name and version")
-    tool_name = str(raw_tool.get("name", "")).strip()
-    tool_version = str(raw_tool.get("version", "")).strip()
-    if not tool_name or not tool_version:
-        raise CliError("OCR evidence tool name and version must be non-empty")
-    if len(tool_name) > 100 or len(tool_version) > 100:
-        raise CliError("OCR evidence tool name and version must be at most 100 characters")
-
-    raw_pages = value.get("pages")
-    if not isinstance(raw_pages, Sequence) or isinstance(
-        raw_pages, (str, bytes, bytearray)
-    ) or not raw_pages:
-        raise CliError("OCR evidence pages must be a non-empty array")
-
-    expected_pages = set(range(page_range[0], page_range[1] + 1))
-    supplied_pages: set[int] = set()
-    records: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-    for index, raw_page in enumerate(raw_pages):
-        if not isinstance(raw_page, Mapping):
-            raise CliError(f"OCR evidence pages[{index}] must be an object")
-        page_index = raw_page.get("page_index")
-        if isinstance(page_index, bool) or not isinstance(page_index, int):
-            raise CliError(f"OCR evidence pages[{index}].page_index must be an integer")
-        if page_index not in expected_pages:
-            raise CliError(
-                f"OCR evidence page {page_index} is outside the selected PDF page range"
-            )
-        if page_index in supplied_pages:
-            raise CliError(f"OCR evidence page {page_index} is duplicated")
-        supplied_pages.add(page_index)
-
-        text = raw_page.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise CliError(f"OCR evidence page {page_index} text must be non-empty")
-        if "\f" in text:
-            raise CliError(
-                f"OCR evidence page {page_index} text must not contain page separators"
-            )
-        if len(text.encode("utf-8")) > _MAX_OCR_PAGE_TEXT_BYTES:
-            raise CliError(
-                f"OCR evidence page {page_index} text exceeds {_MAX_OCR_PAGE_TEXT_BYTES} bytes"
-            )
-
-        printed_label_value = raw_page.get("printed_page_label")
-        printed_label = (
-            None
-            if printed_label_value is None
-            else str(printed_label_value).strip()
-        )
-        if printed_label is not None and len(printed_label) > 100:
-            raise CliError(
-                f"OCR evidence page {page_index} printed label must be at most 100 characters"
-            )
-        page_records, page_rejected = _structured_pdf_rows(
-            text, first_page=page_index
-        )
-        for record in page_records:
-            source = dict(record.get("_source", {}))
-            source.update(
-                {
-                    "method": "ocr-derived",
-                    "printed_page_label": printed_label,
-                    "ocr_tool": {
-                        "name": tool_name,
-                        "version": tool_version,
-                    },
-                }
-            )
-            record["_source"] = source
-        for item in page_rejected:
-            item.update(
-                {
-                    "method": "ocr-derived",
-                    "printed_page_label": printed_label,
-                }
-            )
-        records.extend(page_records)
-        rejected.extend(page_rejected)
-
-    if supplied_pages != expected_pages:
-        missing = sorted(expected_pages - supplied_pages)
-        raise CliError(
-            "OCR evidence must contain each selected page exactly once; missing: "
-            + ", ".join(str(page) for page in missing)
-        )
-    return records, rejected, {"name": tool_name, "version": tool_version}
-
-
 def _handle_pdf(args: argparse.Namespace) -> dict[str, Any]:
     path, data = _read_bytes(args.input)
-    page_range = _pdf_page_range(args.pages)
-    source_sha256 = hashlib.sha256(data).hexdigest()
-    holds: list[dict[str, Any]] = []
-    records: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
+    try:
+        page_range = parse_page_range(args.pages)
+    except PdfExtractionError as exc:
+        raise CliError(str(exc)) from exc
     ocr_evidence: Mapping[str, Any] | None = None
-    ocr_tool: dict[str, str] | None = None
     if args.ocr_evidence:
         _, ocr_bytes = _read_bytes(args.ocr_evidence)
         if len(ocr_bytes) > _MAX_OCR_EVIDENCE_BYTES:
@@ -578,94 +358,13 @@ def _handle_pdf(args: argparse.Namespace) -> dict[str, Any]:
         ocr_evidence = _mapping(
             _read_json(args.ocr_evidence, label="OCR evidence"), "OCR evidence"
         )
-        records, rejected, ocr_tool = _ocr_text_rows(
-            ocr_evidence,
-            source_sha256=source_sha256,
-            page_range=page_range,
-        )
-        if records:
-            holds.append(
-                {
-                    "code": "pdf-ocr-human-review-required",
-                    "severity": "hold",
-                    "blocking": True,
-                    "message": "Review every OCR-derived candidate against its source page before normalization.",
-                }
-            )
-        else:
-            holds.append(
-                {
-                    "code": "pdf-ocr-structured-rows-unavailable",
-                    "severity": "hold",
-                    "blocking": True,
-                    "message": "OCR evidence was supplied, but no strict structured register rows were found.",
-                }
-            )
-    else:
-        executable = shutil.which("pdftotext")
-        if executable is None:
-            holds.append({"code": "pdf-text-extractor-unavailable", "severity": "hold", "blocking": True, "message": "Install pdftotext or provide a rights-safe OCR evidence file for deterministic extraction."})
-        else:
-            command = [executable, "-layout", "-enc", "UTF-8"]
-            if page_range is not None:
-                command.extend(["-f", str(page_range[0]), "-l", str(page_range[1])])
-            command.extend([str(path), "-"])
-            try:
-                completed = subprocess.run(
-                    command,
-                    check=False,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=60,
-                )
-            except subprocess.TimeoutExpired:
-                completed = None
-                holds.append({"code": "pdf-text-extraction-timeout", "severity": "hold", "blocking": True, "message": "PDF text extraction exceeded the 60 second limit."})
-            if completed is not None:
-                if completed.returncode != 0:
-                    holds.append({"code": "pdf-text-extraction-failed", "severity": "hold", "blocking": True, "message": "pdftotext could not extract this document."})
-                else:
-                    text = completed.stdout.decode("utf-8", errors="replace")
-                    records, rejected = _structured_pdf_rows(
-                        text,
-                        first_page=page_range[0] if page_range is not None else 1,
-                    )
-                    if not text.strip():
-                        holds.append({"code": "pdf-ocr-required", "severity": "hold", "blocking": True, "message": "The selected PDF pages contain no extractable text. Supply a rights-safe local modbus-ocr-evidence/v1 file; this command will not invent register rows."})
-                    elif not records:
-                        holds.append({"code": "pdf-structured-rows-unavailable", "severity": "hold", "blocking": True, "message": "Text was extracted, but no strict structured register rows were found. Review the manual or provide a table export."})
-                    else:
-                        holds.append({"code": "pdf-human-review-required", "severity": "hold", "blocking": True, "message": "Review every PDF candidate against its source page before normalization."})
-    result = artifact_envelope({
-        "status": "held" if holds else "candidate",
-        "source": {"filename": path.name, "sha256": source_sha256},
-        "page_selection": (
-            {"first_page": page_range[0], "last_page": page_range[1]}
-            if page_range is not None
-            else None
-        ),
-        "ocr_tool": ocr_tool,
-        "records": records,
-        "rejected_rows": rejected,
-        "warnings": [],
-    },
-        schema_version="modbus-pdf-extraction/v1",
-        inputs={
-            "source": data,
-            "ocr_evidence": ocr_evidence,
-            "page_selection": (
-                {"first_page": page_range[0], "last_page": page_range[1]}
-                if page_range is not None
-                else None
-            ),
-        },
-        assumptions=[],
-        findings=[],
-        holds=holds,
-    )
+    try:
+        result = extract_pdf(path, data, page_range=page_range, ocr_evidence=ocr_evidence)
+    except PdfExtractionError as exc:
+        raise CliError(str(exc)) from exc
     artifact = Artifact.text("pdf-extraction.json", "application/json", stable_json(result), "pdf-extraction")
     _write_artifacts(args.output, [artifact], overwrite=args.overwrite)
-    return {"status": result["status"], "records": len(records), "output": Path(args.output).name}
+    return {"status": result["status"], "records": len(result["records"]), "output": Path(args.output).name}
 
 
 def _handle_normalize(args: argparse.Namespace) -> dict[str, Any]:
@@ -756,14 +455,18 @@ def _handle_diagnose(args: argparse.Namespace) -> dict[str, Any]:
 
 def _handle_review(args: argparse.Namespace) -> dict[str, Any]:
     canonical = _mapping(_read_json(args.input), "map")
-    lint = (
-        _mapping(_read_json(args.lint, label="lint result"), "lint result")
-        if args.lint
-        else lint_map(canonical)
-    )
+    candidate_input = "points" not in canonical and "records" in canonical
+    if args.lint:
+        lint: Mapping[str, Any] | None = _mapping(
+            _read_json(args.lint, label="lint result"), "lint result"
+        )
+    elif candidate_input:
+        lint = None
+    else:
+        lint = lint_map(canonical)
     raw_result = review_parse_evidence(canonical, lint_result=lint)
     findings = [
-        *list(lint.get("findings", ())),
+        *(list(lint.get("findings", ())) if lint is not None else ()),
         *list(raw_result.get("global_findings", ())),
     ]
     result = artifact_envelope(
@@ -889,7 +592,7 @@ def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
         "contract": "modbus-address-remap-preview/v1",
         "source_convention": args.source_convention,
         "target_convention": args.target_convention,
-        "status": "held" if any(item["status"] == "held" for item in conversions) or collisions else "ready-for-review",
+        "status": "held" if any(item["status"] == "held" for item in conversions) or collisions else "ready",
         "conversions": conversions,
         "collisions": collisions,
     }
@@ -1660,7 +1363,7 @@ def _handle_custom(args: argparse.Namespace) -> dict[str, Any]:
     )
     evidence = artifact_envelope({
         "contract": "modbus-custom-format-evidence/v1",
-        "status": "ready-for-human-review",
+        "status": "ready",
         "inference": inference,
         "example": {"filename": example_path.name, "sha256": hashlib.sha256(example).hexdigest()},
         "record_count": len(records),

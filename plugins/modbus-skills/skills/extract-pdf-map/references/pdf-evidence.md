@@ -8,7 +8,28 @@
 - Do not give unlabeled fields a passing accuracy score.
 - Do not calculate precision from a partial truth set.
 - Never merge separately addressed rows because their names look similar.
-- Require human review before promotion to a canonical map.
+- When residual source risk remains, require one scoped confirmation for the bounded
+  exception group after automated checks. Clean strict extraction and coordinate-derived
+  fallback rows that pass quality gates do not require approval. Never require page-by-page
+  or row-by-row approval.
+
+## Automatic extraction ladder
+
+1. Preflight the exact `pdftotext` version and the `-f`, `-l`, `-layout`,
+   `-bbox-layout`, and `-enc` capabilities before extraction.
+2. Use an argument array, a 60-second timeout, a bounded page span, and bounded
+   captured output. Treat filenames as data, never shell text.
+3. Discover likely register pages from headers and register/address signals before
+   requesting a page selection.
+4. Parse strict `-layout` rows, then independently parse `-bbox-layout` coordinates.
+5. Preserve field claims with the parser ID and physical source locator. A failed
+   strict pass is non-blocking when coordinate recovery passes its gates.
+6. Auto-resolve formatting-only agreement. Quarantine only conflicts affecting row
+   identity, address, area, width, datatype, or access; keep unaffected rows usable.
+
+The artifact records the extractor receipt, discovered pages, accepted rows,
+quarantined rows, and localized conflicts. A successful automated extraction has no
+blanket human-review hold.
 
 ## Bounded text extraction
 
@@ -28,8 +49,11 @@ The bundled wrapper accepts comma-and-range page syntax, resolves it to one cont
 3. Record the OCR tool and version.
 4. Preserve row and column association.
 5. Mark each derived row as `ocr-derived`.
-6. Require visual source-page review before confirmation.
+6. Inspect the bounded range once and focus on detected exceptions, layout changes,
+   and a representative sample of stable rows.
 7. Reject uncertain labels, row boundaries, or column boundaries.
+8. Record one confirmation for the complete source hash, page range, record count, and
+   exception list. A page needs a separate decision only when it has a distinct anomaly.
 
 Use this handoff contract:
 
@@ -58,6 +82,6 @@ Use this handoff contract:
 }
 ```
 
-The page array must contain each page in the selected contiguous range exactly once. Both `input_hashes.source_pdf` and `source_sha256` must match the input PDF. The command stores only derived rows, short excerpts, tool metadata, and an input digest. It does not copy the full OCR text into the output artifact.
+The page array must contain each page in the selected contiguous range exactly once. Both `input_hashes.source_pdf` and `source_sha256` must match the input PDF. External OCR uncertainty remains one grouped, bounded hold. The command stores only derived rows, short excerpts, tool metadata, and an input digest. It does not copy the full OCR text into the output artifact.
 
 Do not upload the manual. Do not store full OCR text or page images in repository artifacts. Do not redistribute the manual.

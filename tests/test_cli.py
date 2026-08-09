@@ -72,13 +72,13 @@ class CliIntegrationTests(unittest.TestCase):
         review_receipt = self.run_command(
             "review-evidence", "--input", canonical, "--lint", lint, "--output", review
         )
-        self.assertEqual("ready-for-human-review", review_receipt["status"])
+        self.assertEqual("ready", review_receipt["status"])
 
         diagnosis = self.root / "diagnosis"
         diagnose_receipt = self.run_command(
             "diagnose-map", "--input", FIXTURES / "source_map.json", "--output", diagnosis
         )
-        self.assertEqual("ready-for-human-review", diagnose_receipt["status"])
+        self.assertEqual("ready", diagnose_receipt["status"])
         self.assertTrue((diagnosis / "parsed.json").is_file())
         self.assertTrue((diagnosis / "map-draft.json").is_file())
 
@@ -116,6 +116,51 @@ class CliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual("generated", witte["status"])
         self.assertTrue(any((self.root / "witte-v12" / "modpoll" / "witte-v12-xml").glob("*.xml")))
+
+    def test_review_evidence_accepts_source_codes_before_normalization(self) -> None:
+        candidate = self.root / "coordinate-candidate.json"
+        candidate.write_text(
+            json.dumps(
+                {
+                    "schema_version": "modbus-coordinate-evidence/v1",
+                    "source": {"filename": "synthetic.pdf", "sha256": "2" * 64},
+                    "page_selection": {"first_page": 5, "last_page": 6},
+                    "holds": [
+                        {
+                            "code": "pdf-human-review-required",
+                            "severity": "hold",
+                            "blocking": True,
+                            "message": "Confirm the bounded extraction as one batch.",
+                        }
+                    ],
+                    "records": [
+                        {
+                            "id": "energy",
+                            "name": "Energy",
+                            "source_address": "100/101*",
+                            "scale": "E",
+                            "_source": {
+                                "page": 5,
+                                "method": "coordinate-derived",
+                            },
+                        }
+                    ],
+                    "rejected_rows": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        output = self.root / "candidate-review.json"
+
+        receipt = self.run_command(
+            "review-evidence", "--input", candidate, "--output", output
+        )
+        review = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual("blocked", receipt["status"])
+        self.assertEqual("extraction-candidate", review["input_stage"])
+        self.assertEqual(1, review["summary"]["blocking_decisions"])
+        self.assertEqual("E", review["items"][0]["candidate_record"]["scale"])
 
     def test_read_plan_preserves_map_holds_and_excludes_access_held_points(self) -> None:
         source = self.root / "access-held-map.json"
@@ -338,7 +383,7 @@ class CliIntegrationTests(unittest.TestCase):
             "--output",
             remap,
         )
-        self.assertEqual("ready-for-review", remap_receipt["status"])
+        self.assertEqual("ready", remap_receipt["status"])
 
         custom = self.root / "custom"
         custom_receipt = self.run_command(
@@ -350,7 +395,7 @@ class CliIntegrationTests(unittest.TestCase):
             "--output",
             custom,
         )
-        self.assertEqual("ready-for-human-review", custom_receipt["status"])
+        self.assertEqual("ready", custom_receipt["status"])
         self.assertIn("tank_level", (custom / "rendered-output.txt").read_text(encoding="utf-8"))
 
     def test_byte_order_evidence_keeps_complete_sample_identity(self) -> None:
@@ -496,12 +541,47 @@ class CliIntegrationTests(unittest.TestCase):
         source = self.root / "synthetic.pdf"
         source.write_bytes(b"%PDF-1.4\n% rights-safe synthetic test input\n")
         output = self.root / "pdf"
-        with mock.patch("modbus_skills.cli.shutil.which", return_value=None):
+        with mock.patch("modbus_skills.pdf_extraction.shutil.which", return_value=None):
             receipt = self.run_command("extract-pdf", "--input", source, "--output", output)
         self.assertEqual("held", receipt["status"])
         result = json.loads((output / "pdf-extraction.json").read_text(encoding="utf-8"))
         self.assertEqual("pdf-text-extractor-unavailable", result["holds"][0]["code"])
         self.assertEqual([], result["records"])
+
+    def test_pdf_clean_extraction_has_no_blanket_human_review_hold(self) -> None:
+        source = self.root / "clean; map.pdf"
+        source.write_bytes(b"%PDF-1.4\n% rights-safe synthetic test input\n")
+        output = self.root / "clean-pdf"
+        version = subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n")
+        help_result = subprocess.CompletedProcess([], 0, b"", b"-f -l -layout -bbox-layout -enc\n")
+        layout = subprocess.CompletedProcess([], 0, b"Address  Name  Data Type\n40001  Level  float32\n", b"")
+        bbox = subprocess.CompletedProcess(
+            [],
+            0,
+            (
+                b'<doc><page><word xMin="10" yMin="10" xMax="50" yMax="18">Address</word>'
+                b'<word xMin="100" yMin="10" xMax="140" yMax="18">Name</word>'
+                b'<word xMin="250" yMin="10" xMax="280" yMax="18">Data</word>'
+                b'<word xMin="285" yMin="10" xMax="320" yMax="18">Type</word>'
+                b'<word xMin="10" yMin="25" xMax="50" yMax="33">40001</word>'
+                b'<word xMin="100" yMin="25" xMax="140" yMax="33">Level</word>'
+                b'<word xMin="250" yMin="25" xMax="300" yMax="33">float32</word>'
+                b'</page></doc>'
+            ),
+            b"",
+        )
+        with mock.patch(
+            "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
+        ), mock.patch(
+            "modbus_skills.pdf_extraction.subprocess.run",
+            side_effect=[version, help_result, layout, bbox],
+        ):
+            receipt = self.run_command("extract-pdf", "--input", source, "--output", output)
+
+        artifact = json.loads((output / "pdf-extraction.json").read_text(encoding="utf-8"))
+        self.assertEqual("candidate", receipt["status"])
+        self.assertEqual([], artifact["holds"])
+        self.assertEqual(1, len(artifact["records"]))
 
     def test_invalid_json_is_concise_and_nonzero(self) -> None:
         source = self.root / "broken.json"
@@ -784,7 +864,7 @@ class CliIntegrationTests(unittest.TestCase):
         pdf_source = self.root / "contract.pdf"
         pdf_source.write_bytes(b"%PDF-1.4\n% synthetic contract fixture\n")
         pdf_output = self.root / "contract-pdf"
-        with mock.patch("modbus_skills.cli.shutil.which", return_value=None):
+        with mock.patch("modbus_skills.pdf_extraction.shutil.which", return_value=None):
             run(
                 "extract-pdf",
                 "--input",
@@ -817,13 +897,20 @@ class CliIntegrationTests(unittest.TestCase):
         source = self.root / "ocr.pdf"
         source.write_bytes(b"%PDF-1.4\n% synthetic OCR fixture\n")
         output = self.root / "ocr-output"
+        version = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b"pdftotext version 25.06.0\n"
+        )
+        help_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"", stderr=b"-f -l -layout -bbox-layout -enc\n"
+        )
         completed = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=b"\f", stderr=b""
         )
         with mock.patch(
-            "modbus_skills.cli.shutil.which", return_value="/usr/bin/pdftotext"
+            "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
         ), mock.patch(
-            "modbus_skills.cli.subprocess.run", return_value=completed
+            "modbus_skills.pdf_extraction.subprocess.run",
+            side_effect=[version, help_result, completed],
         ) as run_mock:
             receipt = self.run_command(
                 "extract-pdf",
@@ -835,7 +922,7 @@ class CliIntegrationTests(unittest.TestCase):
                 output,
             )
         self.assertEqual("held", receipt["status"])
-        command = run_mock.call_args.args[0]
+        command = run_mock.call_args_list[2].args[0]
         self.assertEqual("42", command[command.index("-f") + 1])
         self.assertEqual("48", command[command.index("-l") + 1])
         artifact = json.loads(
@@ -894,6 +981,8 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertNotIn(sentinel, raw_output)
         artifact = json.loads(raw_output)
         self.assertEqual("pdf-ocr-human-review-required", artifact["holds"][0]["code"])
+        self.assertEqual("batch-exceptions", artifact["review_strategy"]["mode"])
+        self.assertEqual(1, artifact["review_strategy"]["record_count"])
         self.assertEqual("Synthetic OCR", artifact["ocr_tool"]["name"])
         self.assertEqual(1, len(artifact["records"]))
         source_evidence = artifact["records"][0]["_source"]
