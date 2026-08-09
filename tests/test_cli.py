@@ -56,6 +56,67 @@ class CliIntegrationTests(unittest.TestCase):
         )
         return canonical, lint, plan
 
+    def test_compile_user_map_command_writes_one_offline_case(self) -> None:
+        from modbus_skills.artifacts import stable_input_hash
+        from modbus_skills.compiler_contracts import build_oem_map
+
+        source = build_oem_map(
+            [
+                {
+                    "oem_point_id": "temperature",
+                    "name": "Temperature",
+                    "area": "holding-register",
+                    "protocol_offset": 10,
+                    "datatype": "uint16",
+                    "word_span": 1,
+                    "source_refs": [
+                        {"page_index": 1, "row_index": 1, "region_id": "r1"}
+                    ],
+                }
+            ],
+            source_hash="a" * 64,
+        )
+        request = {
+            "schema_version": "modbus-compile-request/v1",
+            "oem_map": source,
+            "selection_candidate": {
+                "oem_map_hash": stable_input_hash(source),
+                "requested_measurements": ["temperature"],
+                "included": [
+                    {
+                        "oem_point_id": "temperature",
+                        "matched_intent": "temperature",
+                        "match_quality": "exact",
+                        "reason": "requested",
+                        "evidence_refs": ["r1"],
+                    }
+                ],
+                "suggested": [],
+                "excluded": [],
+            },
+            "targets": [],
+            "target_options": {},
+        }
+        request_path = self.root / "compile-request.json"
+        request_path.write_text(json.dumps(request), encoding="utf-8")
+
+        receipt = self.run_command(
+            "compile-user-map",
+            "--request",
+            request_path,
+            "--output",
+            self.root / "compiled",
+        )
+
+        self.assertEqual(receipt["status"], "offline-complete")
+        result = json.loads(
+            (self.root / "compiled" / "compile-result.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(result["state"], "offline-complete")
+        self.assertEqual(result["next_action"]["kind"], "none")
+
     def test_every_skill_wrapper_command_is_registered(self) -> None:
         discovered = set()
         for wrapper in (ROOT / "plugins" / "modbus-skills" / "skills").glob("*/scripts/run.py"):
@@ -878,6 +939,65 @@ class CliIntegrationTests(unittest.TestCase):
             (
                 pdf_output / "pdf-extraction.json",
                 "modbus-pdf-extraction/v1",
+            )
+        )
+
+        from modbus_skills.compiler_contracts import build_oem_map
+
+        compiler_oem = build_oem_map(
+            [
+                {
+                    "oem_point_id": "contract-temperature",
+                    "area": "holding-register",
+                    "protocol_offset": 10,
+                    "datatype": "uint16",
+                    "word_span": 1,
+                    "source_refs": [
+                        {"page_index": 1, "row_index": 1, "region_id": "r1"}
+                    ],
+                }
+            ],
+            source_hash="a" * 64,
+        )
+        compiler_request = self.root / "contract-compiler-request.json"
+        compiler_request.write_text(
+            json.dumps(
+                {
+                    "schema_version": "modbus-compile-request/v1",
+                    "oem_map": compiler_oem,
+                    "selection_candidate": {
+                        "oem_map_hash": stable_input_hash(compiler_oem),
+                        "requested_measurements": ["temperature"],
+                        "included": [
+                            {
+                                "oem_point_id": "contract-temperature",
+                                "matched_intent": "temperature",
+                                "match_quality": "exact",
+                                "reason": "requested",
+                                "evidence_refs": ["r1"],
+                            }
+                        ],
+                        "suggested": [],
+                        "excluded": [],
+                    },
+                    "targets": [],
+                    "target_options": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        compiler_output = self.root / "contract-compiler"
+        run(
+            "compile-user-map",
+            "--request",
+            compiler_request,
+            "--output",
+            compiler_output,
+        )
+        artifacts.append(
+            (
+                compiler_output / "compile-result.json",
+                "modbus-compile-result/v1",
             )
         )
 

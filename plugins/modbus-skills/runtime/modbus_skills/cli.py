@@ -23,6 +23,7 @@ from .artifacts import (
 )
 from .byte_order import RawSample, evaluate_byte_orders
 from .comparison import compare_maps
+from .compiler import compile_user_map
 from .custom_format import render_custom_format, validate_custom_format
 from .decisions import apply_review_decisions
 from .exporters import Artifact, ExportResult, stable_json
@@ -46,6 +47,7 @@ from .tool_pack import ToolPack, build_tool_pack, group_blocking_findings
 
 
 COMMANDS = (
+    "compile-user-map",
     "parse-map",
     "extract-pdf",
     "normalize-map",
@@ -80,7 +82,13 @@ def _parser(command: str) -> argparse.ArgumentParser:
     parser = _ArgumentParser(prog=f"modbus-skills {command}")
     parser.add_argument("--overwrite", action="store_true", help="replace output files")
 
-    if command in {"parse-map", "normalize-map", "lint-map", "review-evidence", "compile-read-plan", "analyze-capture", "evaluate-byte-order"}:
+    if command == "compile-user-map":
+        source = parser.add_mutually_exclusive_group(required=True)
+        source.add_argument("--request")
+        source.add_argument("--case")
+        parser.add_argument("--resume")
+        parser.add_argument("--output")
+    elif command in {"parse-map", "normalize-map", "lint-map", "review-evidence", "compile-read-plan", "analyze-capture", "evaluate-byte-order"}:
         parser.add_argument("--input", required=True)
         parser.add_argument("--output", required=True)
     if command == "parse-map":
@@ -325,6 +333,36 @@ def _json_options(path_value: str | None, label: str) -> Mapping[str, Any]:
     if not path_value:
         return {}
     return _mapping(_read_json(path_value, label=label), label)
+
+
+def _handle_compile(args: argparse.Namespace) -> dict[str, Any]:
+    if args.request:
+        if args.resume:
+            raise CliError("--resume is valid only with --case")
+        if not args.output:
+            raise CliError("--output is required with --request")
+        request = _mapping(
+            _read_json(args.request, label="compiler request"), "compiler request"
+        )
+        case_root = Path(args.output)
+        result = compile_user_map(request, case_root)
+    else:
+        if not args.resume:
+            raise CliError("--resume is required with --case")
+        case_path = Path(args.case)
+        case_root = case_path.parent if case_path.name == "case.json" else case_path
+        if args.output and Path(args.output).resolve() != case_root.resolve():
+            raise CliError("--output cannot redirect an existing compiler case")
+        resume = _mapping(
+            _read_json(args.resume, label="compiler resume"), "compiler resume"
+        )
+        result = compile_user_map(None, case_root, resume=resume)
+    return {
+        "status": result["state"],
+        "case_id": result["case_id"],
+        "output": case_root.name,
+        "next_action": result["next_action"],
+    }
 
 
 def _handle_parse(args: argparse.Namespace) -> dict[str, Any]:
@@ -1415,6 +1453,7 @@ def _handle_custom(args: argparse.Namespace) -> dict[str, Any]:
 
 
 _HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
+    "compile-user-map": _handle_compile,
     "parse-map": _handle_parse,
     "extract-pdf": _handle_pdf,
     "normalize-map": _handle_normalize,
