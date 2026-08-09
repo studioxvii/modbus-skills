@@ -4,14 +4,24 @@ Verification date: 2026-08-08.
 
 ## Node-RED live campaign
 
-The bounded live campaign contract and receipt gate are present for Codex-run
-Generator Fleet Simulator workflows at exactly 10 and 50 units. Native acceptance
-is currently **not-run/blocked** in this environment because the Node-RED runtime
-and `node-red-contrib-modbus` are not installed. The adapter intentionally emits a
-sanitized receipt with zero live requests rather than claiming import or device
-communication proof. Run the campaign only after a pinned native runtime and
-contrib node are available; preserve the separate static and native evidence
-distinction.
+Native acceptance was exercised locally on 2026-08-09 with Node-RED 5.0.4,
+Node.js 25.8.0, and `node-red-contrib-modbus` 5.60.1 against the clean
+`generator-fleet-simulator` checkout at commit `39d20e9`.
+
+- The 10-unit pass produced 10/10 unit-specific FC3 responses through the
+  generated manual flow.
+- The 50-unit bounded pass produced 59 sequential requests covering all 50 unit
+  IDs before the 60-second campaign cap; the simulator queue drained to 0 and
+  the returned raw register values matched the REST register oracle.
+- The simulator-side `fault-and-reset` scenario changed Unit 1 alarm word 1 at
+  holding-register offset 13 from 5 to 20. Node-RED read back 20 during the
+  fault and 5 after restoration, with no Node-RED writes.
+- A stopped-simulator request surfaced Modbus failures; after restart and
+  readiness, the next bounded Node-RED read recovered successfully.
+
+The live flow was imported disabled, reviewed, then enabled with a temporary
+debug capture sink for observation. This is native communication evidence, not a
+claim that Modpoll/ModScan or a long-duration soak was run.
 
 ## Passed
 
@@ -44,6 +54,9 @@ is diagnostic; transcript shape is the deterministic repository gate.
 
 ## Not yet verified
 
-Native application tests did not run because Node-RED, the supported Modpoll implementations, Witte Modbus Poll, and ModScan are not installed in the test environment. Generated target manifests correctly report `verification: "not-run"`.
+Modpoll, Witte Modbus Poll, and ModScan were not installed and were not run.
+Generated target manifests still correctly report `verification: "not-run"` for
+those targets. The Node-RED native result above is a separate local acceptance
+record and does not replace the deterministic repository checks.
 
 Do not publish the repository until the remaining items in `publication-checklist.md` are complete. The open-source license, publisher contact, final URLs, native target tests, and new-task plugin install are still release gates.
