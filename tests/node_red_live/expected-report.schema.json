@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "node-red-live-report/v1",
+  "type": "object",
+  "required": [
+    "schema_version", "run_id", "profile_id", "fleet_size", "status",
+    "terminal_state", "issue_codes", "request_count", "error_count",
+    "hashes", "versions", "cleanup"
+  ],
+  "properties": {
+    "schema_version": {"const": "node-red-live-report/v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "profile_id": {"enum": ["fleet-10", "fleet-50"]},
+    "fleet_size": {"enum": [10, 50]},
+    "status": {"enum": ["passed", "failed", "blocked", "not-run", "inconclusive"]},
+    "terminal_state": {"enum": ["passed", "failed", "blocked", "not-run", "inconclusive"]},
+    "issue_codes": {"type": "array", "items": {"type": "string"}},
+    "request_count": {"type": "integer", "minimum": 0, "maximum": 180},
+    "error_count": {"type": "integer", "minimum": 0},
+    "hashes": {"type": "object"},
+    "versions": {"type": "object"},
+    "cleanup": {"type": "object"}
+  },
+  "additionalProperties": true
+}

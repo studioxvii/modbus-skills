@@ -19,6 +19,10 @@ Follow `../../references/interaction-contract.md`.
 4. Read that skill's current `SKILL.md` before describing its behavior or inputs.
 5. Reply with the next skill, why it fits, what it needs, and what it produces.
 
+Do not ask who will run the work, where files belong, or how to structure tests when
+the request or repository already answers those questions. Use the current project
+and its existing output folders.
+
 Show a sequence only when the user asks for the full path. Keep it to the shortest useful path. Offer one alternate only when the goal is materially ambiguous.
 
 Use this format:

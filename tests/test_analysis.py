@@ -175,6 +175,34 @@ class CaptureAnalysisTests(unittest.TestCase):
             {finding["code"] for finding in result["findings"]},
         )
 
+    def test_campaign_completeness_reports_missing_requests(self) -> None:
+        result = analyze_capture(
+            {
+                "expected_request_ids": ["run-1:block-1", "run-1:block-2"],
+                "samples": [
+                    {
+                        "sample_id": "run-1:block-1:p1",
+                        "request_id": "run-1:block-1",
+                        "block_id": "block-1",
+                        "unit_id": 1,
+                        "point_id": "p1",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                        "raw_words": [1],
+                    }
+                ],
+            }
+        )
+        self.assertEqual(
+            {
+                "expected_requests": 2,
+                "observed_requests": 1,
+                "missing_requests": 1,
+                "missing_request_ids": ["run-1:block-2"],
+            },
+            result["campaign"],
+        )
+        self.assertIn("CAMPAIGN_REQUESTS_MISSING", {item["code"] for item in result["findings"]})
+
 
 if __name__ == "__main__":
     unittest.main()

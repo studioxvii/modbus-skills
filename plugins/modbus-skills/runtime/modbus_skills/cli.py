@@ -850,7 +850,20 @@ def _handle_capture(args: argparse.Namespace) -> dict[str, Any]:
         }
     pack = build_tool_pack(canonical, plan, targets=targets, mode="probe", target_options=target_options)
     _write_pack(pack, args.output, overwrite=args.overwrite)
-    return {"status": pack.status, "targets": targets, "output": Path(args.output).name}
+    return {
+        "status": pack.status,
+        "targets": targets,
+        "output": Path(args.output).name,
+        "next_action": (
+            {
+                "action": "run-bounded-read",
+                "uses": "README.md and the selected target folder",
+                "produces": "capture.json",
+            }
+            if pack.status == "generated"
+            else {"action": "resolve-holds"}
+        ),
+    }
 
 
 def _parse_word(value: Any) -> int:
@@ -974,6 +987,16 @@ def _handle_byte_order(args: argparse.Namespace) -> dict[str, Any]:
         scale=args.scale,
         engineering_offset=args.engineering_offset,
     ).to_dict()
+    raw_result["applicability"] = {
+        "sample_width_bits": sample.bit_width,
+        "word_order": "applicable" if len(sample.words) > 1 else "not-applicable",
+        "evaluation": "layout-candidates" if len(sample.words) > 1 else "byte-swap-only",
+        "message": (
+            "Word order can be evaluated for this multi-register sample."
+            if len(sample.words) > 1
+            else "This point uses one register. Word order does not apply; only AB/BA byte order can be compared."
+        ),
+    }
     raw_result["sample_identity"] = dict(sample_identity)
     missing_identity = [
         field
@@ -1024,7 +1047,16 @@ def _handle_byte_order(args: argparse.Namespace) -> dict[str, Any]:
         holds=holds,
     )
     _write_json(args.output, result, overwrite=args.overwrite)
-    return {"status": "evaluated", "candidates": len(result["candidates"]), "output": Path(args.output).name}
+    return {
+        "status": "evaluated",
+        "candidates": len(result["candidates"]),
+        "output": Path(args.output).name,
+        "next_action": {
+            "skill": "apply-review",
+            "uses": Path(args.output).name,
+            "produces": "a hash-bound layout decision",
+        },
+    }
 
 
 def _max_quantities(values: Sequence[str]) -> Mapping[str, int] | None:
@@ -1167,7 +1199,22 @@ def _handle_node_red(args: argparse.Namespace) -> dict[str, Any]:
     canonical, plan, options = _export_inputs(args)
     result = export_node_red(canonical, plan, mode=args.mode, options=options)
     _write_result(result, args.output, overwrite=args.overwrite)
-    return {"status": result.status, "target": result.target, "output": Path(args.output).name}
+    return {
+        "status": result.status,
+        "target": result.target,
+        "output": Path(args.output).name,
+        "next_action": (
+            {
+                "action": "run-bounded-read-plan",
+                "skill": "capture-sample",
+                "uses": "node-red/flow.json",
+                "produces": "capture.json",
+                "instruction": "Import flow.json, review the local endpoint, then click Run bounded read plan once.",
+            }
+            if result.status == "generated"
+            else {"action": "resolve-holds"}
+        ),
+    }
 
 
 def _handle_modpoll(args: argparse.Namespace) -> dict[str, Any]:
@@ -1362,7 +1409,24 @@ def _handle_analysis(args: argparse.Namespace) -> dict[str, Any]:
         holds=_blocking_findings(findings),
     )
     _write_json(args.output, result, overwrite=args.overwrite)
-    return {"status": "analyzed", "findings": len(result.get("findings", ())), "output": Path(args.output).name}
+    byte_order_needed = any(
+        str(finding.get("code", "")).startswith("BYTE_ORDER_")
+        for finding in findings
+    )
+    return {
+        "status": "analyzed",
+        "findings": len(result.get("findings", ())),
+        "output": Path(args.output).name,
+        "next_action": (
+            {
+                "skill": "check-byte-order",
+                "uses": Path(args.input).name,
+                "produces": "byte-order evidence",
+            }
+            if byte_order_needed
+            else {"action": "none"}
+        ),
+    }
 
 
 def _normalize_header(value: str) -> str:

@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import copy
+import json
+import re
+import shutil
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Mapping, Sequence
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+class CampaignError(ValueError):
+    """Raised when a live campaign would violate its safety contract."""
+
+
+_HOST_PLACEHOLDER = re.compile(r"^\$\{MODBUS(?:_[A-Z0-9_]+)?_HOST\}$")
+
+
+def validate_flow(flow: Sequence[Mapping[str, Any]]) -> None:
+    nodes = list(flow)
+    tabs = [node for node in nodes if node.get("type") == "tab"]
+    if not tabs or not all(bool(tab.get("disabled")) for tab in tabs):
+        raise CampaignError("Node-RED flow must be disabled before import")
+    clients: dict[str, Mapping[str, Any]] = {}
+    for node in nodes:
+        if str(node.get("type", "")).lower() != "modbus-client":
+            continue
+        identifier = str(node.get("id", ""))
+        if not identifier or identifier in clients:
+            raise CampaignError("Node-RED Modbus client IDs must be unique")
+        clients[identifier] = node
+    forbidden_types = ("inject-register", "modbus-read", "scan", "discover", "repeat")
+    for node in nodes:
+        node_type = str(node.get("type", "")).lower()
+        node_name = str(node.get("name", "")).lower()
+        unsafe_type = (
+            any(token in node_type for token in forbidden_types)
+            or ("modbus" in node_type and "write" in node_type)
+        )
+        unsafe_name = any(token in node_name for token in ("scan", "discover", "write register"))
+        if unsafe_type or unsafe_name:
+            if node_type == "inject" and node.get("repeat", "") in ("", None) and not node.get("once", False):
+                continue
+            raise CampaignError(f"unsafe Node-RED node: {node.get('type', '')}")
+        if node_type == "inject" and (node.get("repeat", "") or node.get("crontab", "") or node.get("once", False)):
+            raise CampaignError("Node-RED trigger must be manual one-shot")
+        if node_type == "modbus-flex-getter":
+            raw_codes = node.get("modbusSkillsAllowedFunctionCodes")
+            if raw_codes is None:
+                raw_codes = [node.get("fc", node.get("functionCode", 0))]
+            if not isinstance(raw_codes, list) or not raw_codes:
+                raise CampaignError("Node-RED read node has no bounded function codes")
+            try:
+                codes = {int(value) for value in raw_codes}
+            except (TypeError, ValueError) as exc:
+                raise CampaignError("Node-RED read node has invalid function code") from exc
+            if not codes <= {1, 2, 3, 4}:
+                raise CampaignError("only Modbus FC01-FC04 reads are permitted")
+            server_id = str(node.get("server", ""))
+            client = clients.get(server_id)
+            if server_id and client is None:
+                raise CampaignError("Node-RED read node references an unknown Modbus client")
+            host_source = client if client is not None else node
+            host = host_source.get("tcpHost", host_source.get("host"))
+            if host is not None and str(host) not in {"127.0.0.1", "localhost", "::1"} and _HOST_PLACEHOLDER.fullmatch(str(host)) is None:
+                raise CampaignError("Node-RED Modbus target must be loopback")
+
+
+def planned_requests(flow: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    sequencers = [
+        node
+        for node in flow
+        if node.get("type") == "function"
+        and node.get("name") == "Run bounded read plan"
+        and isinstance(node.get("modbusSkillsBlocks"), list)
+    ]
+    if len(sequencers) != 1:
+        raise CampaignError("generated Node-RED flow must expose one bounded read plan")
+    blocks = sequencers[0]["modbusSkillsBlocks"]
+    if not blocks or not all(isinstance(block, Mapping) for block in blocks):
+        raise CampaignError("generated Node-RED read plan is empty or invalid")
+    return [dict(block) for block in blocks]
+
+
+@dataclass
+class NodeRedRuntime:
+    which: Callable[[str], str | None] = shutil.which
+    cli: str | None = None
+    wait: Callable[[float], None] = time.sleep
+    clock: Callable[[], float] = time.monotonic
+
+    def preflight(self, flow: Sequence[Mapping[str, Any]], *, endpoint: str | None = None) -> dict[str, Any]:
+        if flow:
+            validate_flow(flow)
+        executable = self.cli or self.which("node-red")
+        if not executable:
+            return {"status": "blocked", "issue_codes": ["node-red-runtime-unavailable"], "runtime": "unavailable"}
+        return {"status": "ready", "issue_codes": [], "runtime": executable}
+
+
+class NodeRedAdminClient:
+    """Small loopback-only client for a disposable Node-RED test runtime."""
+
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:1880",
+        *,
+        timeout: float = 5.0,
+        opener=urlopen,
+        clock: Callable[[], float] = time.monotonic,
+        wait: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if not base_url.startswith(("http://127.0.0.1:", "http://localhost:", "http://[::1]:")):
+            raise CampaignError("Node-RED admin URL must use loopback HTTP")
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self._opener = opener
+        self._clock = clock
+        self._wait = wait
+
+    def _request(self, path: str, *, method: str = "GET", payload: Any = None) -> Any:
+        body = None
+        headers = {"Accept": "application/json"}
+        if payload is not None:
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = Request(self.base_url + path, data=body, headers=headers, method=method)
+        try:
+            with self._opener(request, timeout=self.timeout) as response:
+                raw = response.read()
+        except (HTTPError, URLError, OSError, TimeoutError) as exc:
+            raise CampaignError(f"Node-RED admin request failed: {exc}") from exc
+        if not raw:
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CampaignError("Node-RED admin returned invalid JSON") from exc
+
+    def flows(self) -> list[dict[str, Any]]:
+        value = self._request("/flows")
+        if isinstance(value, Mapping):
+            value = value.get("flows")
+        if not isinstance(value, list) or not all(isinstance(item, Mapping) for item in value):
+            raise CampaignError("Node-RED admin returned an invalid flow list")
+        return [dict(item) for item in value]
+
+    def deploy(self, flow: Sequence[Mapping[str, Any]]) -> None:
+        self._request("/flows", method="POST", payload=[dict(node) for node in flow])
+
+    def trigger(self, node_id: str) -> None:
+        if not node_id or not all(character.isalnum() for character in node_id):
+            raise CampaignError("Node-RED inject ID is invalid")
+        self._request(f"/inject/{node_id}", method="POST")
+
+    def run_flow(
+        self,
+        flow: Sequence[Mapping[str, Any]],
+        *,
+        capture_path: Path,
+        environment: Mapping[str, str],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        validate_flow(flow)
+        original = self.flows()
+        deployed = copy.deepcopy([dict(node) for node in flow])
+        tabs = [node for node in deployed if node.get("type") == "tab"]
+        injects = [node for node in deployed if node.get("type") == "inject"]
+        if len(tabs) != 1 or len(injects) != 1:
+            raise CampaignError("Node-RED campaign requires one tab and one manual start button")
+        tabs[0]["disabled"] = False
+        tabs[0]["env"] = [
+            {"name": name, "value": str(value), "type": "str"}
+            for name, value in sorted(environment.items())
+        ]
+        try:
+            last_seen_mtime = capture_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            last_seen_mtime = None
+        try:
+            self.deploy(deployed)
+            self.trigger(str(injects[0]["id"]))
+            deadline = self._clock() + timeout_seconds
+            while self._clock() < deadline:
+                try:
+                    current_mtime = capture_path.stat().st_mtime_ns
+                except FileNotFoundError:
+                    current_mtime = None
+                if current_mtime is not None and current_mtime != last_seen_mtime:
+                    last_seen_mtime = current_mtime
+                    try:
+                        capture = json.loads(capture_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        capture = None
+                    if isinstance(capture, dict):
+                        expected = set(capture.get("expected_request_ids", ()))
+                        completed = capture.get("completed_request_ids")
+                        observed = (
+                            {str(value) for value in completed}
+                            if isinstance(completed, list)
+                            else {
+                                str(sample.get("request_id"))
+                                for sample in capture.get("samples", ())
+                                if isinstance(sample, Mapping) and sample.get("request_id")
+                            }
+                        )
+                        if expected and expected <= observed:
+                            return capture
+                self._wait(0.1)
+            raise CampaignError("Node-RED read plan did not complete before the timeout")
+        finally:
+            self.deploy(original)

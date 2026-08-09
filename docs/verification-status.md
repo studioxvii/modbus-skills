@@ -2,6 +2,29 @@
 
 Verification date: 2026-08-08.
 
+## Node-RED live campaign
+
+Native acceptance was exercised locally on 2026-08-09 with Node-RED 5.0.4,
+Node.js 25.8.0, and `node-red-contrib-modbus` 5.60.1 against the clean
+`generator-fleet-simulator` checkout at commit `39d20e9`.
+
+- The 10-unit pass produced 10/10 unit-specific FC3 responses through the
+  generated manual flow.
+- The 50-unit bounded pass produced 59 sequential requests covering all 50 unit
+  IDs before the 60-second campaign cap; the simulator queue drained to 0 and
+  the returned raw register values matched the REST register oracle.
+- The simulator-side `fault-and-reset` scenario changed Unit 1 alarm word 1 at
+  holding-register offset 13 from 5 to 20. Node-RED read back 20 during the
+  fault and 5 after restoration, with no Node-RED writes.
+- A stopped-simulator request surfaced Modbus failures; after restart and
+  readiness, the next bounded Node-RED read recovered successfully.
+
+The original live flow was imported disabled, reviewed, then enabled with temporary
+test instrumentation. The exporter now includes a bounded `capture/v1` output and
+the campaign runner can operate the single start button through the local Node-RED
+API. That new automated path has deterministic tests but has not replaced the
+recorded manual native evidence above.
+
 ## Passed
 
 - The OpenAI plugin validator accepted the plugin manifest.
@@ -33,6 +56,9 @@ is diagnostic; transcript shape is the deterministic repository gate.
 
 ## Not yet verified
 
-Native application tests did not run because Node-RED, the supported Modpoll implementations, Witte Modbus Poll, and ModScan are not installed in the test environment. Generated target manifests correctly report `verification: "not-run"`.
+Modpoll, Witte Modbus Poll, and ModScan were not installed and were not run.
+Generated target manifests still correctly report `verification: "not-run"` for
+those targets. The Node-RED native result above is a separate local acceptance
+record and does not replace the deterministic repository checks.
 
 Do not publish the repository until the remaining items in `publication-checklist.md` are complete. The open-source license, publisher contact, final URLs, native target tests, and new-task plugin install are still release gates.

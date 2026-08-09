@@ -336,6 +336,18 @@ def analyze_capture(
         raise CaptureAnalysisError("capture.samples must be an array.")
     if len(raw_samples) > max_samples:
         raise CaptureAnalysisError(f"Sample count {len(raw_samples)} exceeds the {max_samples} sample limit.")
+    raw_expected_requests = capture.get("expected_request_ids", ())
+    if not isinstance(raw_expected_requests, Sequence) or isinstance(
+        raw_expected_requests, (str, bytes, bytearray)
+    ):
+        raise CaptureAnalysisError("capture.expected_request_ids must be an array.")
+    expected_request_ids = tuple(str(value).strip() for value in raw_expected_requests)
+    if any(not value for value in expected_request_ids):
+        raise CaptureAnalysisError("capture.expected_request_ids must not contain empty values.")
+    if len(expected_request_ids) != len(set(expected_request_ids)):
+        raise CaptureAnalysisError("capture.expected_request_ids must be unique.")
+    if len(expected_request_ids) > _HARD_MAX_SAMPLES:
+        raise CaptureAnalysisError("capture.expected_request_ids exceeds the sample limit.")
 
     configurations = _config_by_point(capture)
     rejected: list[dict[str, Any]] = []
@@ -386,6 +398,9 @@ def analyze_capture(
                 "error": _is_error(raw_sample),
                 "error_detail": raw_sample.get("error"),
                 "sample_id": raw_sample.get("sample_id"),
+                "request_id": raw_sample.get("request_id"),
+                "block_id": raw_sample.get("block_id"),
+                "unit_id": raw_sample.get("unit_id"),
                 "raw_words": raw_sample.get(
                     "raw_words", raw_sample.get("raw_values", raw_sample.get("words"))
                 ),
@@ -765,6 +780,32 @@ def analyze_capture(
                 "count": global_error_count,
             }
         )
+    completed_request_ids = capture.get("completed_request_ids")
+    if isinstance(completed_request_ids, Sequence) and not isinstance(
+        completed_request_ids, (str, bytes, bytearray)
+    ):
+        observed_request_ids = sorted(
+            {str(value) for value in completed_request_ids if value not in (None, "")}
+        )
+    else:
+        observed_request_ids = sorted(
+            {
+                str(sample["request_id"])
+                for sample in unique
+                if sample.get("request_id") not in (None, "")
+            }
+        )
+    missing_request_ids = sorted(set(expected_request_ids) - set(observed_request_ids))
+    if missing_request_ids:
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "CAMPAIGN_REQUESTS_MISSING",
+                "message": f"The capture is missing {len(missing_request_ids)} planned requests.",
+                "count": len(missing_request_ids),
+                "request_ids": missing_request_ids[:_MAX_EVENTS_PER_KIND],
+            }
+        )
     findings.sort(key=lambda item: (str(item.get("point_id", "")), str(item.get("code", ""))))
     assumptions = []
     if deterministic_time_assumption:
@@ -806,6 +847,12 @@ def analyze_capture(
             "error_count": global_error_count,
             "error_rate": global_error_count / len(unique) if unique else 0.0,
             "response_ms": _response_stats(global_responses),
+        },
+        "campaign": {
+            "expected_requests": len(expected_request_ids),
+            "observed_requests": len(observed_request_ids),
+            "missing_requests": len(missing_request_ids),
+            "missing_request_ids": missing_request_ids,
         },
         "points": point_results,
         "findings": findings,
