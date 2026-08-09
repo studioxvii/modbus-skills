@@ -2,6 +2,17 @@
 
 Verification date: 2026-08-08.
 
+## Node-RED live campaign
+
+The bounded live campaign contract and receipt gate are present for Codex-run
+Generator Fleet Simulator workflows at exactly 10 and 50 units. Native acceptance
+is currently **not-run/blocked** in this environment because the Node-RED runtime
+and `node-red-contrib-modbus` are not installed. The adapter intentionally emits a
+sanitized receipt with zero live requests rather than claiming import or device
+communication proof. Run the campaign only after a pinned native runtime and
+contrib node are available; preserve the separate static and native evidence
+distinction.
+
 ## Passed
 
 - The OpenAI plugin validator accepted the plugin manifest.
