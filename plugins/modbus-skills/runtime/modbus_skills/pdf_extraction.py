@@ -19,6 +19,7 @@ from .artifacts import (
     assert_artifact_envelope,
     stable_input_hash,
 )
+from .pdf_table_extraction import PdfTableExtractionError, extract_pdf_table_rows
 
 
 class PdfExtractionError(ValueError):
@@ -54,6 +55,12 @@ _MAX_PAGE_SPAN = 256
 _MAX_TOOL_OUTPUT_BYTES = 32_000_000
 _MAX_OCR_EVIDENCE_BYTES = 10_000_000
 _MAX_OCR_PAGE_TEXT_BYTES = 1_000_000
+_GRID_RECOVERY_FINDING = {
+    "code": "pdf-grid-recovery-used",
+    "severity": "info",
+    "blocking": False,
+    "message": "Grid-aware table extraction supplied register-table structure alongside text parsing.",
+}
 
 
 def parse_page_range(value: str | None) -> tuple[int, int] | None:
@@ -328,7 +335,7 @@ def _equivalent(field: str, left: Any, right: Any) -> bool:
         text = re.sub(r"\s+", " ", str(value).strip()).casefold()
         if field in {"address", "protocol_offset", "display_address", "word_count"}:
             try:
-                return str(int(text, 0))
+                return str(int(text, 10 if re.fullmatch(r"[+-]?\d+", text) else 0))
             except ValueError:
                 return text
         return text.replace("_", "-")
@@ -471,7 +478,12 @@ def extract_pdf(
 
     executable, capability, failure = _preflight(path, source, page_range)
     if failure is not None:
-        return failure
+        return _recover_grid_or(
+            path,
+            source,
+            page_range=page_range,
+            fallback=failure,
+        )
     assert executable is not None and capability is not None
     base = [executable, "-enc", "UTF-8"]
     if page_range:
@@ -479,18 +491,36 @@ def extract_pdf(
     try:
         layout = _call([*base, "-layout", str(path), "-"], timeout=60)
     except subprocess.TimeoutExpired:
-        return _hold_result(path, source, "pdf-text-extraction-timeout", "PDF text extraction exceeded the 60 second limit.", page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-text-extraction-timeout", "PDF text extraction exceeded the 60 second limit.", page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     except (OSError, PdfExtractionError) as exc:
-        return _hold_result(path, source, "pdf-text-extraction-resource-limit", str(exc), page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-text-extraction-resource-limit", str(exc), page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     if layout.returncode != 0:
-        return _hold_result(path, source, "pdf-text-extraction-failed", "pdftotext could not extract this document.", page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-text-extraction-failed", "pdftotext could not extract this document.", page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     text = layout.stdout.decode("utf-8", errors="replace")
     if not text.strip():
-        return _hold_result(path, source, "pdf-ocr-required", "The selected pages contain no extractable text. Supply one bounded rights-safe modbus-ocr-evidence/v1 artifact.", page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-ocr-required", "The selected pages contain no extractable text. Supply one bounded rights-safe modbus-ocr-evidence/v1 artifact.", page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     first_page = page_range[0] if page_range else 1
     discovered = list(range(page_range[0], page_range[1] + 1)) if page_range else discover_register_pages(text, first_page=first_page)
     if not discovered:
-        return _hold_result(path, source, "pdf-register-pages-unavailable", "No likely register pages were discovered from text or layout signals.", page_range=page_range, capability=capability)
+        try:
+            grid, discovered = _recover_grid_rows(path)
+        except PdfTableExtractionError as exc:
+            return _hold_result(path, source, "pdf-register-pages-unavailable", f"No likely register pages were discovered and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
+        return _envelope(
+            path,
+            source,
+            grid,
+            [],
+            [_GRID_RECOVERY_FINDING],
+            [],
+            page_range,
+            capability=capability,
+            discovered_pages=discovered,
+        )
     page_filter = set(discovered)
     strict, rejected = parse_layout_rows(text, first_page=first_page, pages=page_filter)
     findings: list[dict[str, Any]] = []
@@ -501,19 +531,37 @@ def extract_pdf(
     try:
         bbox_result = _call([*bbox_base, "-bbox-layout", str(path), "-"], timeout=60)
     except subprocess.TimeoutExpired:
-        return _hold_result(path, source, "pdf-coordinate-extraction-timeout", "Coordinate extraction exceeded the 60 second limit.", page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-coordinate-extraction-timeout", "Coordinate extraction exceeded the 60 second limit.", page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     except (OSError, PdfExtractionError) as exc:
-        return _hold_result(path, source, "pdf-coordinate-extraction-resource-limit", str(exc), page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-coordinate-extraction-resource-limit", str(exc), page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     if bbox_result.returncode != 0:
-        return _hold_result(path, source, "pdf-coordinate-extraction-failed", "pdftotext coordinate extraction failed.", page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-coordinate-extraction-failed", "pdftotext coordinate extraction failed.", page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     try:
         coordinate = parse_bbox_rows(bbox_result.stdout.decode("utf-8", errors="replace"), first_page=min(discovered))
     except PdfExtractionError:
-        return _hold_result(path, source, "pdf-coordinate-output-malformed", "pdftotext coordinate output was malformed and could not be reconciled safely.", page_range=page_range, capability=capability)
+        fallback = _hold_result(path, source, "pdf-coordinate-output-malformed", "pdftotext coordinate output was malformed and could not be reconciled safely.", page_range=page_range, capability=capability)
+        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     coordinate = [record for record in coordinate if record["_source"]["page"] in page_filter]
     if not coordinate and not strict:
-        return _hold_result(path, source, "pdf-structured-rows-unavailable", "Neither strict nor coordinate parsing produced quality-gated register rows.", page_range=page_range, capability=capability)
+        try:
+            grid, _grid_pages = _recover_grid_rows(path, pages=discovered)
+        except PdfTableExtractionError as exc:
+            return _hold_result(path, source, "pdf-structured-rows-unavailable", f"Text and coordinate parsing produced no rows, and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
+        findings.append(_GRID_RECOVERY_FINDING)
+        return _envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered)
     records, quarantined, conflicts = _reconcile(strict, coordinate)
+    try:
+        grid, _grid_pages = _recover_grid_rows(path, pages=discovered)
+    except PdfTableExtractionError:
+        grid = []
+    if grid:
+        records, grid_quarantined, grid_conflicts = _reconcile(records, grid)
+        quarantined.extend(grid_quarantined)
+        conflicts.extend(grid_conflicts)
+        findings.append(_GRID_RECOVERY_FINDING)
     holds: list[dict[str, Any]] = []
     if conflicts:
         holds.append({
@@ -524,6 +572,46 @@ def extract_pdf(
             "conflicts": conflicts,
         })
     return _envelope(path, source, records, rejected, findings, holds, page_range, capability=capability, discovered_pages=discovered, quarantined=quarantined)
+
+
+def _recover_grid_rows(
+    path: Path, *, pages: Sequence[int] | None = None
+) -> tuple[list[dict[str, Any]], list[int]]:
+    records = extract_pdf_table_rows(path, pages=pages)
+    if not records:
+        raise PdfTableExtractionError("table geometry contained no register rows")
+    discovered = sorted({int(record["_source"]["page"]) for record in records})
+    return records, discovered
+
+
+def _recover_grid_or(
+    path: Path,
+    source: bytes,
+    *,
+    page_range: tuple[int, int] | None,
+    fallback: dict[str, Any],
+    capability: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    pages = (
+        list(range(page_range[0], page_range[1] + 1))
+        if page_range is not None
+        else None
+    )
+    try:
+        grid, discovered = _recover_grid_rows(path, pages=pages)
+    except PdfTableExtractionError:
+        return fallback
+    return _envelope(
+        path,
+        source,
+        grid,
+        [],
+        [_GRID_RECOVERY_FINDING],
+        [],
+        page_range,
+        capability=capability,
+        discovered_pages=discovered,
+    )
 
 
 __all__ = ["PdfExtractionError", "discover_register_pages", "extract_pdf", "parse_bbox_rows", "parse_layout_rows", "parse_page_range"]

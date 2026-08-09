@@ -12,13 +12,15 @@ Follow `../../references/interaction-contract.md`.
 ## Process
 
 1. Read `references/pdf-evidence.md`.
-2. Record the source hash, physical page indexes, and printed page labels separately.
-3. Run `python3 <skill-dir>/scripts/run.py --input <manual.pdf> --pages <page-or-range> --output <directory>` for a bounded range.
-4. For scanned pages, add a local `modbus-ocr-evidence/v1` file with `--ocr-evidence <ocr.json>`.
-5. Automatically check page coverage, record counts, unique addresses, row widths,
+2. Locate the bundled workspace dependency runtime and use its Python executable when
+   it provides `pdfplumber`. Do not install dependencies during extraction.
+3. Record the source hash, physical page indexes, and printed page labels separately.
+4. Run `<selected-python> <skill-dir>/scripts/run.py --input <manual.pdf> --pages <page-or-range> --output <directory>` for a bounded range.
+5. For scanned pages, add a local `modbus-ocr-evidence/v1` file with `--ocr-evidence <ocr.json>`.
+6. Automatically check page coverage, record counts, unique addresses, row widths,
    source locations, rejected rows, and cross-page consistency.
-6. Keep uncertain rows as candidates and group them by exception type.
-7. When source confirmation is still required, present the bounded extraction once
+7. Keep uncertain rows as candidates and group them by exception type.
+8. When source confirmation is still required, present the bounded extraction once
    with its source hash, page range, record count, checks, and exceptions. Never ask
    for page-by-page confirmation; one scoped confirmation covers the full range.
 

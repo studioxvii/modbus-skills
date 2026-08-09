@@ -47,12 +47,15 @@ def bbox(*rows: tuple[str, str, str]) -> bytes:
 
 
 class PdfExtractionTests(unittest.TestCase):
-    def extract(self, effects, *, name: str = "map.pdf"):
+    def extract(self, effects, *, name: str = "map.pdf", grid_rows=None):
         with mock.patch(
             "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
         ), mock.patch(
             "modbus_skills.pdf_extraction._call", side_effect=effects
-        ) as run_mock:
+        ) as run_mock, mock.patch(
+            "modbus_skills.pdf_extraction.extract_pdf_table_rows",
+            return_value=[] if grid_rows is None else grid_rows,
+        ):
             result = extract_pdf(Path(name), b"%PDF synthetic")
         return result, run_mock
 
@@ -76,6 +79,96 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual([], result["holds"])
         self.assertEqual("pdftotext-bbox-layout/v1", result["records"][0]["_source"]["parser_id"])
         self.assertIn("pdf-strict-parser-no-rows", {item["code"] for item in result["findings"]})
+
+    def test_grid_recovery_runs_when_text_parsers_find_no_rows(self) -> None:
+        layout = b"Modbus register map 001 002\n"
+        grid_row = {
+            "source_address": "257/258",
+            "protocol_offset": 257,
+            "word_count": 2,
+            "access": "R",
+            "format": "Float",
+            "description": "Real Energy",
+            "_source": {
+                "format": "pdf",
+                "page": 1,
+                "row": 2,
+                "region": "p1:t0:r2",
+                "parser_id": "pdfplumber-table/v1",
+                "method": "coordinate-derived",
+                "excerpt": "257/258 | R | Float | Real Energy",
+            },
+        }
+        result, _ = self.extract(
+            [VERSION, HELP, completed(layout), completed(b"<doc><page/></doc>")],
+            grid_rows=[grid_row],
+        )
+
+        self.assertEqual("candidate", result["status"])
+        self.assertEqual([], result["holds"])
+        self.assertEqual([grid_row], result["records"])
+        self.assertIn("pdf-grid-recovery-used", {item["code"] for item in result["findings"]})
+
+    def test_grid_recovery_does_not_require_pdftotext(self) -> None:
+        grid_row = {
+            "source_register": "001",
+            "address": 1,
+            "word_count": 1,
+            "name": "Status",
+            "description": "Status",
+            "_source": {
+                "format": "pdf",
+                "page": 3,
+                "row": 2,
+                "region": "p3:t0:r2",
+                "parser_id": "pdfplumber-table/v1",
+                "method": "coordinate-derived",
+                "excerpt": "001 | R | Status",
+            },
+        }
+        with mock.patch(
+            "modbus_skills.pdf_extraction.shutil.which", return_value=None
+        ), mock.patch(
+            "modbus_skills.pdf_extraction.extract_pdf_table_rows",
+            return_value=[grid_row],
+        ):
+            result = extract_pdf(Path("map.pdf"), b"%PDF synthetic")
+
+        self.assertEqual("candidate", result["status"])
+        self.assertEqual([], result["holds"])
+        self.assertEqual([grid_row], result["records"])
+
+    def test_partial_text_rows_are_completed_by_grid_rows(self) -> None:
+        layout = b"Address  Name  Data Type\n001  Status  uint16\n"
+        grid_rows = [
+            {
+                "source_register": register,
+                "address": int(register),
+                "word_count": 1,
+                "name": name,
+                "description": name,
+                "format": "UInt",
+                "_source": {
+                    "format": "pdf",
+                    "page": 1,
+                    "row": row,
+                    "region": f"p1:t0:r{row}",
+                    "parser_id": "pdfplumber-table/v1",
+                    "method": "coordinate-derived",
+                    "excerpt": f"{register} | R | {name}",
+                },
+            }
+            for row, register, name in ((2, "001", "Status"), (3, "002", "Alarm"))
+        ]
+
+        result, _ = self.extract(
+            [VERSION, HELP, completed(layout), completed(bbox(("001", "Status", "uint16")))],
+            grid_rows=grid_rows,
+        )
+
+        self.assertEqual("candidate", result["status"])
+        self.assertEqual({"Status", "Alarm"}, {row["name"] for row in result["records"]})
+        self.assertIn("pdf-grid-recovery-used", {item["code"] for item in result["findings"]})
 
     def test_only_material_conflict_is_quarantined(self) -> None:
         layout = (

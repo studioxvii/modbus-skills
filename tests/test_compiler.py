@@ -163,6 +163,46 @@ class CompilerTests(unittest.TestCase):
         )
         self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
 
+    def test_complete_map_intent_selects_every_readable_source_point(self) -> None:
+        source = self.root / "complete.csv"
+        source.write_text(
+            "logical_point_id,name,protocol_offset,area,datatype,access\n"
+            "temperature,Temperature,10,holding-register,uint16,read-only\n"
+            "power,Power,11,holding-register,uint16,read-write\n"
+            "setpoint,Setpoint,12,holding-register,uint16,write-only\n",
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "complete-map-case")
+
+        self.assertEqual("offline-complete", result["state"])
+        user_map = json.loads(
+            (self.root / "complete-map-case" / "artifacts" / "user-map.json").read_text()
+        )
+        self.assertEqual(
+            ["temperature", "power"],
+            [point["oem_point_id"] for point in user_map["points"]],
+        )
+        self.assertEqual(
+            ["setpoint"],
+            [
+                item["oem_point_id"]
+                for item in user_map["exception_annex"]
+                if item.get("kind") == "excluded"
+            ],
+        )
+
     def test_existing_candidate_map_records_are_valid_structured_input(self) -> None:
         source = self.root / "candidate-map.json"
         source.write_text(
@@ -276,6 +316,63 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(result, replay)
         self.assertEqual("none", result["next_action"]["kind"])
         self.assertEqual(4, run_mock.call_count)
+
+    def test_pdf_grid_recovery_and_complete_intent_emit_offline_map(self) -> None:
+        source = self.root / "oem-grid.pdf"
+        source.write_bytes(b"%PDF-1.4\n% synthetic rights-safe fixture\n")
+        effects = [
+            subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n"),
+            subprocess.CompletedProcess([], 0, b"", b"-f -l -layout -bbox-layout -enc\n"),
+            subprocess.CompletedProcess([], 0, b"Modbus Point Map\n", b""),
+        ]
+        grid_rows = [
+            {
+                "source_register": "257/258",
+                "address": 257,
+                "word_count": 2,
+                "access": "R",
+                "format": "Float",
+                "units": "kWh",
+                "description": "Real Energy Consumption",
+                "_source": {
+                    "format": "pdf",
+                    "page": 1,
+                    "row": 2,
+                    "region": "p1:t0:r2",
+                    "parser_id": "pdfplumber-table/v1",
+                    "method": "coordinate-derived",
+                    "excerpt": "257/258 | R | Float | kWh | Real Energy Consumption",
+                },
+            }
+        ]
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "pdf"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+        with mock.patch(
+            "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
+        ), mock.patch(
+            "modbus_skills.pdf_extraction._call", side_effect=effects
+        ), mock.patch(
+            "modbus_skills.pdf_extraction.extract_pdf_table_rows",
+            return_value=grid_rows,
+        ):
+            result = compile_user_map(compile_request, self.root / "grid-pdf-case")
+
+        self.assertEqual("offline-complete", result["state"])
+        self.assertEqual("none", result["next_action"]["kind"])
+        user_map = json.loads(
+            (self.root / "grid-pdf-case" / "artifacts" / "user-map.json").read_text()
+        )
+        self.assertEqual(1, len(user_map["points"]))
+        self.assertEqual("257/258", user_map["points"][0]["source_register"])
 
     def test_source_normalization_exceptions_form_one_grouped_packet(self) -> None:
         source = self.root / "missing-datatype.csv"

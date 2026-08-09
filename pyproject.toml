@@ -3,7 +3,7 @@ name = "modbus-skills-runtime"
 version = "0.1.0"
 description = "Deterministic runtime for read-only Modbus skills"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["pdfplumber>=0.11,<0.12"]
 
 [tool.modbus-skills]
 plugin-root = "plugins/modbus-skills"

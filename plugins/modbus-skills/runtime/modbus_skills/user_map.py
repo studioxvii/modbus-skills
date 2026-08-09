@@ -14,6 +14,7 @@ from .compiler_contracts import (
     CompilerContractError,
     build_user_map,
     build_user_selection,
+    point_evidence_refs,
     validate_oem_map,
     validate_user_selection,
 )
@@ -30,6 +31,7 @@ _POINT_FIELDS = (
     "name",
     "area",
     "protocol_offset",
+    "source_register",
     "datatype",
     "word_span",
     "scale",
@@ -45,6 +47,7 @@ _CSV_FIELDS = (
     "alias",
     "oem_point_id",
     "name",
+    "source_register",
     "area",
     "protocol_offset",
     "datatype",
@@ -193,7 +196,7 @@ def compile_user_map_bundle(
             candidates = [
                 {
                     "oem_point_id": point["oem_point_id"],
-                    "evidence_refs": _point_evidence_refs(point),
+                    "evidence_refs": point_evidence_refs(point),
                 }
                 for point in oem_map["points"]
             ]
@@ -202,7 +205,7 @@ def compile_user_map_bundle(
                 reference
                 for entry in candidates
                 for reference in (
-                    entry.get("evidence_refs") or _point_evidence_refs(
+                    entry.get("evidence_refs") or point_evidence_refs(
                         next(point for point in oem_map["points"] if point["oem_point_id"] == entry["oem_point_id"])
                     )
                 )
@@ -230,9 +233,9 @@ def compile_user_map_bundle(
         _render_point(point_index[entry["oem_point_id"]], entry)
         for entry in selection["included"]
     ]
-    rendered_points.sort(key=_point_sort_key)
     included_ids = {point["oem_point_id"] for point in rendered_points}
     selected_holds, annex_holds = _partition_holds(oem_map.get("holds", ()), included_ids)
+    selected_holds = _group_holds(selected_holds)
     annex = [
         {
             "kind": "excluded",
@@ -306,7 +309,9 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
     lines.extend(["", "## Blocking exceptions"])
     if user_map["holds"]:
         for hold in user_map["holds"]:
-            lines.append(f"- {hold.get('code', 'UNRESOLVED')}: {hold.get('message', hold.get('reason', 'Review required'))}")
+            affected = hold.get("affected_count")
+            suffix = f" ({affected} points)" if isinstance(affected, int) and affected > 1 else ""
+            lines.append(f"- {hold.get('code', 'UNRESOLVED')}: {hold.get('message', hold.get('reason', 'Review required'))}{suffix}")
     else:
         lines.append("- None")
     lines.extend(["", "## Exclusions and evidence annex"])
@@ -418,6 +423,9 @@ def _partition_holds(
         raw_subjects = hold.get("subject_ids", ())
         if isinstance(raw_subjects, Sequence) and not isinstance(raw_subjects, (str, bytes, bytearray)):
             point_ids.update(str(value) for value in raw_subjects)
+        raw_point_ids = hold.get("point_ids", ())
+        if isinstance(raw_point_ids, Sequence) and not isinstance(raw_point_ids, (str, bytes, bytearray)):
+            point_ids.update(str(value) for value in raw_point_ids)
         if not point_ids or point_ids & included_ids:
             selected.append(hold)
         else:
@@ -425,26 +433,60 @@ def _partition_holds(
     return selected, annex
 
 
-def _point_evidence_refs(point: Mapping[str, Any]) -> list[str]:
-    refs: list[str] = []
-    for raw in point.get("source_refs", ()):
-        if not isinstance(raw, Mapping):
-            continue
-        if raw.get("region_id"):
-            refs.append(str(raw["region_id"]))
-        elif raw.get("record_id"):
-            refs.append(str(raw["record_id"]))
-        else:
-            refs.append(f"page-{raw.get('page_index', 'unknown')}-row-{raw.get('row_index', 'unknown')}")
-    return refs
+def _group_holds(holds: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, str, bool], dict[str, Any]] = {}
+    for raw in holds:
+        code = str(raw.get("code", "UNRESOLVED"))
+        message = str(raw.get("message", raw.get("reason", "Review required")))
+        if code == "address.area-unresolved":
+            code = "point.area-unresolved"
+            message = "Declare the Modbus area before address conversion."
+        elif code == "point.area-unresolved":
+            message = "Declare the Modbus area before address conversion."
+        field = str(raw.get("field", ""))
+        severity = str(raw.get("severity", "hold"))
+        blocking = raw.get("blocking", True) is not False
+        key = (code, message, field, severity, blocking)
+        group = groups.setdefault(
+            key,
+            {
+                "code": code,
+                "message": message,
+                **({"field": field} if field else {}),
+                "severity": severity,
+                "blocking": blocking,
+                "affected_count": 0,
+                "_subject_ids": set(),
+                "_occurrences": 0,
+            },
+        )
+        group["_occurrences"] += 1
+        subject_ids = group["_subject_ids"]
+        for value in raw.get("point_ids", ()):
+            subject_ids.add(str(value))
+        for field_name in ("oem_point_id", "point_id"):
+            if raw.get(field_name) not in (None, ""):
+                subject_ids.add(str(raw[field_name]))
+    result = []
+    for key in sorted(groups):
+        group = groups[key]
+        subject_ids = sorted(group.pop("_subject_ids"))
+        group["subject_ids"] = subject_ids
+        group["affected_count"] = len(subject_ids) or group.pop("_occurrences")
+        group.pop("_occurrences", None)
+        result.append(group)
+    return result
 
 
 def _point_sort_key(point: Mapping[str, Any]) -> tuple[str, str, int, str]:
     offset = point.get("protocol_offset")
+    if not isinstance(offset, int) or isinstance(offset, bool):
+        match = re.match(r"\d+", str(point.get("source_register", "")))
+        offset = int(match.group()) if match else 65_536
     return (
         str(point.get("requested_measurement", "")).casefold(),
         str(point.get("area", "")),
-        offset if isinstance(offset, int) and not isinstance(offset, bool) else 65_536,
+        offset,
         str(point.get("oem_point_id", "")),
     )
 
@@ -452,7 +494,12 @@ def _point_sort_key(point: Mapping[str, Any]) -> tuple[str, str, int, str]:
 def _address_label(point: Mapping[str, Any]) -> str:
     area = point.get("area") or "area unresolved"
     offset = point.get("protocol_offset")
-    return f"{area} offset {offset}" if offset is not None else f"{area}, offset unresolved"
+    if offset is not None:
+        return f"{area} offset {offset}"
+    source_register = point.get("source_register")
+    if source_register not in (None, ""):
+        return f"source register {source_register}; {area}"
+    return f"{area}, offset unresolved"
 
 
 def _array(value: Any, field: str) -> list[Any]:

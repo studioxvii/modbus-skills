@@ -49,6 +49,15 @@ codex plugin add modbus-skills@modbus-skills
 
 Private repository access is required during pre-release.
 
+Direct runtime or CLI use requires the project dependencies:
+
+```bash
+python3 -m pip install -e .
+```
+
+Inside Codex, PDF skills use the bundled workspace Python when available and do not
+install dependencies in the task's critical path.
+
 ### 2. Choose a skill
 
 Try one of these prompts in Codex:
@@ -88,7 +97,8 @@ status, active alarms, and power. Return the organized map plus JSON and CSV.
 The skill automatically:
 
 1. preflights the local source and available PDF capability;
-2. finds likely register pages and reconciles strict and coordinate extraction;
+2. finds likely register pages, reconciles text coordinates, and automatically falls
+   back to drawn-table grid extraction for merged OEM layouts;
 3. preserves source locations while normalizing the OEM semantics;
 4. selects and organizes the requested measurements;
 5. validates counts, identities, ranges, datatypes, and artifact hashes; and
@@ -114,6 +124,11 @@ case-directory/
 
 Excluded or quarantined source items remain in the user map's exception annex rather
 than blocking unrelated selected points.
+
+For a complete catalog rather than a measurement subset, use selection mode
+`all-readable`. It is resolved after extraction, so callers do not need to know OEM
+point IDs in advance. Repeated per-point uncertainty is grouped by root cause in the
+human bundle while the OEM audit artifact retains point-level evidence.
 
 For deterministic runtime use, create a request described in
 [`compile-user-map/references/request.md`](plugins/modbus-skills/skills/compile-user-map/references/request.md)

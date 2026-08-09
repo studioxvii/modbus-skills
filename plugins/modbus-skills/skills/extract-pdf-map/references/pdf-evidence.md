@@ -22,9 +22,12 @@
 3. Discover likely register pages from headers and register/address signals before
    requesting a page selection.
 4. Parse strict `-layout` rows, then independently parse `-bbox-layout` coordinates.
-5. Preserve field claims with the parser ID and physical source locator. A failed
+5. When both text interpretations produce no viable rows, automatically recover drawn
+   table grids with `pdfplumber`. This is the same shared fallback used by
+   `$compile-user-map`; never recreate it as a temporary per-manual script.
+6. Preserve field claims with the parser ID and physical source locator. A failed
    strict pass is non-blocking when coordinate recovery passes its gates.
-6. Auto-resolve formatting-only agreement. Quarantine only conflicts affecting row
+7. Auto-resolve formatting-only agreement. Quarantine only conflicts affecting row
    identity, address, area, width, datatype, or access; keep unaffected rows usable.
 
 The artifact records the extractor receipt, discovered pages, accepted rows,

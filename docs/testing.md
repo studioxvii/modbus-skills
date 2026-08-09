@@ -28,7 +28,8 @@ python3 scripts/run_compile_workflow_tests.py \
   --output /tmp/modbus-compile-workflow
 ```
 
-The suite covers clean structured intake, automatic PDF coordinate fallback, one
+The suite covers clean structured intake, automatic PDF coordinate and table-grid
+fallback, late-bound complete-map selection, one
 grouped selection decision and resume, preserved offline artifacts across a binding
 gate, and minimum safe reads inside an evidenced readable island. It fails on page or
 row approval loops, dependency installation, stage-skill handoffs, repeated holds, or

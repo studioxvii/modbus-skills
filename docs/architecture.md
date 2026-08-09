@@ -19,6 +19,12 @@ legacy target projections separate. Clean offline work completes in one invocati
 only a material source, selection, binding, physical-read, or byte-order exception can
 pause the persisted case.
 
+PDF intake uses one shared extraction ladder for both the focused extraction skill and
+the outcome compiler: bounded `pdftotext` layout, bounded coordinate text, then
+`pdfplumber` table-grid recovery. Semantic uncertainty such as area or byte order is
+retained in the offline map; it is not misreported as a request to replace a readable
+source PDF.
+
 The compiler stores owner-only, hash-indexed case artifacts and commits the case
 manifest last. Exact resume replay is idempotent; stale or broadened decisions are
 rejected before mutation. Portable user outputs exclude local paths, transport data,
