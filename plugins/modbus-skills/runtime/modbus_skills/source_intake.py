@@ -10,10 +10,11 @@ import stat
 from typing import Any
 
 from .artifacts import stable_input_hash
-from .compiler_contracts import CompilerContractError, build_oem_map
+from .compiler_contracts import CompilerContractError, build_oem_map, point_evidence_refs
 from .map_workflows import MapWorkflowError, normalize_map
 from .parsers import ParseError, parse_source
 from .pdf_extraction import PdfExtractionError, extract_pdf, parse_page_range
+from .pdf_table_extraction import prepare_pdf_records
 
 
 SELECTION_TEMPLATE_SCHEMA_VERSION = "modbus-user-selection-template/v1"
@@ -28,6 +29,8 @@ _OEM_POINT_FIELDS = (
     "description",
     "area",
     "protocol_offset",
+    "source_address",
+    "source_register",
     "datatype",
     "word_span",
     "byte_order",
@@ -87,6 +90,7 @@ def compile_source_descriptor(
         if source_format == "pdf":
             page_range = parse_page_range(pages)
             parsed = extract_pdf(path, data, page_range=page_range)
+            parsed = prepare_pdf_records(parsed)
         else:
             if pages is not None:
                 raise SourceIntakeError("source.pages is valid only for PDF input")
@@ -215,6 +219,7 @@ def bind_selection_template(
     allowed = {
         "schema_version",
         "requested_measurements",
+        "mode",
         "included",
         "suggested",
         "excluded",
@@ -240,6 +245,45 @@ def bind_selection_template(
         "oem_map_hash": stable_input_hash(oem_map),
         "requested_measurements": _array(template.get("requested_measurements"), "requested_measurements"),
     }
+    mode = template.get("mode")
+    if mode is not None:
+        if mode != "all-readable":
+            raise SourceIntakeError("selection_template.mode must be all-readable")
+        if any(template.get(field) not in (None, []) for field in ("included", "suggested", "excluded")):
+            raise SourceIntakeError(
+                "selection_template.mode cannot be combined with explicit dispositions"
+            )
+        included: list[dict[str, Any]] = []
+        excluded: list[dict[str, Any]] = []
+        for point in oem_map["points"]:
+            evidence_refs = point_evidence_refs(point)
+            if not evidence_refs:
+                raise SourceIntakeError(
+                    f"OEM point {point.get('oem_point_id')!r} has no usable source evidence"
+                )
+            entry = {
+                "oem_point_id": point["oem_point_id"],
+                "reason": "Included by the explicit all-readable selection mode.",
+                "evidence_refs": evidence_refs,
+            }
+            if point.get("access") == "write-only":
+                excluded.append(
+                    {
+                        **entry,
+                        "reason": "Excluded because the OEM map marks this point write-only.",
+                    }
+                )
+            else:
+                included.append(
+                    {
+                        **entry,
+                        "matched_intent": "all documented Modbus read points",
+                        "match_quality": "exact",
+                        "selection_basis": "typed-all-readable",
+                    }
+                )
+        candidate.update({"included": included, "suggested": [], "excluded": excluded})
+        return candidate
     for disposition in ("included", "suggested", "excluded"):
         entries = _array(template.get(disposition), disposition)
         candidate[disposition] = [
@@ -286,6 +330,13 @@ def _oem_point(point: Mapping[str, Any], index: int) -> dict[str, Any]:
     for field in _OEM_POINT_FIELDS:
         if field in point:
             result[field] = point[field]
+    unmapped = point.get("unmapped_fields")
+    source_register = unmapped.get("source_register") if isinstance(unmapped, Mapping) else None
+    source_address = point.get("source_address")
+    if source_register not in (None, ""):
+        result["source_register"] = str(source_register)
+    elif isinstance(source_address, Mapping) and source_address.get("raw") not in (None, ""):
+        result["source_register"] = str(source_address["raw"])
     result["source_refs"] = [_source_ref(point.get("source_location"), index)]
     return result
 

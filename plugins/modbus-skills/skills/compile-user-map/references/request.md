@@ -12,6 +12,23 @@ Include:
 - optional target IDs and explicit target options;
 - optional device binding only when known.
 
+For a complete readable register catalog, encode the user's intent without knowing
+point IDs in advance:
+
+```json
+{
+  "selection_template": {
+    "schema_version": "modbus-user-selection-template/v1",
+    "requested_measurements": ["all documented Modbus read points"],
+    "mode": "all-readable"
+  }
+}
+```
+
+`all-readable` includes every point not explicitly marked write-only after extraction.
+Do not send empty `included`, `suggested`, and `excluded` arrays for a complete-map
+request; that means no selection.
+
 Do not request route, unit, byte order, target, or page selection before the runtime
 reports that the missing value blocks a requested output. An offline user map does not
 require device binding.

@@ -146,7 +146,9 @@ def compile_user_map(
     )
     _store_json(root, index, "request", "control/request.json", normalized)
     _store_json(root, index, "oem_map", "artifacts/oem-map.json", oem_map)
-    if "source" in normalized and _blocking_holds(oem_map):
+    if "source" in normalized and _requires_source_correction(
+        oem_map, str(normalized["source"].get("format", ""))
+    ):
         packet = _source_decision_packet(case_id, oem_map)
         _store_json(
             root,
@@ -576,6 +578,32 @@ def _blocking_holds(value: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         and hold.get("blocking", True) is not False
         and str(hold.get("severity", "hold")).lower() in {"error", "hold"}
     ]
+
+
+def _requires_source_correction(
+    oem_map: Mapping[str, Any], source_format: str
+) -> bool:
+    """Return whether the source cannot produce a useful offline map.
+
+    PDF semantic uncertainty belongs in the generated map's exception annex;
+    it is not evidence that the user must replace the source document.
+    """
+
+    holds = [
+        hold
+        for hold in _blocking_holds(oem_map)
+        if str(hold.get("code", ""))
+        not in {"point.not-readable", "point.write-only-not-readable"}
+    ]
+    if source_format != "pdf":
+        return bool(holds)
+    if not oem_map.get("points"):
+        return True
+    return any(
+        str(hold.get("code", "")).startswith("pdf-")
+        or str(hold.get("code", "")).startswith("source.rejected-")
+        for hold in holds
+    )
 
 
 def _request_identity(value: Mapping[str, Any]) -> dict[str, Any]:

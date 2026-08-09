@@ -196,6 +196,24 @@ def validate_user_selection(
                 raise CompilerContractError("selection confidence must be from 0 through 1")
 
 
+def point_evidence_refs(point: Mapping[str, Any]) -> list[str]:
+    """Render portable source references into stable selection evidence IDs."""
+
+    refs: list[str] = []
+    for raw in point.get("source_refs", ()):
+        if not isinstance(raw, Mapping):
+            continue
+        if raw.get("region_id"):
+            refs.append(str(raw["region_id"]))
+        elif raw.get("record_id"):
+            refs.append(str(raw["record_id"]))
+        else:
+            refs.append(
+                f"page-{raw.get('page_index', 'unknown')}-row-{raw.get('row_index', 'unknown')}"
+            )
+    return refs
+
+
 def build_device_binding(
     oem_map: Mapping[str, Any],
     *,
@@ -275,7 +293,7 @@ def build_user_map(
         {
             "points": sorted(
                 (_json_object(point, "user-map point") for point in points),
-                key=lambda point: str(point.get("oem_point_id", "")),
+                key=_user_map_sort_key,
             ),
             "exception_annex": sorted(
                 (_json_object(item, "exception annex item") for item in exception_annex),
@@ -514,6 +532,19 @@ def _oem_sort_key(point: Mapping[str, Any]) -> tuple[str, int, str]:
     )
 
 
+def _user_map_sort_key(point: Mapping[str, Any]) -> tuple[str, str, int, str]:
+    offset = point.get("protocol_offset")
+    if not isinstance(offset, int) or isinstance(offset, bool):
+        match = re.match(r"\d+", str(point.get("source_register", "")))
+        offset = int(match.group()) if match else 65_536
+    return (
+        str(point.get("group", point.get("requested_measurement", ""))).casefold(),
+        str(point.get("area", "")),
+        offset,
+        str(point.get("oem_point_id", "")),
+    )
+
+
 def _assert_portable(value: Any, path: str = "artifact") -> None:
     if isinstance(value, Mapping):
         for raw_key, item in value.items():
@@ -612,6 +643,7 @@ __all__ = [
     "build_oem_map",
     "build_user_map",
     "build_user_selection",
+    "point_evidence_refs",
     "validate_compile_case",
     "validate_device_binding",
     "validate_oem_map",

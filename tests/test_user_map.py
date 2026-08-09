@@ -214,6 +214,116 @@ class UserMapTests(unittest.TestCase):
         self.assertNotIn("/Users/", combined)
         self.assertNotIn("password", combined.lower())
 
+    def test_repeated_selected_holds_are_grouped_by_root_cause(self) -> None:
+        source = build_oem_map(
+            [
+                {
+                    "oem_point_id": point_id,
+                    "name": point_id,
+                    "area": None,
+                    "protocol_offset": None,
+                    "datatype": "uint16",
+                    "word_span": 1,
+                    "source_refs": [{"record_id": f"row:{index}"}],
+                }
+                for index, point_id in enumerate(("one", "two"), start=1)
+            ],
+            source_hash="b" * 64,
+            holds=[
+                {
+                    "code": "point.area-unresolved",
+                    "message": "Declare the Modbus area.",
+                    "point_ids": [point_id],
+                }
+                for point_id in ("one", "two")
+            ],
+        )
+        selection = {
+            "oem_map_hash": stable_input_hash(source),
+            "requested_measurements": ["all"],
+            "included": [
+                {
+                    "oem_point_id": point_id,
+                    "matched_intent": "all",
+                    "match_quality": "exact",
+                    "reason": "Explicit all selection",
+                    "evidence_refs": [f"row:{index}"],
+                }
+                for index, point_id in enumerate(("one", "two"), start=1)
+            ],
+            "suggested": [],
+            "excluded": [],
+        }
+
+        result = compile_user_map_bundle(source, selection, case_id="case-grouped")
+
+        self.assertEqual(1, len(result["user_map"]["holds"]))
+        self.assertEqual(2, result["user_map"]["holds"][0]["affected_count"])
+        self.assertEqual(["one", "two"], result["user_map"]["holds"][0]["subject_ids"])
+        self.assertEqual(
+            1,
+            result["human_summary"].count(
+                "Declare the Modbus area before address conversion."
+            ),
+        )
+
+    def test_point_ids_hold_for_excluded_point_is_annex_only(self) -> None:
+        source = build_oem_map(
+            [
+                {
+                    "oem_point_id": point_id,
+                    "name": point_id,
+                    "area": "holding-register",
+                    "protocol_offset": index,
+                    "datatype": "uint16",
+                    "word_span": 1,
+                    "source_refs": [{"record_id": f"row:{index}"}],
+                }
+                for index, point_id in enumerate(("one", "two"), start=1)
+            ],
+            source_hash="c" * 64,
+            holds=[
+                {
+                    "code": "point.example-unresolved",
+                    "message": "Resolve excluded point evidence.",
+                    "point_ids": ["two"],
+                }
+            ],
+        )
+        selection = {
+            "oem_map_hash": stable_input_hash(source),
+            "requested_measurements": ["one"],
+            "included": [
+                {
+                    "oem_point_id": "one",
+                    "matched_intent": "one",
+                    "match_quality": "exact",
+                    "reason": "Explicit selection",
+                    "evidence_refs": ["row:1"],
+                }
+            ],
+            "suggested": [],
+            "excluded": [
+                {
+                    "oem_point_id": "two",
+                    "reason": "Write-only",
+                    "evidence_refs": ["row:2"],
+                }
+            ],
+        }
+
+        result = compile_user_map_bundle(source, selection, case_id="case-annex")
+
+        self.assertEqual([], result["user_map"]["holds"])
+        self.assertEqual(
+            ["point.example-unresolved"],
+            [
+                item["code"]
+                for item in result["user_map"]["exception_annex"]
+                if item.get("kind") == "unselected-hold"
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
