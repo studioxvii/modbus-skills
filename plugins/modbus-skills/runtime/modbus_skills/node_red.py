@@ -37,7 +37,7 @@ from .exporters import (
 )
 
 
-ADAPTER_VERSION = "1.0.0"
+ADAPTER_VERSION = "2.0.0"
 TARGET = "node-red"
 _PROBE_BYTE_ORDER_LAYOUTS = ("ABCD", "BADC", "CDAB", "DCBA")
 _PROBE_32_BIT_INTERPRETATIONS = ("uint32", "int32", "float32")
@@ -52,9 +52,10 @@ def export_node_red(
 ) -> ExportResult:
     """Generate a disabled Node-RED flow from one canonical read plan.
 
-    Each flow uses a manual ``inject`` node and a ``modbus-flex-getter`` for
-    each physical block. The flow contains no scheduled polling or write node
-    in either mode. Final flows decode only confirmed layouts.
+    Each flow uses one manual ``inject`` node and a response-driven sequencer.
+    The sequencer shares one ``modbus-flex-getter`` per route and never has
+    more than one request in flight. The flow contains no scheduled polling or
+    write node in either mode. Final flows decode only confirmed layouts.
     """
 
     mode = normalize_mode(mode)
@@ -161,10 +162,7 @@ def export_node_red(
             }
         )
 
-    read_ids: list[str] = []
-    manual_inject_ids: list[str] = []
-    error_debug_id = _node_id(seed, "errors")
-    watchdog_debug_id = _node_id(seed, "watchdog-debug")
+    block_specs: list[dict[str, Any]] = []
     for order_index, (source_index, block) in enumerate(blocks):
         identifier = block_id(block, source_index)
         route = block_route_id(block)
@@ -179,14 +177,6 @@ def export_node_red(
         assert quantity is not None
         assert function_code is not None
 
-        read_id = _node_id(seed, f"read:{identifier}")
-        inject_id = _node_id(seed, f"inject:{identifier}")
-        response_gate_id = _node_id(seed, f"response-gate:{identifier}")
-        decode_id = _node_id(seed, f"derive:{identifier}")
-        watchdog_id = _node_id(seed, f"watchdog:{identifier}")
-        watchdog_reset_id = _node_id(seed, f"watchdog-reset:{identifier}")
-        read_ids.append(read_id)
-        y = 100 + order_index * 110
         specs = []
         for point_index, point in enumerate(
             points_for_block(canonical_map, block, source_index)
@@ -209,145 +199,199 @@ def export_node_red(
                 }
             )
 
-        manual_inject_ids.append(inject_id)
-        nodes.append(
+        block_specs.append(
+            {
+                "block_id": identifier,
+                "route_id": route,
+                "route_index": routes.index(route),
+                "unit_id": unit,
+                "area": area,
+                "function_code": function_code,
+                "start_offset": start,
+                "quantity": quantity,
+                "mode": mode,
+                "point_specs": specs,
+            }
+        )
+
+    inject_id = _node_id(seed, "inject:plan")
+    sequencer_id = _node_id(seed, "sequencer")
+    response_gate_id = _node_id(seed, "response-gate")
+    decode_id = _node_id(seed, "derive")
+    capture_id = _node_id(seed, "capture")
+    capture_file_id = _node_id(seed, "capture-file")
+    watchdog_id = _node_id(seed, "watchdog")
+    watchdog_reset_id = _node_id(seed, "watchdog-reset")
+    error_debug_id = _node_id(seed, "errors")
+    watchdog_debug_id = _node_id(seed, "watchdog-debug")
+    plan_status_debug_id = _node_id(seed, "plan-status")
+    read_ids = [_node_id(seed, f"read:{route}") for route in routes]
+
+    nodes.extend(
+        [
             {
                 "id": inject_id,
                 "type": "inject",
                 "z": flow_id,
-                "name": f"Run one read: {identifier}",
-                "props": [
-                    {"p": "payload"},
-                    {"p": "topic", "vt": "str"},
-                ],
+                "name": "Run bounded read plan",
+                "props": [{"p": "payload"}],
                 "repeat": "",
                 "crontab": "",
                 "once": False,
                 "onceDelay": 0.1,
-                "topic": identifier,
-                "payload": stable_json(
-                    {
-                        "fc": function_code,
-                        "unitid": unit,
-                        "address": start,
-                        "quantity": quantity,
-                    },
-                    pretty=False,
-                ),
+                "payload": stable_json({"action": "start"}, pretty=False),
                 "payloadType": "json",
-                "x": 180,
-                "y": y,
-                "wires": [[read_id, watchdog_id]],
+                "x": 170,
+                "y": 150,
+                "wires": [[sequencer_id]],
+            },
+            {
+                "id": sequencer_id,
+                "type": "function",
+                "z": flow_id,
+                "name": "Run bounded read plan",
+                "func": _sequencer_function(block_specs, len(routes)),
+                "outputs": len(routes) + 1,
+                "timeout": 0,
+                "noerr": 0,
+                "initialize": "",
+                "finalize": "",
+                "libs": [],
+                "x": 410,
+                "y": 150,
+                "wires": [
+                    [read_ids[index], watchdog_id] for index in range(len(routes))
+                ]
+                + [[plan_status_debug_id]],
+            },
+        ]
+    )
+    for route_index, route in enumerate(routes):
+        nodes.append(
+            {
+                "id": read_ids[route_index],
+                "type": "modbus-flex-getter",
+                "z": flow_id,
+                "name": f"Read route: {route}",
+                "showStatusActivities": True,
+                "showErrors": True,
+                "showWarnings": True,
+                "server": clients[route],
+                "useIOFile": False,
+                "ioFile": "",
+                "useIOForPayload": False,
+                "emptyMsgOnFail": True,
+                "keepMsgProperties": True,
+                "x": 650,
+                "y": 120 + route_index * 45,
+                "wires": [[response_gate_id], [capture_id, error_debug_id]],
             }
         )
-        read_node = {
-            "id": read_id,
-            "type": "modbus-flex-getter",
-            "z": flow_id,
-            "name": f"Read once: {identifier}",
-            "showStatusActivities": True,
-            "showErrors": True,
-            "showWarnings": True,
-            "server": clients[route],
-            "useIOFile": False,
-            "ioFile": "",
-            "useIOForPayload": False,
-            "emptyMsgOnFail": True,
-            "keepMsgProperties": True,
-            "x": 420,
-            "y": y,
-            "wires": [[response_gate_id], [error_debug_id]],
-        }
 
-        nodes.extend(
-            [
-                read_node,
-                {
-                    "id": response_gate_id,
-                    "type": "function",
-                    "z": flow_id,
-                    "name": f"Accept complete read: {identifier}",
-                    "func": _response_gate_function(
-                        block_id_value=identifier,
-                        quantity=quantity,
-                    ),
-                    "outputs": 2,
-                    "timeout": 0,
-                    "noerr": 0,
-                    "initialize": "",
-                    "finalize": "",
-                    "libs": [],
-                    "x": 650,
-                    "y": y,
-                    "wires": [[decode_id, watchdog_reset_id], [error_debug_id]],
-                },
-                {
-                    "id": decode_id,
-                    "type": "function",
-                    "z": flow_id,
-                    "name": f"Derive points: {identifier}",
-                    "func": _derive_function(
-                        block_id_value=identifier,
-                        route_id=route,
-                        unit_id=unit,
-                        area=area,
-                        function_code=function_code,
-                        start=start,
-                        quantity=quantity,
-                        mode=mode,
-                        point_specs=specs,
-                    ),
-                    "outputs": 1,
-                    "timeout": 0,
-                    "noerr": 0,
-                    "initialize": "",
-                    "finalize": "",
-                    "libs": [],
-                    "x": 900,
-                    "y": y,
-                    "wires": [[]],
-                },
-                {
-                    "id": watchdog_reset_id,
-                    "type": "function",
-                    "z": flow_id,
-                    "name": f"Reset watchdog: {identifier}",
-                    "func": "msg.reset = true;\nreturn msg;",
-                    "outputs": 1,
-                    "timeout": 0,
-                    "noerr": 0,
-                    "initialize": "",
-                    "finalize": "",
-                    "libs": [],
-                    "x": 900,
-                    "y": y + 35,
-                    "wires": [[watchdog_id]],
-                },
-                {
-                    "id": watchdog_id,
-                    "type": "trigger",
-                    "z": flow_id,
-                    "name": f"Watchdog: {identifier}",
-                    "op1": "",
-                    "op2": stable_json(
-                        {"state": "timeout", "block_id": identifier}, pretty=False
-                    ),
-                    "op1type": "nul",
-                    "op2type": "json",
-                    "duration": "${MODBUS_WATCHDOG_MS}",
-                    "extend": True,
-                    "overrideDelay": False,
-                    "units": "ms",
-                    "reset": "",
-                    "bytopic": "all",
-                    "topic": "topic",
-                    "outputs": 1,
-                    "x": 900,
-                    "y": y + 35,
-                    "wires": [[watchdog_debug_id]],
-                },
-            ]
-        )
+    nodes.extend(
+        [
+            {
+                "id": response_gate_id,
+                "type": "function",
+                "z": flow_id,
+                "name": "Accept complete read",
+                "func": _response_gate_function(),
+                "outputs": 2,
+                "timeout": 0,
+                "noerr": 0,
+                "initialize": "",
+                "finalize": "",
+                "libs": [],
+                "x": 890,
+                "y": 150,
+                "wires": [[decode_id, watchdog_reset_id], [capture_id, error_debug_id]],
+            },
+            {
+                "id": decode_id,
+                "type": "function",
+                "z": flow_id,
+                "name": "Derive points",
+                "func": _derive_function(),
+                "outputs": 1,
+                "timeout": 0,
+                "noerr": 0,
+                "initialize": "",
+                "finalize": "",
+                "libs": [],
+                "x": 1110,
+                "y": 135,
+                "wires": [[capture_id]],
+            },
+            {
+                "id": capture_id,
+                "type": "function",
+                "z": flow_id,
+                "name": "Build capture/v1",
+                "func": _capture_function(map_digest, plan_digest),
+                "outputs": 2,
+                "timeout": 0,
+                "noerr": 0,
+                "initialize": "",
+                "finalize": "",
+                "libs": [],
+                "x": 1320,
+                "y": 150,
+                "wires": [[capture_file_id], [sequencer_id]],
+            },
+            {
+                "id": capture_file_id,
+                "type": "file",
+                "z": flow_id,
+                "name": "Write capture.json",
+                "filename": "filename",
+                "filenameType": "msg",
+                "appendNewline": False,
+                "createDir": True,
+                "overwriteFile": "true",
+                "encoding": "none",
+                "x": 1540,
+                "y": 135,
+                "wires": [[]],
+            },
+            {
+                "id": watchdog_reset_id,
+                "type": "function",
+                "z": flow_id,
+                "name": "Reset watchdog",
+                "func": "msg.reset = true;\nreturn msg;",
+                "outputs": 1,
+                "timeout": 0,
+                "noerr": 0,
+                "initialize": "",
+                "finalize": "",
+                "libs": [],
+                "x": 1120,
+                "y": 190,
+                "wires": [[watchdog_id]],
+            },
+            {
+                "id": watchdog_id,
+                "type": "trigger",
+                "z": flow_id,
+                "name": "Read watchdog",
+                "op1": "",
+                "op2": stable_json({"state": "timeout"}, pretty=False),
+                "op1type": "nul",
+                "op2type": "json",
+                "duration": "${MODBUS_WATCHDOG_MS}",
+                "extend": True,
+                "overrideDelay": False,
+                "units": "ms",
+                "reset": "",
+                "bytopic": "all",
+                "topic": "topic",
+                "outputs": 1,
+                "x": 900,
+                "y": 230,
+                "wires": [[capture_id, watchdog_debug_id]],
+            },
+        ]
+    )
 
     status_id = _node_id(seed, "status")
     queue_id = _node_id(seed, "queue-signal")
@@ -418,6 +462,21 @@ def export_node_red(
                 "wires": [],
             },
             {
+                "id": plan_status_debug_id,
+                "type": "debug",
+                "z": flow_id,
+                "name": "Read plan status",
+                "active": True,
+                "tosidebar": True,
+                "console": False,
+                "tostatus": False,
+                "complete": "payload",
+                "targetType": "msg",
+                "x": 670,
+                "y": 270,
+                "wires": [],
+            },
+            {
                 "id": queue_debug_id,
                 "type": "debug",
                 "z": flow_id,
@@ -472,7 +531,7 @@ def export_node_red(
     for route in routes:
         prefix = route_env[route]
         environment.extend([f"{prefix}_HOST", f"{prefix}_PORT"])
-    environment.append("MODBUS_WATCHDOG_MS")
+    environment.extend(["MODBUS_WATCHDOG_MS", "MODBUS_CAPTURE_PATH"])
     manifest = target_manifest(
         target=TARGET,
         profile=None,
@@ -488,13 +547,16 @@ def export_node_red(
             "physical_read_nodes": len(read_ids),
             "read_block_ids": [block_id(block, index) for index, block in blocks],
             "read_node_type": "modbus-flex-getter",
-            "trigger_type": "manual-inject",
-            "trigger_nodes": len(manual_inject_ids),
+            "trigger_type": "sequenced-manual-plan",
+            "trigger_nodes": 1,
+            "sequencing": "response-driven",
+            "max_in_flight": 1,
+            "capture_contract": "capture/v1",
             "scheduled_polling": False,
             **(
                 {
-                    "probe_trigger_type": "manual-inject",
-                    "probe_trigger_nodes": len(manual_inject_ids),
+                    "probe_trigger_type": "sequenced-manual-plan",
+                    "probe_trigger_nodes": 1,
                     "probe_polling": False,
                     "probe_byte_order_candidates": list(
                         _PROBE_BYTE_ORDER_LAYOUTS
@@ -541,31 +603,55 @@ def export_node_red(
     )
 
 
-def _derive_function(
-    *,
-    block_id_value: str,
-    route_id: str,
-    unit_id: int,
-    area: str,
-    function_code: int,
-    start: int,
-    quantity: int,
-    mode: str,
-    point_specs: list[dict[str, Any]],
-) -> str:
-    block_metadata = {
-        "block_id": block_id_value,
-        "route_id": route_id,
-        "unit_id": unit_id,
-        "area": area,
-        "function_code": function_code,
-        "start_offset": start,
-        "quantity": quantity,
-        "mode": mode,
-    }
+def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int) -> str:
     return (
-        f"const block = {stable_json(block_metadata, pretty=False)};\n"
-        f"const pointSpecs = {stable_json(point_specs, pretty=False)};\n"
+        f"const blocks = {stable_json(block_specs, pretty=False)};\n"
+        f"const routeCount = {route_count};\n"
+        "const statusIndex = routeCount;\n"
+        "const output = (index, value) => {\n"
+        "  const values = Array(routeCount + 1).fill(null);\n"
+        "  values[index] = value;\n"
+        "  return values;\n"
+        "};\n"
+        "const next = () => {\n"
+        "  const queue = flow.get('modbusSkillsQueue') || [];\n"
+        "  if (queue.length === 0) {\n"
+        "    flow.set('modbusSkillsRunning', false);\n"
+        "    return output(statusIndex, {payload: {state: 'complete', request_count: blocks.length}});\n"
+        "  }\n"
+        "  const block = queue.shift();\n"
+        "  flow.set('modbusSkillsQueue', queue);\n"
+        "  const request = {\n"
+        "    block_id: block.block_id, route_id: block.route_id, unit_id: block.unit_id,\n"
+        "    area: block.area, function_code: block.function_code,\n"
+        "    start_offset: block.start_offset, quantity: block.quantity,\n"
+        "    mode: block.mode, point_specs: block.point_specs, started_at_ms: Date.now()\n"
+        "  };\n"
+        "  const requestMsg = {\n"
+        "    topic: block.block_id, modbusSkillsRequest: request,\n"
+        "    payload: {fc: block.function_code, unitid: block.unit_id, address: block.start_offset, quantity: block.quantity}\n"
+        "  };\n"
+        "  return output(block.route_index, requestMsg);\n"
+        "};\n"
+        "if (msg && msg.payload && msg.payload.action === 'start') {\n"
+        "  if (flow.get('modbusSkillsRunning')) {\n"
+        "    return output(statusIndex, {payload: {state: 'already-running'}});\n"
+        "  }\n"
+        "  flow.set('modbusSkillsRunning', true);\n"
+        "  flow.set('modbusSkillsQueue', blocks.slice());\n"
+        "  flow.set('modbusSkillsCapture', []);\n"
+        "  flow.set('modbusSkillsRunId', `run-${Date.now()}`);\n"
+        "  return next();\n"
+        "}\n"
+        "if (msg && msg.modbusSkillsContinue === true) return next();\n"
+        "return output(statusIndex, {payload: {state: 'ignored-message'}});"
+    )
+
+
+def _derive_function() -> str:
+    return (
+        "const block = msg.modbusSkillsRequest || {};\n"
+        "const pointSpecs = Array.isArray(block.point_specs) ? block.point_specs : [];\n"
         "const byteLayouts32 = Object.freeze({\n"
         "  ABCD: Object.freeze([0, 1, 2, 3]),\n"
         "  BADC: Object.freeze([1, 0, 3, 2]),\n"
@@ -610,7 +696,48 @@ def _derive_function(
     )
 
 
-def _response_gate_function(*, block_id_value: str, quantity: int) -> str:
+def _capture_function(map_digest: str, plan_digest: str) -> str:
+    return (
+        f"const mapHash = {stable_json(map_digest, pretty=False)};\n"
+        f"const planHash = {stable_json(plan_digest, pretty=False)};\n"
+        "const request = msg.modbusSkillsRequest || {};\n"
+        "const timestamp = new Date().toISOString();\n"
+        "const elapsed = Number.isFinite(request.started_at_ms) ? Date.now() - request.started_at_ms : null;\n"
+        "const derived = Array.isArray(msg.payload) ? msg.payload : [];\n"
+        "const successful = derived.length > 0 && !msg.error && !msg.modbusError && !msg.modbusSkillsReadError;\n"
+        "const points = Array.isArray(request.point_specs) ? request.point_specs : [];\n"
+        "const samples = successful ? derived.map((point) => ({\n"
+        "  sample_id: `${flow.get('modbusSkillsRunId')}:${request.block_id}:${point.point_id}`,\n"
+        "  point_id: point.point_id, block_id: request.block_id, route_id: request.route_id,\n"
+        "  unit_id: request.unit_id, area: request.area,\n"
+        "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
+        "  timestamp, response_time_ms: elapsed, success: true, raw_words: point.raw_values || [],\n"
+        "  derived_values: point\n"
+        "})) : points.map((point) => ({\n"
+        "  sample_id: `${flow.get('modbusSkillsRunId')}:${request.block_id}:${point.point_id}:error`,\n"
+        "  point_id: point.point_id, block_id: request.block_id, route_id: request.route_id,\n"
+        "  unit_id: request.unit_id, area: request.area,\n"
+        "  protocol_offset: request.start_offset + (Number.isInteger(point.relative_offset) ? point.relative_offset : 0),\n"
+        "  timestamp, response_time_ms: elapsed, success: false, raw_words: [],\n"
+        "  error: (msg.modbusSkillsReadError && msg.modbusSkillsReadError.reason) ||\n"
+        "    (msg.payload && msg.payload.state) || (msg.error && msg.error.message) || 'read-failed'\n"
+        "}));\n"
+        "const existing = flow.get('modbusSkillsCapture') || [];\n"
+        "const combined = existing.concat(samples);\n"
+        "flow.set('modbusSkillsCapture', combined);\n"
+        "const capture = {\n"
+        "  schema_version: \"capture/v1\", capture_id: flow.get('modbusSkillsRunId'),\n"
+        "  canonical_map_hash: mapHash, read_plan_hash: planHash, samples: combined\n"
+        "};\n"
+        "const fileMsg = {\n"
+        "  filename: env.get('MODBUS_CAPTURE_PATH') || 'modbus-capture.json',\n"
+        "  payload: JSON.stringify(capture, null, 2)\n"
+        "};\n"
+        "return [fileMsg, {modbusSkillsContinue: true, payload: {action: 'next'}}];"
+    )
+
+
+def _response_gate_function() -> str:
     """Accept only a complete, successful read response.
 
     The success output feeds both derivation and the watchdog reset. The error
@@ -618,12 +745,9 @@ def _response_gate_function(*, block_id_value: str, quantity: int) -> str:
     cannot look like a completed read.
     """
 
-    expected = stable_json(
-        {"block_id": block_id_value, "expected_quantity": quantity},
-        pretty=False,
-    )
     return (
-        f"const expected = {expected};\n"
+        "const request = msg.modbusSkillsRequest || {};\n"
+        "const expected = {block_id: request.block_id, expected_quantity: request.quantity};\n"
         "const payloadData = msg.payload && Array.isArray(msg.payload.data)\n"
         "  ? msg.payload.data\n"
         "  : null;\n"
@@ -655,9 +779,9 @@ def _node_id(seed: str, role: str) -> str:
 def _readme(*, mode: str, environment: list[str]) -> str:
     environment_lines = "\n".join(f"- `{name}`" for name in environment)
     run_instructions = (
-        "After you enable the tab, click one `Run one read` inject node. Wait "
-        "for its response or watchdog result before you click the next node. "
-        "The flow has no scheduled polling and does not run at deploy."
+        "After you enable the tab, click `Run bounded read plan` once. The flow "
+        "sends the next request only after the current request returns or times "
+        "out. It has no scheduled polling and does not run at deploy."
     )
     return f"""# Node-RED {mode.title()} Flow
 
@@ -677,6 +801,11 @@ The flow tab is disabled by default. Review all settings before you enable it.
 Set each port to a decimal TCP port. {run_instructions} Import `flow.json`,
 review it, deploy it while it is disabled, and then enable the tab only when
 the endpoint is safe for one bounded read.
+
+Set `MODBUS_CAPTURE_PATH` to the local path for `capture.json`. The flow
+rewrites that file after every response so it always contains a complete
+`capture/v1` document. The flow uses one shared reader per route and keeps one
+request in flight.
 
 The derive nodes keep an immutable copy of the raw values. They also attach
 point datatype, byte-order, scaling, and engineering-unit metadata. For each

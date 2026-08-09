@@ -57,7 +57,7 @@ def artifact_text(result: object, suffix: str) -> str:
 
 
 class NodeRedExporterTests(unittest.TestCase):
-    def test_flow_is_disabled_read_only_and_one_manual_read_per_block(self) -> None:
+    def test_flow_is_disabled_read_only_and_runs_one_sequenced_plan(self) -> None:
         first = point()
         second = point(
             logical_point_id="temperature",
@@ -72,14 +72,14 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertEqual("generated", result.status)
         flow = json.loads(artifact_text(result, "flow.json"))
         counts = Counter(node["type"] for node in flow)
-        self.assertEqual(2, counts["inject"])
-        self.assertEqual(2, counts["modbus-flex-getter"])
-        self.assertEqual(len(read_plan["requests"]), counts["modbus-flex-getter"])
+        self.assertEqual(1, counts["inject"])
+        self.assertEqual(1, counts["modbus-flex-getter"])
+        self.assertEqual(1, counts["file"])
         self.assertFalse(counts["modbus-read"])
         self.assertTrue(next(node for node in flow if node["type"] == "tab")["disabled"])
         self.assertEqual(1, counts["catch"])
         self.assertEqual(1, counts["status"])
-        self.assertEqual(2, counts["trigger"])
+        self.assertEqual(1, counts["trigger"])
         self.assertFalse(any("write" in node["type"].lower() for node in flow))
 
     def test_ids_are_unique_and_environment_values_are_placeholders(self) -> None:
@@ -93,7 +93,9 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertEqual("${MODBUS_PORT}", client["tcpPort"])
         read = next(node for node in flow if node["type"] == "modbus-flex-getter")
         inject = next(node for node in flow if node["type"] == "inject")
-        self.assertEqual(read["id"], inject["wires"][0][0])
+        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        self.assertEqual(sequencer["id"], inject["wires"][0][0])
+        self.assertIn(read["id"], sequencer["wires"][0])
         self.assertEqual("", inject["repeat"])
         self.assertEqual("", inject["crontab"])
         self.assertFalse(inject["once"])
@@ -105,12 +107,29 @@ class NodeRedExporterTests(unittest.TestCase):
         derive = next(
             node
             for node in flow
-            if node["type"] == "function" and node["name"].startswith("Derive points")
+            if node["type"] == "function" and node["name"] == "Derive points"
         )
         self.assertIn("raw_values", derive["func"])
-        self.assertIn('"datatype":"float32"', derive["func"])
-        self.assertIn('"byte_order":"ABCD"', derive["func"])
-        self.assertIn('"scale":0.1', derive["func"])
+        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        self.assertIn('"datatype":"float32"', sequencer["func"])
+        self.assertIn('"byte_order":"ABCD"', sequencer["func"])
+        self.assertIn('"scale":0.1', sequencer["func"])
+
+    def test_flow_writes_capture_v1_and_advances_only_after_a_result(self) -> None:
+        canonical_map, read_plan = inputs(
+            point(),
+            point(logical_point_id="temperature", protocol_offset=110, datatype="int16", word_span=1),
+        )
+        flow = json.loads(artifact_text(export_node_red(canonical_map, read_plan), "flow.json"))
+        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        capture = next(node for node in flow if node.get("name") == "Build capture/v1")
+        sink = next(node for node in flow if node["type"] == "file")
+        self.assertIn("flow.set('modbusSkillsQueue'", sequencer["func"])
+        self.assertIn("modbusSkillsContinue", sequencer["func"])
+        self.assertIn('schema_version: "capture/v1"', capture["func"])
+        self.assertIn("MODBUS_CAPTURE_PATH", capture["func"])
+        self.assertIn(sequencer["id"], capture["wires"][1])
+        self.assertEqual(sink["id"], capture["wires"][0][0])
 
     def test_probe_flow_accepts_unresolved_decoding(self) -> None:
         raw_point = point(
@@ -124,12 +143,8 @@ class NodeRedExporterTests(unittest.TestCase):
         result = export_node_red(canonical_map, read_plan, mode="probe")
         self.assertEqual("generated", result.status)
         flow = json.loads(artifact_text(result, "flow.json"))
-        derive = next(
-            node
-            for node in flow
-            if node["type"] == "function" and node["name"].startswith("Derive points")
-        )
-        self.assertIn('"datatype":null', derive["func"])
+        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        self.assertIn('"datatype":null', sequencer["func"])
 
     def test_probe_one_read_feeds_all_four_32_bit_byte_order_candidates(self) -> None:
         raw_point = point(
@@ -155,28 +170,28 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertEqual(1, len(derives))
         self.assertEqual("", injects[0]["repeat"])
         self.assertFalse(injects[0]["once"])
-        self.assertEqual(reads[0]["id"], injects[0]["wires"][0][0])
+        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        self.assertEqual(sequencer["id"], injects[0]["wires"][0][0])
         watchdog = next(node for node in flow if node["type"] == "trigger")
-        self.assertIn(watchdog["id"], injects[0]["wires"][0])
+        self.assertIn(reads[0]["id"], sequencer["wires"][0])
+        self.assertIn(watchdog["id"], sequencer["wires"][0])
         reset = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"].startswith("Reset watchdog")
+            and node["name"] == "Reset watchdog"
         )
         gate = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"].startswith("Accept complete read")
+            and node["name"] == "Accept complete read"
         )
         error_debug = next(
             node for node in flow if node.get("name") == "Modbus read errors"
         )
-        self.assertEqual(
-            [[gate["id"]], [error_debug["id"]]],
-            reads[0]["wires"],
-        )
+        self.assertEqual([gate["id"]], reads[0]["wires"][0])
+        self.assertIn(error_debug["id"], reads[0]["wires"][1])
         self.assertIn(reset["id"], gate["wires"][0])
         self.assertIn(derives[0]["id"], gate["wires"][0])
         self.assertNotIn(reset["id"], reads[0]["wires"][0])
@@ -189,10 +204,7 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertIn(
             "values.length === expected.expected_quantity", gate["func"]
         )
-        self.assertEqual(
-            {"fc": 3, "unitid": 1, "address": 100, "quantity": 2},
-            json.loads(injects[0]["payload"]),
-        )
+        self.assertEqual({"action": "start"}, json.loads(injects[0]["payload"]))
         self.assertFalse(any(node["type"] == "modbus-read" for node in flow))
         self.assertFalse(any("write" in node["type"].lower() for node in flow))
         self.assertTrue(next(node for node in flow if node["type"] == "tab")["disabled"])
@@ -225,7 +237,7 @@ class NodeRedExporterTests(unittest.TestCase):
             manifest["probe_candidate_source"],
         )
         self.assertFalse(manifest["probe_polling"])
-        self.assertEqual("manual-inject", manifest["probe_trigger_type"])
+        self.assertEqual("sequenced-manual-plan", manifest["probe_trigger_type"])
         self.assertEqual(1, manifest["probe_trigger_nodes"])
         self.assertEqual("modbus-flex-getter", manifest["read_node_type"])
         self.assertNotIn("MODBUS_POLL_INTERVAL_MS", manifest["environment"])
@@ -239,34 +251,34 @@ class NodeRedExporterTests(unittest.TestCase):
         injects = [node for node in flow if node["type"] == "inject"]
         self.assertEqual(1, len(reads))
         self.assertEqual(1, len(injects))
-        self.assertEqual(reads[0]["id"], injects[0]["wires"][0][0])
+        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        self.assertEqual(sequencer["id"], injects[0]["wires"][0][0])
         watchdog = next(node for node in flow if node["type"] == "trigger")
-        self.assertIn(watchdog["id"], injects[0]["wires"][0])
+        self.assertIn(reads[0]["id"], sequencer["wires"][0])
+        self.assertIn(watchdog["id"], sequencer["wires"][0])
         reset = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"].startswith("Reset watchdog")
+            and node["name"] == "Reset watchdog"
         )
         gate = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"].startswith("Accept complete read")
+            and node["name"] == "Accept complete read"
         )
         derive = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"].startswith("Derive points")
+            and node["name"] == "Derive points"
         )
         error_debug = next(
             node for node in flow if node.get("name") == "Modbus read errors"
         )
-        self.assertEqual(
-            [[gate["id"]], [error_debug["id"]]],
-            reads[0]["wires"],
-        )
+        self.assertEqual([gate["id"]], reads[0]["wires"][0])
+        self.assertIn(error_debug["id"], reads[0]["wires"][1])
         self.assertIn(reset["id"], gate["wires"][0])
         self.assertIn(derive["id"], gate["wires"][0])
         self.assertNotIn(reset["id"], reads[0]["wires"][0])
@@ -278,7 +290,7 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertFalse(any(node["type"] == "modbus-read" for node in flow))
         self.assertNotIn("MODBUS_POLL_INTERVAL_MS", json.dumps(flow))
         manifest = json.loads(artifact_text(result, "manifest.json"))
-        self.assertEqual("manual-inject", manifest["trigger_type"])
+        self.assertEqual("sequenced-manual-plan", manifest["trigger_type"])
         self.assertEqual(1, manifest["trigger_nodes"])
         self.assertFalse(manifest["scheduled_polling"])
         self.assertNotIn("MODBUS_POLL_INTERVAL_MS", manifest["environment"])

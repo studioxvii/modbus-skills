@@ -93,12 +93,10 @@ class ToolPackTests(unittest.TestCase):
         flow = json.loads(pack.files()["node-red/flow.json"])
         reads = [node for node in flow if node["type"] == "modbus-flex-getter"]
         injects = [node for node in flow if node["type"] == "inject"]
-        self.assertEqual(len(read_plan.requests), len(reads))
-        self.assertEqual(len(read_plan.requests), len(injects))
-        self.assertEqual(
-            read_plan.requests[0].start_offset,
-            json.loads(injects[0]["payload"])["address"],
-        )
+        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        self.assertEqual(1, len(reads))
+        self.assertEqual(1, len(injects))
+        self.assertIn(f'"start_offset":{read_plan.requests[0].start_offset}', sequencer["func"])
 
     def test_checksums_cover_every_file_except_the_checksum_file(self) -> None:
         canonical_map, read_plan = inputs()
