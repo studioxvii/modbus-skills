@@ -1,0 +1,95 @@
+{
+  "schema_version": "node-red-live-campaign/v1",
+  "campaign_id": "node-red-live-human-campaign",
+  "profiles": [
+    {
+      "id": "fleet-10",
+      "fleet_size": 10,
+      "unit_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    },
+    {
+      "id": "fleet-50",
+      "fleet_size": 50,
+      "unit_ids": [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+        31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+        41, 42, 43, 44, 45, 46, 47, 48, 49, 50
+      ]
+    }
+  ],
+  "budget": {
+    "rounds": 3,
+    "max_compiled_block_reads": 180,
+    "max_seconds": 60,
+    "cadence_seconds": 1,
+    "max_in_flight": 1
+  },
+  "readiness": {
+    "required": true,
+    "endpoint": "/api/ready",
+    "fleet_size_must_match": true,
+    "reported_modbus_port_required": true
+  },
+  "safety": {
+    "endpoint": "http://127.0.0.1:${MODBUS_PORT}",
+    "require_loopback": true,
+    "allowed_function_codes": [1, 2, 3, 4],
+    "writes": false,
+    "broadcasts": false,
+    "discovery_scans": false,
+    "scheduled_polling": false,
+    "deploy_time_triggers": false,
+    "credentials": false,
+    "flow_disabled_before_import": true,
+    "manual_one_shot_trigger": true,
+    "authorization": {
+      "required": true,
+      "scope": "named-local-campaign",
+      "per_read": false
+    }
+  },
+  "hash_bindings": {
+    "canonical_map_sha256": "canonical_map_sha256",
+    "read_plan_sha256": "read_plan_sha256",
+    "flow_sha256": "flow_sha256",
+    "manifest_sha256": "manifest_sha256",
+    "simulator_config_sha256": "simulator_config_sha256"
+  },
+  "capture": {
+    "schema_version": "capture/v1",
+    "required_identity": ["route", "unit_id", "area", "protocol_offset"],
+    "required_fields": [
+      "timestamp",
+      "raw_words",
+      "derived_values",
+      "response_time_ms",
+      "status"
+    ],
+    "row_statuses": ["success", "error"],
+    "error_rule": "communication errors remain errors and do not produce derived values"
+  },
+  "terminal_statuses": ["passed", "failed", "blocked", "not-run", "inconclusive"],
+  "output": {
+    "ignored_roots": ["artifacts", "private"],
+    "sanitized": true,
+    "forbid_absolute_paths": true,
+    "forbid_credentials": true,
+    "forbid_simulator_exports": true,
+    "forbid_agent_transcripts": true,
+    "public_fields": [
+      "run_id",
+      "profile_id",
+      "fleet_size",
+      "status",
+      "terminal_state",
+      "issue_codes",
+      "request_count",
+      "error_count",
+      "hashes",
+      "versions",
+      "cleanup"
+    ]
+  }
+}
