@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import copy
+import json
 import shutil
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 class CampaignError(ValueError):
@@ -100,3 +105,106 @@ class NodeRedRuntime:
         if not executable:
             return {"status": "blocked", "issue_codes": ["node-red-runtime-unavailable"], "runtime": "unavailable"}
         return {"status": "ready", "issue_codes": [], "runtime": executable}
+
+
+class NodeRedAdminClient:
+    """Small loopback-only client for a disposable Node-RED test runtime."""
+
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:1880",
+        *,
+        timeout: float = 5.0,
+        opener=urlopen,
+        clock: Callable[[], float] = time.monotonic,
+        wait: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if not base_url.startswith(("http://127.0.0.1:", "http://localhost:", "http://[::1]:")):
+            raise CampaignError("Node-RED admin URL must use loopback HTTP")
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self._opener = opener
+        self._clock = clock
+        self._wait = wait
+
+    def _request(self, path: str, *, method: str = "GET", payload: Any = None) -> Any:
+        body = None
+        headers = {"Accept": "application/json"}
+        if payload is not None:
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = Request(self.base_url + path, data=body, headers=headers, method=method)
+        try:
+            with self._opener(request, timeout=self.timeout) as response:
+                raw = response.read()
+        except (HTTPError, URLError, OSError, TimeoutError) as exc:
+            raise CampaignError(f"Node-RED admin request failed: {exc}") from exc
+        if not raw:
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CampaignError("Node-RED admin returned invalid JSON") from exc
+
+    def flows(self) -> list[dict[str, Any]]:
+        value = self._request("/flows")
+        if isinstance(value, Mapping):
+            value = value.get("flows")
+        if not isinstance(value, list) or not all(isinstance(item, Mapping) for item in value):
+            raise CampaignError("Node-RED admin returned an invalid flow list")
+        return [dict(item) for item in value]
+
+    def deploy(self, flow: Sequence[Mapping[str, Any]]) -> None:
+        self._request("/flows", method="POST", payload=[dict(node) for node in flow])
+
+    def trigger(self, node_id: str) -> None:
+        if not node_id or not all(character.isalnum() for character in node_id):
+            raise CampaignError("Node-RED inject ID is invalid")
+        self._request(f"/inject/{node_id}", method="POST")
+
+    def run_flow(
+        self,
+        flow: Sequence[Mapping[str, Any]],
+        *,
+        capture_path: Path,
+        environment: Mapping[str, str],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        validate_flow(flow)
+        original = self.flows()
+        deployed = copy.deepcopy([dict(node) for node in flow])
+        tabs = [node for node in deployed if node.get("type") == "tab"]
+        injects = [node for node in deployed if node.get("type") == "inject"]
+        if len(tabs) != 1 or len(injects) != 1:
+            raise CampaignError("Node-RED campaign requires one tab and one manual start button")
+        tabs[0]["disabled"] = False
+        tabs[0]["env"] = [
+            {"name": name, "value": str(value), "type": "str"}
+            for name, value in sorted(environment.items())
+        ]
+        before_mtime = capture_path.stat().st_mtime_ns if capture_path.exists() else None
+        try:
+            self.deploy(deployed)
+            self.trigger(str(injects[0]["id"]))
+            deadline = self._clock() + timeout_seconds
+            while self._clock() < deadline:
+                if capture_path.is_file():
+                    current_mtime = capture_path.stat().st_mtime_ns
+                    if before_mtime is None or current_mtime != before_mtime:
+                        try:
+                            capture = json.loads(capture_path.read_text(encoding="utf-8"))
+                        except (OSError, json.JSONDecodeError):
+                            capture = None
+                        if isinstance(capture, dict):
+                            expected = set(capture.get("expected_request_ids", ()))
+                            observed = {
+                                str(sample.get("request_id"))
+                                for sample in capture.get("samples", ())
+                                if isinstance(sample, Mapping) and sample.get("request_id")
+                            }
+                            if expected and expected <= observed:
+                                return capture
+                self._wait(0.1)
+            raise CampaignError("Node-RED read plan did not complete before the timeout")
+        finally:
+            self.deploy(original)

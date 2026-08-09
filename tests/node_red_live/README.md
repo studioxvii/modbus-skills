@@ -50,3 +50,24 @@ terminal statuses are `passed`, `failed`, `blocked`, `not-run`, and `inconclusiv
 Raw captures, Node-RED logs, simulator snapshots, and transcripts belong only below
 ignored `artifacts/` or `private/` output. Tracked files must not include simulator
 exports, credentials, private captures, absolute local paths, or full agent prose.
+
+## Run it
+
+Start the simulator and a disposable local Node-RED runtime first. Generate the
+Node-RED flow from the reviewed map and read plan. Then run:
+
+```text
+python3 scripts/run_node_red_live_campaign.py \
+  --profile fleet-10 \
+  --authorize \
+  --node-red-cli /path/to/node-red \
+  --flow /path/to/node-red/flow.json \
+  --capture /private/output/capture.json \
+  --hashes /private/output/hashes.json
+```
+
+The runner imports the reviewed flow, enables it for this run, clicks its single
+start button through the local Node-RED API, waits for every planned request,
+checks raw words against the simulator API, and restores the original Node-RED
+flows. If any required input is missing, it returns `blocked` or `not-run` instead
+of claiming a live pass.

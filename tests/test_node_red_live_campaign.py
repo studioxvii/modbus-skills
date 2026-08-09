@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -17,6 +19,7 @@ from run_node_red_live_campaign import (  # noqa: E402
 from node_red_live.node_red import (  # noqa: E402
     BoundedReadLedger,
     CampaignError as NodeRedCampaignError,
+    NodeRedAdminClient,
     NodeRedRuntime,
     validate_flow,
 )
@@ -110,6 +113,55 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
         with patch.object(client, "_request_json", side_effect=SimulatorError("HTTP 503")):
             with self.assertRaises(SimulatorError):
                 client.readiness()
+
+    def test_admin_driver_triggers_once_and_restores_original_flows(self) -> None:
+        class Response:
+            def __init__(self, body=b""):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return self.body
+
+        with tempfile.TemporaryDirectory() as directory:
+            capture_path = Path(directory) / "capture.json"
+            calls = []
+
+            def opener(request, timeout):
+                calls.append((request.method, request.full_url))
+                if request.method == "GET":
+                    return Response(b"[]")
+                if "/inject/" in request.full_url:
+                    capture_path.write_text(
+                        json.dumps(
+                            {
+                                "expected_request_ids": ["run:block"],
+                                "samples": [{"request_id": "run:block"}],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                return Response()
+
+            admin = NodeRedAdminClient(opener=opener, wait=lambda _: None)
+            capture = admin.run_flow(
+                [
+                    {"id": "tab", "type": "tab", "disabled": True},
+                    {"id": "inject", "type": "inject", "repeat": "", "crontab": "", "once": False},
+                    {"id": "read", "type": "modbus-flex-getter", "fc": 3, "tcpHost": "127.0.0.1"},
+                ],
+                capture_path=capture_path,
+                environment={"MODBUS_CAPTURE_PATH": str(capture_path)},
+                timeout_seconds=1,
+            )
+        self.assertEqual(["run:block"], capture["expected_request_ids"])
+        self.assertEqual(2, sum(1 for method, url in calls if method == "POST" and url.endswith("/flows")))
+        self.assertEqual(1, sum(1 for method, url in calls if method == "POST" and "/inject/" in url))
 
 
 if __name__ == "__main__":

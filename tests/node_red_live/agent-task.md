@@ -11,12 +11,12 @@ load test.
 2. Obtain one scoped human authorization for this named local campaign. Do not ask
    for per-read approvals.
 3. Import the generated flow while disabled. Verify that it contains only FC01–FC04
-   reads, manual one-shot triggers, no writes, no discovery, no deploy-time trigger,
+   reads, one manual start button, no writes, no discovery, no deploy-time trigger,
    no scheduled polling, and at most one read in flight. Reject the run if any check
    fails.
-4. Run the correctness pass at exactly 10 units and exactly 50 units. Compare each
-   response with the same-window simulator register oracle. Preserve complete
-   `capture/v1` identity and raw-word evidence.
+4. Run the correctness pass at exactly 10 units and exactly 50 units. Use the
+   built-in `capture/v1` file; do not add a temporary debug sink. Compare each
+   response with the same-window simulator register oracle.
 5. Run three rounds (sequential) per profile with a one-second cadence, at most 180
    compiled-block reads, and a 60-second cap. Record request count, latency,
    readiness, queue drain, and errors.

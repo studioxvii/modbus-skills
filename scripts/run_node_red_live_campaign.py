@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Preflight and (when available) run the bounded Node-RED live campaign.
-
-The native Node-RED driver is intentionally optional.  On a machine without the
-CLI the command emits a sanitized blocked receipt instead of pretending that a
-live read occurred.
-"""
+"""Run the bounded Node-RED campaign or report exactly why it could not run."""
 
 from __future__ import annotations
 
@@ -20,7 +15,8 @@ from urllib.parse import urlparse
 if str(Path(__file__).resolve().parents[1] / "tests") not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
-from node_red_live.node_red import CampaignError, NodeRedRuntime
+from node_red_live.node_red import CampaignError, NodeRedAdminClient, NodeRedRuntime
+from node_red_live.simulator import SimulatorClient, SimulatorError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -96,7 +92,49 @@ def _hashes(contract: Mapping[str, Any], supplied: Mapping[str, str] | None) -> 
     return result
 
 
-def run_campaign(contract: Mapping[str, Any], *, profile_id: str | None = None, authorized: bool = False, runtime: NodeRedRuntime | None = None, flow: list[Mapping[str, Any]] | None = None, hashes: Mapping[str, str] | None = None) -> dict[str, Any]:
+def _oracle_mismatches(capture: Mapping[str, Any], simulator: Any) -> list[dict[str, Any]]:
+    cache: dict[int, Mapping[str, Any]] = {}
+    mismatches: list[dict[str, Any]] = []
+    for sample in capture.get("samples", ()):
+        if not isinstance(sample, Mapping) or sample.get("success") is False:
+            continue
+        unit_id = int(sample.get("unit_id", 0))
+        offset = int(sample.get("protocol_offset", -1))
+        words = sample.get("raw_words", ())
+        if unit_id < 1 or offset < 0 or not isinstance(words, list):
+            mismatches.append({"sample_id": sample.get("sample_id"), "reason": "identity-incomplete"})
+            continue
+        if unit_id not in cache:
+            cache[unit_id] = simulator.registers(unit_id)
+        registers = cache[unit_id].get("registers")
+        if not isinstance(registers, Mapping):
+            mismatches.append({"sample_id": sample.get("sample_id"), "reason": "oracle-registers-missing"})
+            continue
+        expected = [registers.get(str(offset + index), registers.get(offset + index)) for index in range(len(words))]
+        if expected != words:
+            mismatches.append(
+                {
+                    "sample_id": sample.get("sample_id"),
+                    "reason": "raw-words-do-not-match-oracle",
+                    "expected": expected,
+                    "observed": words,
+                }
+            )
+    return mismatches
+
+
+def run_campaign(
+    contract: Mapping[str, Any],
+    *,
+    profile_id: str | None = None,
+    authorized: bool = False,
+    runtime: NodeRedRuntime | None = None,
+    flow: list[Mapping[str, Any]] | None = None,
+    hashes: Mapping[str, str] | None = None,
+    admin: Any | None = None,
+    simulator: Any | None = None,
+    capture_path: Path | None = None,
+) -> dict[str, Any]:
     validate_campaign_settings(contract)
     selected = next((p for p in contract["profiles"] if p["id"] == profile_id), None) if profile_id else contract["profiles"][0]
     if selected is None:
@@ -116,10 +154,55 @@ def run_campaign(contract: Mapping[str, Any], *, profile_id: str | None = None, 
     if preflight["status"] != "ready":
         report["issue_codes"] = list(preflight["issue_codes"])
         return report
-    # Native execution is deliberately a separate driver; this command only
-    # promises preflight unless a future driver supplies capture rows.
-    report["status"] = report["terminal_state"] = "not-run"
-    report["issue_codes"] = ["native-driver-not-configured"]
+    if admin is None or simulator is None or capture_path is None or not flow:
+        report["status"] = report["terminal_state"] = "not-run"
+        report["issue_codes"] = ["native-driver-not-configured"]
+        return report
+    if any(value == "unavailable" for value in report["hashes"].values()):
+        report["issue_codes"] = ["evidence-hashes-required"]
+        return report
+    try:
+        ready = simulator.require_ready(int(selected["fleet_size"]))
+        capture = admin.run_flow(
+            flow,
+            capture_path=capture_path,
+            environment={
+                "MODBUS_HOST": "127.0.0.1",
+                "MODBUS_PORT": str(ready.modbus_port),
+                "MODBUS_WATCHDOG_MS": "3000",
+                "MODBUS_CAPTURE_PATH": str(capture_path.resolve()),
+            },
+            timeout_seconds=float(contract["budget"]["max_seconds"]),
+        )
+        expected = set(capture.get("expected_request_ids", ()))
+        observed = {
+            str(sample.get("request_id"))
+            for sample in capture.get("samples", ())
+            if isinstance(sample, Mapping) and sample.get("request_id")
+        }
+        errors = [
+            sample
+            for sample in capture.get("samples", ())
+            if isinstance(sample, Mapping) and sample.get("success") is False
+        ]
+        mismatches = _oracle_mismatches(capture, simulator)
+        missing = sorted(expected - observed)
+        report["request_count"] = len(observed)
+        report["error_count"] = len(errors)
+        report["cleanup"]["flow_removed"] = True
+        if missing:
+            report["issue_codes"].append("planned-requests-missing")
+        if errors:
+            report["issue_codes"].append("node-red-read-errors")
+        if mismatches:
+            report["issue_codes"].append("simulator-oracle-mismatch")
+        report["oracle_mismatches"] = mismatches[:10]
+        report["status"] = report["terminal_state"] = (
+            "passed" if not report["issue_codes"] else "failed"
+        )
+    except (CampaignError, SimulatorError, OSError, ValueError) as exc:
+        report["status"] = report["terminal_state"] = "failed"
+        report["issue_codes"] = [str(exc)]
     return report
 
 
@@ -129,12 +212,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", choices=("fleet-10", "fleet-50"))
     parser.add_argument("--authorize", action="store_true", help="confirm this named local campaign once")
     parser.add_argument("--node-red-cli")
+    parser.add_argument("--node-red-url", default="http://127.0.0.1:1880")
+    parser.add_argument("--simulator-url", default="http://127.0.0.1:5000")
+    parser.add_argument("--flow", type=Path)
+    parser.add_argument("--capture", type=Path)
+    parser.add_argument("--hashes", type=Path)
     args = parser.parse_args(argv)
     try:
         contract = load_campaign_contract(args.contract)
         runtime = NodeRedRuntime(cli=args.node_red_cli)
-        report = run_campaign(contract, profile_id=args.profile, authorized=args.authorize, runtime=runtime)
-    except (OSError, json.JSONDecodeError, CampaignError) as exc:
+        flow = json.loads(args.flow.read_text(encoding="utf-8")) if args.flow else None
+        hashes = json.loads(args.hashes.read_text(encoding="utf-8")) if args.hashes else None
+        report = run_campaign(
+            contract,
+            profile_id=args.profile,
+            authorized=args.authorize,
+            runtime=runtime,
+            flow=flow,
+            hashes=hashes,
+            admin=NodeRedAdminClient(args.node_red_url) if args.flow and args.capture else None,
+            simulator=SimulatorClient(args.simulator_url) if args.flow and args.capture else None,
+            capture_path=args.capture,
+        )
+    except (OSError, json.JSONDecodeError, CampaignError, SimulatorError) as exc:
         report = {"schema_version": "node-red-live-report/v1", "status": "failed", "terminal_state": "failed", "issue_codes": [str(exc)]}
     print(json.dumps(report, sort_keys=True))
     return 0 if report.get("status") in {"passed", "blocked", "not-run"} else 1

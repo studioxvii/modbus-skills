@@ -19,9 +19,11 @@ Node.js 25.8.0, and `node-red-contrib-modbus` 5.60.1 against the clean
 - A stopped-simulator request surfaced Modbus failures; after restart and
   readiness, the next bounded Node-RED read recovered successfully.
 
-The live flow was imported disabled, reviewed, then enabled with a temporary
-debug capture sink for observation. This is native communication evidence, not a
-claim that Modpoll/ModScan or a long-duration soak was run.
+The original live flow was imported disabled, reviewed, then enabled with temporary
+test instrumentation. The exporter now includes a bounded `capture/v1` output and
+the campaign runner can operate the single start button through the local Node-RED
+API. That new automated path has deterministic tests but has not replaced the
+recorded manual native evidence above.
 
 ## Passed
 

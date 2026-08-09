@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
 from scripts.run_node_red_live_campaign import load_campaign_contract, run_campaign
+from node_red_live.node_red import NodeRedRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +56,64 @@ class NodeRedLiveAgentAcceptanceTests(unittest.TestCase):
         contract = load_campaign_contract(CONTRACT)
         self.assertEqual({10, 50}, {profile["fleet_size"] for profile in contract["profiles"]})
         self.assertEqual({"fleet-10", "fleet-50"}, {profile["id"] for profile in contract["profiles"]})
+
+    def test_ready_native_driver_runs_flow_and_checks_simulator_oracle(self) -> None:
+        contract = load_campaign_contract(CONTRACT)
+        capture = {
+            "schema_version": "capture/v1",
+            "expected_request_ids": ["run:block-1"],
+            "samples": [
+                {
+                    "sample_id": "run:block-1:p1",
+                    "request_id": "run:block-1",
+                    "block_id": "block-1",
+                    "point_id": "p1",
+                    "unit_id": 1,
+                    "protocol_offset": 0,
+                    "raw_words": [123],
+                    "success": True,
+                    "timestamp": "2026-08-09T12:00:00Z",
+                }
+            ],
+        }
+
+        class Admin:
+            restored = False
+
+            def run_flow(self, flow, *, capture_path, environment, timeout_seconds):
+                self.restored = True
+                return capture
+
+        class Simulator:
+            def require_ready(self, expected_fleet):
+                return type("Ready", (), {"modbus_port": 5020, "fleet_size": expected_fleet})()
+
+            def registers(self, unit_id):
+                return {"registers": {"0": 123}}
+
+        hashes = {name: "a" * 64 for name in contract["hash_bindings"]}
+        flow = [
+            {"id": "tab", "type": "tab", "disabled": True},
+            {"id": "inject", "type": "inject", "repeat": "", "crontab": "", "once": False},
+            {"id": "read", "type": "modbus-flex-getter", "fc": 3, "tcpHost": "${MODBUS_HOST}"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            report = run_campaign(
+                contract,
+                profile_id="fleet-10",
+                authorized=True,
+                runtime=NodeRedRuntime(which=lambda _: "/tmp/node-red"),
+                flow=flow,
+                hashes=hashes,
+                admin=Admin(),
+                simulator=Simulator(),
+                capture_path=Path(directory) / "capture.json",
+            )
+        _assert_report_shape(self, report)
+        self.assertEqual("passed", report["status"])
+        self.assertEqual(1, report["request_count"])
+        self.assertEqual(0, report["error_count"])
+        self.assertTrue(report["cleanup"]["flow_removed"])
 
 
 if __name__ == "__main__":
