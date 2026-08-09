@@ -28,6 +28,11 @@ offline map look complete.
   Its identity excludes route, unit, endpoint, and transport data. Exact
   duplicate IDs are rejected as duplicates; reuse of an ID for different
   content is rejected as a collision.
+  PDF rows use page/table/row geometry for source identity, so two OEM tables may
+  safely reuse the same register address. Its `source_coverage` records detected
+  pages and regions, accepted/rejected/quarantined counts, whether discovery
+  completed, and the evidence basis. Artifact validity alone never implies complete
+  source coverage.
 - `modbus-user-selection/v1` contains the requested measurements and one
   reasoned disposition per referenced OEM point: `included`, `suggested`, or
   `excluded`. Its `input_hashes.oem_map` must match the exact OEM map.
@@ -41,6 +46,10 @@ offline map look complete.
 - `modbus-compile-case/v1` is local control data, not a portable deliverable. It
   records the immutable source and request hashes, compiler version, state,
   receipts, active packet, next action, and a case-relative artifact index.
+
+`offline-complete` requires complete source coverage when a coverage contract is
+present and no blocking hold on a selected point. The three user deliverables live in
+`output/`; control, provenance, and target files remain outside that folder.
 
 The legacy bound identity remains:
 

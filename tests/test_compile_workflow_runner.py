@@ -60,6 +60,8 @@ class CompileWorkflowRunnerTests(unittest.TestCase):
             fallback = cases["fallback-extraction"]
             self.assertEqual(fallback["invocation_count"], 1)
             self.assertEqual(fallback["question_count"], 0)
+            self.assertEqual(fallback["decision_packet_count"], 0)
+            self.assertEqual(fallback["state_transitions"], ["offline-complete"])
             self.assertEqual(fallback["strategy"], "coordinate-fallback")
             self.assertEqual(fallback["source_point_count"], 1)
 

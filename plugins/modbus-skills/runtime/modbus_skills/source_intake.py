@@ -34,6 +34,7 @@ _OEM_POINT_FIELDS = (
     "datatype",
     "word_span",
     "byte_order",
+    "byte_order_confirmed",
     "scale",
     "engineering_offset",
     "engineering_unit",
@@ -127,6 +128,11 @@ def compile_source_descriptor(
             points,
             source_hash=source_hash,
             source_reference={"filename": path.name, "format": source_format},
+            source_coverage=(
+                parsed.get("source_coverage", {})
+                if isinstance(parsed, Mapping)
+                else {}
+            ),
             assumptions=canonical.get("assumptions", ()),
             findings=canonical.get("source_findings", ()),
             holds=holds,

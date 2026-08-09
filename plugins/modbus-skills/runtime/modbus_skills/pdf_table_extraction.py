@@ -47,11 +47,15 @@ _GRID_TIMEOUT_SECONDS = 60
 
 
 def extract_pdf_table_rows(
-    path: Path, *, pages: Sequence[int] | None = None
+    path: Path, *, pages: Sequence[int] | None = None, timeout_seconds: int = _GRID_TIMEOUT_SECONDS
 ) -> list[dict[str, Any]]:
     """Extract register rows in a killable, output-bounded worker process."""
 
     selected = sorted(set(pages)) if pages is not None else None
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= _GRID_TIMEOUT_SECONDS:
+        raise PdfTableExtractionError(
+            f"grid extraction timeout must be from 1 through {_GRID_TIMEOUT_SECONDS} seconds"
+        )
     if selected is not None:
         if any(isinstance(page, bool) or not isinstance(page, int) or page < 1 for page in selected):
             raise PdfTableExtractionError("grid extraction pages must be positive integers")
@@ -66,12 +70,12 @@ def extract_pdf_table_rows(
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
             process = subprocess.Popen(argv, stdout=stdout, stderr=stderr, shell=False)
             try:
-                returncode = process.wait(timeout=_GRID_TIMEOUT_SECONDS)
+                returncode = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired as exc:
                 process.kill()
                 process.wait()
                 raise PdfTableExtractionError(
-                    f"grid extraction exceeded the {_GRID_TIMEOUT_SECONDS} second limit"
+                    f"grid extraction exceeded the {timeout_seconds} second limit"
                 ) from exc
             stdout.seek(0, 2)
             if stdout.tell() > _MAX_GRID_OUTPUT_BYTES:
@@ -199,9 +203,6 @@ def parse_pdf_table(
             "source_register": address_text,
             "address": first_address,
             "word_count": 2 if second_address is not None else 1,
-            "logical_point_id": f"source-{first_address}" + (
-                f"-{second_address}" if second_address is not None else ""
-            ),
             "footnote_marker": bool(address_match.group(3)),
             **{field: value for field, value in values.items() if value},
             "name": description,
@@ -257,13 +258,14 @@ def prepare_pdf_records(parsed: Mapping[str, Any]) -> dict[str, Any]:
                     "word_count": 2,
                     "address": first,
                     "datatype": "uint32",
+                    "byte_order": "ABCD",
+                    "byte_order_confirmed": True,
                     "name": _PAIR_SUFFIX.sub(
                         "", str(current.get("name", ""))
                     ).strip(),
                     "description": _PAIR_SUFFIX.sub(
                         "", str(current.get("description", ""))
                     ).strip(),
-                    "logical_point_id": f"source-{first}-{first + 1}",
                 }
             )
             source = dict(merged.get("_source", {}))
@@ -276,6 +278,7 @@ def prepare_pdf_records(parsed: Mapping[str, Any]) -> dict[str, Any]:
                 ]
                 source["region"] = "+".join(regions)
             merged["_source"] = source
+            merged["logical_point_id"] = _source_point_id(merged)
             logical.append(merged)
             index += 2
             continue
@@ -287,6 +290,7 @@ def prepare_pdf_records(parsed: Mapping[str, Any]) -> dict[str, Any]:
 
 def _prepare_pdf_record(raw: Mapping[str, Any]) -> dict[str, Any]:
     record = dict(raw)
+    record["logical_point_id"] = _source_point_id(record)
     description = str(record.get("description") or "").strip()
     record.setdefault("name", description or None)
     source_format = str(record.get("format") or "").strip()
@@ -303,6 +307,17 @@ def _prepare_pdf_record(raw: Mapping[str, Any]) -> dict[str, Any]:
             record["source_scale"] = scale
             record.pop("scale", None)
     return record
+
+
+def _source_point_id(record: Mapping[str, Any]) -> str:
+    source = record.get("_source", {})
+    region = source.get("region") if isinstance(source, Mapping) else None
+    if isinstance(region, str) and region:
+        suffix = re.sub(r"[^A-Za-z0-9._-]+", "-", region).strip("-")
+        if suffix:
+            return f"source-{suffix}"
+    address = _source_register_number(record.get("source_register"))
+    return f"source-{address}" if address is not None else "source-row"
 
 
 def _explicit_word_pair(first: Mapping[str, Any], second: Mapping[str, Any]) -> bool:

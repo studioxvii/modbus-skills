@@ -318,6 +318,40 @@ def _advance(
         )
 
     _store_bundle(root, index, bundle)
+    blocking_user_holds = _blocking_holds(bundle["user_map"])
+    source_coverage = oem_map.get("source_coverage", {})
+    coverage_incomplete = bool(source_coverage) and (
+        source_coverage.get("status") != "complete"
+        or source_coverage.get("discovery_complete") is not True
+    )
+    if blocking_user_holds or coverage_incomplete:
+        return _commit(
+            root,
+            request,
+            case_id=case_id,
+            state="partial",
+            index=index,
+            receipts=completed_receipts,
+            target_statuses=[
+                {"target": target, "status": "held"}
+                for target in request["targets"]
+            ],
+            next_action={
+                "kind": "provide-corrected-source",
+                "accepted_schema": COMPILE_REQUEST_SCHEMA_VERSION,
+                "starts_new_case": True,
+                "reason": "selected points still have grouped blocking source exceptions; keep the useful output and start a corrected hash-bound case",
+                "affected_count": max(
+                    1,
+                    sum(
+                        int(hold.get("affected_count", 1))
+                        for hold in blocking_user_holds
+                    ),
+                ),
+            },
+            started=started,
+            timer=timer,
+        )
     targets = request["targets"]
     if not targets:
         return _commit(
@@ -597,13 +631,7 @@ def _requires_source_correction(
     ]
     if source_format != "pdf":
         return bool(holds)
-    if not oem_map.get("points"):
-        return True
-    return any(
-        str(hold.get("code", "")).startswith("pdf-")
-        or str(hold.get("code", "")).startswith("source.rejected-")
-        for hold in holds
-    )
+    return not bool(oem_map.get("points"))
 
 
 def _request_identity(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -700,12 +728,12 @@ def _commit(
 def _store_bundle(
     root: Path, index: dict[str, dict[str, str]], bundle: Mapping[str, Any]
 ) -> None:
-    _store_json(root, index, "user_map", "artifacts/user-map.json", bundle["user_map"])
+    _store_json(root, index, "user_map", "output/user-map.json", bundle["user_map"])
     _store_bytes(
         root,
         index,
         "user_map_csv",
-        "artifacts/user-map.csv",
+        "output/user-map.csv",
         str(bundle["csv"]).encode("utf-8"),
         schema_version="text/csv",
     )
@@ -713,7 +741,7 @@ def _store_bundle(
         root,
         index,
         "user_map_human",
-        "artifacts/user-map.md",
+        "output/user-map.md",
         str(bundle["human_summary"]).encode("utf-8"),
         schema_version="text/markdown",
     )

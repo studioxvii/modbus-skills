@@ -70,13 +70,17 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual(1, len(result["records"]))
         parser_ids = {claim["parser_id"] for claim in result["records"][0]["_claims"]}
         self.assertEqual({"pdftotext-layout/v1", "pdftotext-bbox-layout/v1"}, parser_ids)
+        self.assertEqual("complete", result["source_coverage"]["status"])
+        self.assertEqual(1, result["source_coverage"]["accepted_row_count"])
+        self.assertEqual(1, result["source_coverage"]["independent_parser_row_count"])
 
-    def test_merged_cell_layout_falls_back_to_coordinate_rows_without_hold(self) -> None:
+    def test_coordinate_only_rows_complete_after_bounded_discovery(self) -> None:
         layout = b"Address Name Data Type\n40001 Tank Level float32\n"
         result, _ = self.extract([VERSION, HELP, completed(layout), completed(bbox(("40001", "Tank Level", "float32")))])
 
         self.assertEqual("candidate", result["status"])
-        self.assertEqual([], result["holds"])
+        self.assertEqual("complete", result["source_coverage"]["status"])
+        self.assertEqual(1, result["source_coverage"]["single_parser_row_count"])
         self.assertEqual("pdftotext-bbox-layout/v1", result["records"][0]["_source"]["parser_id"])
         self.assertIn("pdf-strict-parser-no-rows", {item["code"] for item in result["findings"]})
 
@@ -105,6 +109,7 @@ class PdfExtractionTests(unittest.TestCase):
         )
 
         self.assertEqual("candidate", result["status"])
+        self.assertEqual("complete", result["source_coverage"]["status"])
         self.assertEqual([], result["holds"])
         self.assertEqual([grid_row], result["records"])
         self.assertIn("pdf-grid-recovery-used", {item["code"] for item in result["findings"]})
@@ -167,6 +172,7 @@ class PdfExtractionTests(unittest.TestCase):
         )
 
         self.assertEqual("candidate", result["status"])
+        self.assertEqual("complete", result["source_coverage"]["status"])
         self.assertEqual({"Status", "Alarm"}, {row["name"] for row in result["records"]})
         self.assertIn("pdf-grid-recovery-used", {item["code"] for item in result["findings"]})
 
@@ -184,6 +190,35 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual(1, len(result["records"]))
         self.assertEqual("Tank Temp", result["records"][0]["name"])
         self.assertEqual(1, len(result["quarantined_records"]))
+
+    def test_repeated_descriptions_at_distinct_addresses_are_not_dropped(self) -> None:
+        layout = (
+            b"Address  Name  Data Type\n"
+            b"40001  Reserved  uint16\n"
+            b"40002  Reserved  uint16\n"
+        )
+        coordinates = bbox(
+            ("40001", "Reserved", "uint16"),
+            ("40002", "Reserved", "uint16"),
+        )
+
+        result, _ = self.extract([VERSION, HELP, completed(layout), completed(coordinates)])
+
+        self.assertEqual(2, len(result["records"]))
+        self.assertEqual(
+            {"40001", "40002"},
+            {record["address"] for record in result["records"]},
+        )
+
+    def test_unique_address_with_name_drift_is_quarantined_not_duplicated(self) -> None:
+        layout = b"Address  Name  Data Type\n40001  Tank Level  float32\n"
+        coordinates = bbox(("40001", "Level", "float32"))
+
+        result, _ = self.extract([VERSION, HELP, completed(layout), completed(coordinates)])
+
+        self.assertEqual([], result["records"])
+        self.assertEqual(1, len(result["quarantined_records"]))
+        self.assertEqual("pdf-material-claim-conflict", result["holds"][0]["code"])
 
     def test_discovers_register_pages_before_coordinate_fallback(self) -> None:
         layout = b"Introduction only\fAddress Name Data Type\n40001 Tank Level float32\n"
@@ -229,6 +264,47 @@ class PdfExtractionTests(unittest.TestCase):
         with mock.patch("modbus_skills.pdf_extraction._MAX_TOOL_OUTPUT_BYTES", 8):
             with self.assertRaisesRegex(PdfExtractionError, "output exceeds 8 bytes"):
                 _call([sys.executable, "-c", "print('0123456789')"], timeout=5)
+
+    def test_oversized_manual_uses_bounded_chunk_discovery(self) -> None:
+        first_chunk = "\f".join(["Introduction"] * 256).encode()
+        second_pages = ["Introduction"] * 43 + [
+            "Address  Name  Data Type\n40001  Tank Level  float32\n"
+        ]
+        overflow = PdfExtractionError("pdftotext output exceeds 32000000 bytes")
+        result, run_mock = self.extract(
+            [
+                VERSION,
+                HELP,
+                overflow,
+                completed(first_chunk),
+                completed("\f".join(second_pages).encode()),
+                completed(bbox(("40001", "Tank Level", "float32"))),
+            ]
+        )
+
+        self.assertEqual("candidate", result["status"])
+        self.assertEqual("complete", result["source_coverage"]["status"])
+        self.assertEqual([300], result["discovered_register_pages"])
+        chunk_argv = run_mock.call_args_list[3].args[0]
+        self.assertEqual("1", chunk_argv[chunk_argv.index("-f") + 1])
+        self.assertEqual("256", chunk_argv[chunk_argv.index("-l") + 1])
+
+    def test_chunk_discovery_failure_never_reports_complete(self) -> None:
+        first_chunk = "\f".join(["Introduction"] * 256).encode()
+        result, _ = self.extract(
+            [
+                VERSION,
+                HELP,
+                PdfExtractionError("pdftotext output exceeds 32000000 bytes"),
+                completed(first_chunk),
+                subprocess.TimeoutExpired(["pdftotext"], timeout=30),
+            ]
+        )
+
+        self.assertEqual("held", result["status"])
+        self.assertEqual("unknown", result["source_coverage"]["status"])
+        self.assertFalse(result["source_coverage"]["discovery_complete"])
+        self.assertIn("pdf-chunk-scan-limit", {hold["code"] for hold in result["holds"]})
 
 
 if __name__ == "__main__":

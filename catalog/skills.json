@@ -100,7 +100,7 @@
     {
       "id": "extract-pdf-map",
       "display_name": "Extract PDF Map",
-      "description": "Extract traceable Modbus register candidates and page evidence from a bounded PDF manual or page range.",
+      "description": "Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.",
       "short_description": "Extract traceable rows from a PDF",
       "default_prompt": "Use $extract-pdf-map to extract register rows from these PDF pages.",
       "path": "plugins/modbus-skills/skills/extract-pdf-map"

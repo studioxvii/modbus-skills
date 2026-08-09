@@ -7,6 +7,8 @@
 - Keep page selection separate from row confidence.
 - Do not give unlabeled fields a passing accuracy score.
 - Do not calculate precision from a partial truth set.
+- Give every row a source identity based on page, table, and row geometry. Register
+  address alone is not a source identity because separate tables may reuse it.
 - Never merge separately addressed rows because their names look similar.
 - When residual source risk remains, require one scoped confirmation for the bounded
   exception group after automated checks. Clean strict extraction and coordinate-derived
@@ -20,7 +22,8 @@
 2. Use an argument array, a 60-second timeout, a bounded page span, and bounded
    captured output. Treat filenames as data, never shell text.
 3. Discover likely register pages from headers and register/address signals before
-   requesting a page selection.
+   requesting a page selection. If one-pass output exceeds its bound, scan sequential
+   256-page chunks for at most 4,096 pages or 180 seconds.
 4. Parse strict `-layout` rows, then independently parse `-bbox-layout` coordinates.
 5. When both text interpretations produce no viable rows, automatically recover drawn
    table grids with `pdfplumber`. This is the same shared fallback used by
@@ -30,9 +33,12 @@
 7. Auto-resolve formatting-only agreement. Quarantine only conflicts affecting row
    identity, address, area, width, datatype, or access; keep unaffected rows usable.
 
-The artifact records the extractor receipt, discovered pages, accepted rows,
-quarantined rows, and localized conflicts. A successful automated extraction has no
-blanket human-review hold.
+The artifact records the extractor receipt, discovered pages and table regions,
+accepted rows, rejected or quarantined rows, and a `source_coverage` summary. Coverage
+is complete when bounded discovery finishes with no rejected or quarantined rows.
+Independent-parser agreement is reported as evidence, not turned into a mandatory
+approval. Incomplete discovery or actual exceptions produce one grouped source hold;
+the skill never asks for page-by-page approval.
 
 ## Bounded text extraction
 

@@ -115,8 +115,10 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(result["state"], "offline-complete")
         self.assertEqual(result["next_action"]["kind"], "none")
         self.assertEqual(result["target_statuses"], [])
-        for path in ("user-map.md", "user-map.json", "user-map.csv"):
-            self.assertTrue((case_root / "artifacts" / path).is_file())
+        self.assertEqual(
+            {"user-map.md", "user-map.json", "user-map.csv"},
+            {path.name for path in (case_root / "output").iterdir()},
+        )
         self.assertTrue((case_root / "compile-result.json").is_file())
         self.assertTrue((case_root / "case.json").is_file())
         self.assertEqual(result, compile_user_map(copy.deepcopy(request()), case_root))
@@ -124,6 +126,52 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(
             stat.S_IMODE((case_root / "case.json").stat().st_mode), 0o600
         )
+
+    def test_selected_blocking_hold_cannot_report_offline_complete(self) -> None:
+        held_map = build_oem_map(
+            oem_map()["points"],
+            source_hash="a" * 64,
+            holds=[{
+                "code": "point.datatype-unresolved",
+                "severity": "hold",
+                "blocking": True,
+                "point_ids": ["temperature"],
+                "message": "Declare the datatype.",
+            }],
+        )
+        compile_request = request()
+        compile_request["oem_map"] = held_map
+        compile_request["selection_candidate"]["oem_map_hash"] = stable_input_hash(held_map)
+
+        result = compile_user_map(compile_request, self.root / "held-oem-case")
+
+        self.assertEqual("partial", result["state"])
+        self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
+        self.assertTrue((self.root / "held-oem-case" / "output" / "user-map.md").is_file())
+
+    def test_unknown_declared_source_coverage_cannot_report_complete(self) -> None:
+        source = build_oem_map(
+            oem_map()["points"],
+            source_hash="a" * 64,
+            source_coverage={
+                "status": "unknown",
+                "accepted_row_count": 1,
+                "rejected_row_count": 0,
+                "quarantined_row_count": 0,
+                "detected_pages": [2],
+                "detected_regions": ["row-4"],
+                "basis": "single-or-conflicting-parser-evidence",
+                "discovery_complete": True,
+            },
+        )
+        compile_request = request()
+        compile_request["oem_map"] = source
+        compile_request["selection_candidate"]["oem_map_hash"] = stable_input_hash(source)
+
+        result = compile_user_map(compile_request, self.root / "coverage-case")
+
+        self.assertEqual("partial", result["state"])
+        self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
 
     def test_clean_structured_source_reaches_offline_bundle_in_one_call(self) -> None:
         source = self.root / "clean.csv"
@@ -158,9 +206,7 @@ class CompilerTests(unittest.TestCase):
 
         self.assertEqual("offline-complete", result["state"])
         self.assertEqual("none", result["next_action"]["kind"])
-        user_map = json.loads(
-            (self.root / "source-case" / "artifacts" / "user-map.json").read_text()
-        )
+        user_map = json.loads((self.root / "source-case" / "output" / "user-map.json").read_text())
         self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
 
     def test_complete_map_intent_selects_every_readable_source_point(self) -> None:
@@ -188,7 +234,7 @@ class CompilerTests(unittest.TestCase):
 
         self.assertEqual("offline-complete", result["state"])
         user_map = json.loads(
-            (self.root / "complete-map-case" / "artifacts" / "user-map.json").read_text()
+            (self.root / "complete-map-case" / "output" / "user-map.json").read_text()
         )
         self.assertEqual(
             ["temperature", "power"],
@@ -366,13 +412,76 @@ class CompilerTests(unittest.TestCase):
         ):
             result = compile_user_map(compile_request, self.root / "grid-pdf-case")
 
-        self.assertEqual("offline-complete", result["state"])
-        self.assertEqual("none", result["next_action"]["kind"])
+        self.assertEqual("partial", result["state"])
+        self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
         user_map = json.loads(
-            (self.root / "grid-pdf-case" / "artifacts" / "user-map.json").read_text()
+            (self.root / "grid-pdf-case" / "output" / "user-map.json").read_text()
         )
         self.assertEqual(1, len(user_map["points"]))
         self.assertEqual("257/258", user_map["points"][0]["source_register"])
+
+    def test_same_pdf_address_in_two_tables_becomes_two_source_rows(self) -> None:
+        source = self.root / "duplicate-address.pdf"
+        source.write_bytes(b"%PDF synthetic")
+        effects = [
+            subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n"),
+            subprocess.CompletedProcess([], 0, b"", b"-f -l -layout -bbox-layout -enc\n"),
+            subprocess.CompletedProcess([], 0, b"Modbus register map 001\n", b""),
+            subprocess.CompletedProcess([], 0, b"<doc><page/></doc>", b""),
+        ]
+        grid_rows = [
+            {
+                "source_register": "001",
+                "address": 1,
+                "word_count": 1,
+                "access": "R",
+                "format": "UInt",
+                "name": name,
+                "description": name,
+                "_source": {
+                    "format": "pdf",
+                    "page": 1,
+                    "row": 2,
+                    "region": region,
+                    "parser_id": "pdfplumber-table/v1",
+                    "method": "coordinate-derived",
+                    "excerpt": f"001 | R | {name}",
+                },
+            }
+            for name, region in (("Status A", "p1:t0:r2"), ("Status B", "p1:t1:r2"))
+        ]
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "pdf"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+        with mock.patch(
+            "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
+        ), mock.patch(
+            "modbus_skills.pdf_extraction._call", side_effect=effects
+        ), mock.patch(
+            "modbus_skills.pdf_extraction.extract_pdf_table_rows", return_value=grid_rows
+        ):
+            result = compile_user_map(compile_request, self.root / "duplicate-case")
+
+        self.assertEqual("partial", result["state"])
+        self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
+        self.assertTrue(
+            (self.root / "duplicate-case" / "output" / "user-map.json").is_file()
+        )
+        oem_artifact = json.loads(
+            (self.root / "duplicate-case" / "artifacts" / "oem-map.json").read_text()
+        )
+        self.assertEqual(2, len(oem_artifact["points"]))
+        self.assertEqual(
+            2, len({point["oem_point_id"] for point in oem_artifact["points"]})
+        )
 
     def test_source_normalization_exceptions_form_one_grouped_packet(self) -> None:
         source = self.root / "missing-datatype.csv"
@@ -410,7 +519,7 @@ class CompilerTests(unittest.TestCase):
         )
         self.assertEqual("source", packet["phase"])
         self.assertEqual(1, len(packet["decisions"]))
-        self.assertFalse((self.root / "held-source-case" / "artifacts" / "user-map.json").exists())
+        self.assertFalse((self.root / "held-source-case" / "output" / "user-map.json").exists())
 
     def test_target_waits_for_one_binding_resume_without_losing_offline_map(self) -> None:
         case_root = self.root / "case"
@@ -418,7 +527,7 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(initial["state"], "awaiting-binding")
         self.assertEqual(initial["next_action"]["kind"], "provide-binding")
         self.assertEqual(initial["target_statuses"][0]["status"], "held")
-        self.assertTrue((case_root / "artifacts" / "user-map.json").is_file())
+        self.assertTrue((case_root / "output" / "user-map.json").is_file())
 
         case = json.loads((case_root / "case.json").read_text(encoding="utf-8"))
         source = request(targets=["node-red"])["oem_map"]

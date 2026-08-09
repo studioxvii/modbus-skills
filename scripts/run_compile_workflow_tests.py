@@ -130,10 +130,10 @@ def _request(
 
 
 def _selected_counts(case_root: Path) -> dict[str, int]:
-    user_map = json.loads((case_root / "artifacts/user-map.json").read_text(encoding="utf-8"))
-    with (case_root / "artifacts/user-map.csv").open(encoding="utf-8", newline="") as stream:
+    user_map = json.loads((case_root / "output/user-map.json").read_text(encoding="utf-8"))
+    with (case_root / "output/user-map.csv").open(encoding="utf-8", newline="") as stream:
         csv_count = len(list(csv.DictReader(stream)))
-    human = (case_root / "artifacts/user-map.md").read_text(encoding="utf-8")
+    human = (case_root / "output/user-map.md").read_text(encoding="utf-8")
     return {
         "csv": csv_count,
         "human": len(re.findall(r"^- `", human, flags=re.MULTILINE)),
@@ -325,7 +325,7 @@ def _binding_case(output: Path) -> dict[str, Any]:
     root = output / "binding-readable-island"
     first = compile_user_map(request, root)
     before = {
-        name: fixture_sha256(root / "artifacts" / name)
+        name: fixture_sha256(root / "output" / name)
         for name in ("user-map.md", "user-map.json", "user-map.csv")
     }
     case = json.loads((root / "case.json").read_text(encoding="utf-8"))
@@ -358,7 +358,7 @@ def _binding_case(output: Path) -> dict[str, Any]:
     }
     second = compile_user_map(None, root, resume=reply)
     after = {
-        name: fixture_sha256(root / "artifacts" / name)
+        name: fixture_sha256(root / "output" / name)
         for name in ("user-map.md", "user-map.json", "user-map.csv")
     }
     plan = json.loads((root / "artifacts/read-plan.json").read_text(encoding="utf-8"))
