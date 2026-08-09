@@ -17,6 +17,10 @@ Follow `../../references/interaction-contract.md`.
 4. Separate communication findings from signal findings.
 5. Report the sample window, thresholds, skipped checks, and missing metadata.
 
+## Output files
+
+- `analysis.json` - Open this result. It summarizes communication, timing, signal, and raw-word findings for the supplied sample window.
+
 Completion requires a schema-valid analysis that makes every enabled check visible.
 
 ## Handoff

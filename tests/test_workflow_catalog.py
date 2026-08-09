@@ -34,6 +34,33 @@ class WorkflowCatalogTests(unittest.TestCase):
         self.assertIn("$compile-user-map", router)
         self.assertIn("explicitly requested stage", router)
 
+    def test_shared_completion_contract_recommends_one_actionable_next_step(self) -> None:
+        contract = (
+            ROOT / "plugins" / "modbus-skills" / "references" / "interaction-contract.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("## Completion and next step", contract)
+        self.assertIn("choose exactly one `Recommended next:` skill", contract)
+        self.assertIn("Show at most two `Other options:`", contract)
+        self.assertIn("Reply `proceed` to continue.", contract)
+        self.assertIn("next_action: none", contract)
+
+        skill_root = ROOT / "plugins" / "modbus-skills" / "skills"
+        for skill_dir in skill_root.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            with self.subTest(skill=skill_dir.name):
+                skill = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+                self.assertIn("../../references/interaction-contract.md", skill)
+
+    def test_compiler_finishes_with_outcome_aware_guidance(self) -> None:
+        skill = (
+            ROOT / "plugins" / "modbus-skills" / "skills" / "compile-user-map" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("## Finish", skill)
+        self.assertIn("user-map holds and target statuses", skill)
+        self.assertIn("never treat `next_action: none` alone as proof of completion", skill)
+        self.assertIn("recommend continuing", skill)
+
     def test_skill_handoffs_reference_existing_skills(self) -> None:
         skill_root = ROOT / "plugins" / "modbus-skills" / "skills"
         skill_ids = {path.name for path in skill_root.iterdir() if path.is_dir()}

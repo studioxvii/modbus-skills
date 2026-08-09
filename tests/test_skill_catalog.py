@@ -21,6 +21,15 @@ class SkillCatalogTests(unittest.TestCase):
         result = subprocess.run([sys.executable, "scripts/validate_skills.py"], cwd=ROOT, check=False)
         self.assertEqual(0, result.returncode)
 
+    def test_every_skill_explains_its_output_files(self) -> None:
+        skills_root = ROOT / "plugins" / "modbus-skills" / "skills"
+        missing = [
+            path.parent.name
+            for path in sorted(skills_root.glob("*/SKILL.md"))
+            if "\n## Output files\n" not in path.read_text(encoding="utf-8")
+        ]
+        self.assertEqual([], missing)
+
 
 if __name__ == "__main__":
     unittest.main()

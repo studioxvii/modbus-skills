@@ -19,6 +19,14 @@ Follow `../../references/interaction-contract.md`.
 6. Report each target as `generated`, `held`, `unsupported`, or `verification-failed`.
 7. Verify each generated target independently.
 
+## Output files
+
+- `README.md` - Start here. It lists the selected tools and how to use their folders.
+- The `node-red/`, `modpoll/`, and/or `modscan/` folders - The files to import or enter in the selected tools.
+- `tool-pack.zip` - The same portable files in one archive for sharing.
+- `canonical-map.json` and `read-plan.json` - Included so the pack remains understandable on its own.
+- `manifest.json`, `checksums.sha256`, and `tool-pack-result.json` - Normally ignore these. They prove the pack is complete, unchanged, and tied to the correct inputs.
+
 Completion requires a checksummed pack that contains every selected target and no unselected target.
 
 ## Handoff

@@ -17,6 +17,10 @@ Follow `../../references/interaction-contract.md`.
    plus the complete affected-ID list in the artifact.
 4. Hold final generation automatically while an error or hold remains.
 
+## Output files
+
+- `validation.json` - Open this report. It lists passed checks and groups problems by root cause. It does not create or modify a map.
+
 Completion requires every check to have a visible pass, finding, or skipped reason.
 
 ## Handoff

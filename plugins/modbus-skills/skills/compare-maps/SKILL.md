@@ -17,6 +17,10 @@ Follow `../../references/interaction-contract.md`.
 4. Treat route, unit, area, or protocol-offset changes as moves when logical identity remains stable.
 5. Highlight address, datatype, width, access, scale, byte-order, enum, and evidence changes.
 
+## Output files
+
+- `diff.json` - Open this comparison. It lists added, removed, moved, changed, and unresolved points without changing either input map.
+
 Completion requires every point from both inputs to have a disposition.
 
 ## Handoff

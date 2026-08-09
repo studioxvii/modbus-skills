@@ -21,6 +21,10 @@ Follow `../../references/interaction-contract.md`.
    one remains, present the proof and one scoped confirmation; otherwise ask once with
    the complete shortlist and distinguishing evidence needed.
 
+## Output files
+
+- `evidence.json` - Open this candidate table. It shows every supported word and byte layout for the same raw sample. It records evidence only; it does not change the map.
+
 Completion requires every candidate to share one `sample_id`; the evidence selects no winner.
 
 ## Handoff

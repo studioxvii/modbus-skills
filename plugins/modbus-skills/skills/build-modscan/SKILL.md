@@ -19,6 +19,14 @@ Follow `../../references/interaction-contract.md`.
 5. Inspect the setup manifest and generated CSV files.
 6. Load them through the named licensed application before marking native verification complete.
 
+## Output files
+
+- `modscan/read-plan.csv` - The bounded read blocks to enter in ModScan.
+- `modscan/point-map.csv` - The names and meanings of the returned registers.
+- `modscan/test-message-plan.csv` - Optional protocol test messages for verification.
+- `modscan/README.md` - Start here for setup instructions.
+- The JSON manifest and result files - Normally ignore these. They prove which map and plan produced the CSV files and record any holds.
+
 Completion requires a generated or held status with visible native-verification state.
 
 ## Handoff
