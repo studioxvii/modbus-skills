@@ -35,7 +35,7 @@ Completion requires a generated or held status with visible native-verification 
 
 ## Handoff
 
-- No read plan exists: suggest `$plan-reads`.
-- The user needs several target formats: suggest `$build-tool-pack`.
+- No read plan exists: suggest `plan-reads`.
+- The user needs several target formats: suggest `build-tool-pack`.
 
 Preserve documented ModScan files. Never claim native verification when it was not run.

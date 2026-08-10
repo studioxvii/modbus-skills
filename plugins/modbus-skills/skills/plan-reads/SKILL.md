@@ -31,5 +31,5 @@ needed. Replan automatically after every map change.
 
 ## Handoff
 
-- One target: suggest `$build-node-red`, `$build-modpoll`, or `$build-modscan` based on the named tool.
-- Several targets: suggest `$build-tool-pack`.
+- One target: suggest `build-node-red`, `build-modpoll`, or `build-modscan` based on the named tool.
+- Several targets: suggest `build-tool-pack`.

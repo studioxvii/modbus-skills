@@ -1,5 +1,8 @@
 # Modbus Skills
 
+Read-only Modbus engineering workflows for Codex, Claude Code, Cursor, and other
+clients that implement the Agent Plugins 1.0 standard.
+
 Turn vendor Modbus documentation into clear, usable engineering files.
 
 Modbus Skills helps controls, commissioning, and integration engineers turn a
@@ -50,6 +53,30 @@ codex plugin add modbus-skills@modbus-skills
 
 Private repository access is required while the project is pre-release.
 
+### Build for another client
+
+Build all four distributions from the canonical source:
+
+```bash
+python3 scripts/build_plugin_variants.py
+python3 scripts/validate_plugin_variants.py --output dist/plugins
+```
+
+Use the generated directory that matches the client:
+
+| Client | Package | Discovery metadata |
+| --- | --- | --- |
+| Cursor | `dist/plugins/cursor` | `.cursor-plugin/plugin.json` |
+| Other Agent Plugins 1.0 clients | `dist/plugins/agent-plugin` | root `plugin.json` |
+| OpenAI Codex | `dist/plugins/codex` | `.codex-plugin/plugin.json` |
+| Claude Code | `dist/plugins/claude` | `.claude-plugin/plugin.json` |
+
+The repository includes native Codex and Cursor marketplace descriptors. Codex
+can install the canonical source directly during development. Claude skills are
+manually invoked with `/modbus-skills:<skill-name>`, for example
+`/modbus-skills:check-map`; Cursor and other portable Agent Plugins clients use
+their native invocation policy.
+
 ### Try a workflow
 
 If you have a vendor manual, start here:
@@ -84,7 +111,8 @@ Direct runtime or CLI use requires the project dependencies:
 python3 -m pip install -e .
 ```
 
-PDF workflows use the bundled workspace Python when it is available.
+PDF skills require Python 3.11+ with `pdfplumber`. If that dependency is unavailable,
+the skill reports it and stops; it does not install software during the workflow.
 
 ## From a vendor manual to a usable map
 
@@ -229,8 +257,11 @@ excluded points cannot enter a final read plan.
 ## Repository layout
 
 ```text
-.agents/plugins/marketplace.json       Local marketplace entry
-plugins/modbus-skills/                 Installable Codex plugin
+.agents/plugins/marketplace.json       Local Codex marketplace entry
+.cursor-plugin/marketplace.json        Local Cursor marketplace entry
+plugins/modbus-skills/                 Canonical skills, runtime, and host metadata
+packaging/                             Portable, Cursor, and Claude manifest templates
+dist/plugins/                          Generated packages (ignored by Git)
 plugins/modbus-skills/skills/          Workflow definitions and instructions
 plugins/modbus-skills/runtime/         Deterministic Python runtime
 catalog/                               Skill and workflow catalogs
@@ -270,6 +301,11 @@ Modbus Poll, and ModScan acceptance tests remain release gates.
 - Use synthetic fixtures instead of customer data, vendor manuals, or complete vendor maps.
 - Add tests for behavior changes.
 - Run `python3 scripts/verify_repo.py` before opening a pull request.
+
+Do not edit generated packages. Change the canonical source or a manifest
+template, then rebuild. The variant validator proves that shared skills,
+runtime, scripts, references, licenses, and notices remain identical across
+variants except for the documented Claude manual-invocation frontmatter adapter.
 
 ## License
 

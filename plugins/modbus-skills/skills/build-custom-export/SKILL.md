@@ -29,7 +29,7 @@ Completion requires a validated declarative configuration and deterministic outp
 
 ## Handoff
 
-- The input map is not reviewed: suggest `$review-map`.
+- The input map is not reviewed: suggest `review-map`.
 - The target is Node-RED, Modpoll, or ModScan: suggest its dedicated builder.
 
 Use this skill for one simple text or CSV shape. Use a dedicated adapter for graphs, opaque binaries, or interdependent collections.

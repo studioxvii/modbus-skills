@@ -31,7 +31,7 @@ Completion requires a generated or held status with visible native-verification 
 
 ## Handoff
 
-- No read plan exists: suggest `$plan-reads`.
-- The user also needs Node-RED or ModScan: suggest `$build-tool-pack`.
+- No read plan exists: suggest `plan-reads`.
+- The user also needs Node-RED or ModScan: suggest `build-tool-pack`.
 
 Preserve native files. Never claim native verification when it was not run.

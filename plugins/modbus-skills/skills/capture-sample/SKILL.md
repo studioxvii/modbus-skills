@@ -31,7 +31,7 @@ Completion requires one immutable sample and no generated final decoding.
 
 ## Handoff
 
-- Unknown byte order or datatype interpretation: suggest `$check-byte-order`.
-- Time-series troubleshooting: suggest `$analyze-capture`.
+- Unknown byte order or datatype interpretation: suggest `check-byte-order`.
+- Time-series troubleshooting: suggest `analyze-capture`.
 
 Keep the probe manual, bounded, credential-free, and read-only.

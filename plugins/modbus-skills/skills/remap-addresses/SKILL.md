@@ -28,7 +28,7 @@ Completion requires a collision-free, hash-bound preview before map output.
 
 ## Handoff
 
-- The converted map needs validation: suggest `$check-map`.
-- Source conventions remain mixed or unknown: suggest `$normalize-map`.
+- The converted map needs validation: suggest `check-map`.
+- Source conventions remain mixed or unknown: suggest `normalize-map`.
 
 Keep the raw source token. Protocol offset zero is valid; offsets above 65535 are not.

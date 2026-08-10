@@ -1,0 +1,21 @@
+{
+  "name": "modbus-skills",
+  "displayName": "Modbus Skills",
+  "version": "0.2.0",
+  "description": "Read-only Modbus map, byte-order, tool-generation, and capture-analysis workflows.",
+  "author": {
+    "name": "Studio Seventeen"
+  },
+  "homepage": "https://github.com/studioxvii/modbus-skills",
+  "repository": "https://github.com/studioxvii/modbus-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "modbus",
+    "industrial-automation",
+    "node-red",
+    "register-map",
+    "byte-order"
+  ],
+  "category": "productivity",
+  "skills": "./skills/"
+}

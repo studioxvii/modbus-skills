@@ -46,10 +46,10 @@ request in flight.
 
 ## Handoff
 
-- No read plan exists: suggest `$plan-reads`.
-- A run creates `capture.json`: suggest `$analyze-capture`.
-- The analysis finds a supported multi-register layout question: suggest `$check-byte-order`.
-- The user needs more target formats: suggest `$build-tool-pack`.
+- No read plan exists: suggest `plan-reads`.
+- A run creates `capture.json`: suggest `analyze-capture`.
+- The analysis finds a supported multi-register layout question: suggest `check-byte-order`.
+- The user needs more target formats: suggest `build-tool-pack`.
 
 Click the single start button once in probe mode. In final mode, enable the
 disabled tab intentionally; its one poll trigger runs the bounded plan every

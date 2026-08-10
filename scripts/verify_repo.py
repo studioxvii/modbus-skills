@@ -23,6 +23,7 @@ def run(*args: str) -> int:
 def main() -> int:
     commands = [
         (sys.executable, "scripts/validate_skills.py"),
+        (sys.executable, "scripts/validate_plugin_variants.py"),
         (sys.executable, "scripts/check_public_boundary.py"),
         (sys.executable, "scripts/build_catalog.py", "--check"),
         (sys.executable, "scripts/build_activation_cases.py", "--check"),

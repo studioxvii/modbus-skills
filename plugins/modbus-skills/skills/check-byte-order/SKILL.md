@@ -33,5 +33,5 @@ Completion requires every candidate to share one `sample_id`; the evidence selec
 
 ## Handoff
 
-- No raw sample exists: suggest `$capture-sample`.
-- The user confirms a layout: suggest `$apply-review`, then `$plan-reads`.
+- No raw sample exists: suggest `capture-sample`.
+- The user confirms a layout: suggest `apply-review`, then `plan-reads`.

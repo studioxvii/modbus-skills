@@ -31,7 +31,7 @@ class WorkflowCatalogTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("../../references/user-paths.md", router)
         self.assertIn("Read that skill's current `SKILL.md`", router)
-        self.assertIn("$compile-user-map", router)
+        self.assertIn("`compile-user-map`", router)
         self.assertIn("explicitly requested stage", router)
 
     def test_router_defaults_to_complete_safe_chain_but_keeps_direct_stage_routes(self) -> None:
@@ -42,8 +42,8 @@ class WorkflowCatalogTests(unittest.TestCase):
             ROOT / "plugins" / "modbus-skills" / "references" / "user-paths.md"
         ).read_text(encoding="utf-8")
         complete_chain = (
-            "$normalize-map -> $check-map -> $plan-reads -> $build-node-red -> "
-            "$capture-sample -> $analyze-capture -> $check-byte-order"
+            "normalize-map -> check-map -> plan-reads -> build-node-red -> "
+            "capture-sample -> analyze-capture -> check-byte-order"
         )
         self.assertIn(complete_chain, router)
         self.assertIn(complete_chain, paths)
@@ -57,6 +57,9 @@ class WorkflowCatalogTests(unittest.TestCase):
         self.assertIn("choose exactly one `Recommended next:` skill", contract)
         self.assertIn("Show at most two `Other options:`", contract)
         self.assertIn("Reply `proceed` to continue.", contract)
+        self.assertIn("read the named sibling skill's current `SKILL.md`", contract)
+        self.assertRegex(contract, r"execute it with the exact\s+artifacts named in `Uses:`")
+        self.assertIn("Do not rely on host-specific implicit invocation", contract)
         self.assertIn("next_action: none", contract)
 
         skill_root = ROOT / "plugins" / "modbus-skills" / "skills"
@@ -82,8 +85,10 @@ class WorkflowCatalogTests(unittest.TestCase):
         for skill_id in skill_ids - {"modbus-help"}:
             text = (skill_root / skill_id / "SKILL.md").read_text(encoding="utf-8")
             with self.subTest(skill=skill_id):
-                for target in re.findall(r"\$([a-z0-9]+(?:-[a-z0-9]+)*)", text):
-                    self.assertIn(target, skill_ids)
+                handoffs = [line for line in text.splitlines() if "suggest" in line]
+                for line in handoffs:
+                    for target in re.findall(r"`([a-z0-9]+(?:-[a-z0-9]+)*)`", line):
+                        self.assertIn(target, skill_ids)
 
     def test_workflows_reference_existing_skills(self) -> None:
         workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
