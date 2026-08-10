@@ -1,6 +1,7 @@
 ---
 name: normalize-map
 description: Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
+license: Apache-2.0
 ---
 
 # Normalize Map

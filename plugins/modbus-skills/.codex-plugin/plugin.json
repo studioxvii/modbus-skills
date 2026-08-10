@@ -7,6 +7,7 @@
     "url": "https://github.com/studioxvii"
   },
   "repository": "https://github.com/studioxvii/modbus-skills",
+  "license": "Apache-2.0",
   "keywords": [
     "modbus",
     "industrial-automation",

@@ -1,6 +1,7 @@
 ---
 name: build-modscan
 description: Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
+license: Apache-2.0
 ---
 
 # Build ModScan

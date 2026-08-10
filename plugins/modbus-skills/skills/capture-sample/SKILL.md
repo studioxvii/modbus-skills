@@ -1,6 +1,7 @@
 ---
 name: capture-sample
 description: Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
+license: Apache-2.0
 ---
 
 # Capture Sample

@@ -1,6 +1,7 @@
 ---
 name: review-evidence
 description: Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
+license: Apache-2.0
 ---
 
 # Review Evidence

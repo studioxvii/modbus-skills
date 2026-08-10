@@ -5,6 +5,7 @@
       "id": "analyze-capture",
       "display_name": "Analyze Capture",
       "description": "Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence.",
+      "license": "Apache-2.0",
       "short_description": "Find problems in Modbus sample data",
       "default_prompt": "Use $analyze-capture to inspect this bounded Modbus capture.",
       "path": "plugins/modbus-skills/skills/analyze-capture"
@@ -13,6 +14,7 @@
       "id": "apply-review",
       "display_name": "Apply Review",
       "description": "Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.",
+      "license": "Apache-2.0",
       "short_description": "Apply batched map decisions safely",
       "default_prompt": "Use $apply-review to apply this batch of confirmed map decisions.",
       "path": "plugins/modbus-skills/skills/apply-review"
@@ -21,6 +23,7 @@
       "id": "build-custom-export",
       "display_name": "Build Custom Export",
       "description": "Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map.",
+      "license": "Apache-2.0",
       "short_description": "Build a declarative text or CSV export",
       "default_prompt": "Use $build-custom-export to reproduce this documented export format.",
       "path": "plugins/modbus-skills/skills/build-custom-export"
@@ -29,6 +32,7 @@
       "id": "build-modpoll",
       "display_name": "Build Modpoll",
       "description": "Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles.",
+      "license": "Apache-2.0",
       "short_description": "Build read-only Modpoll artifacts",
       "default_prompt": "Use $build-modpoll to build artifacts for this Modpoll profile.",
       "path": "plugins/modbus-skills/skills/build-modpoll"
@@ -37,6 +41,7 @@
       "id": "build-modscan",
       "display_name": "Build ModScan",
       "description": "Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.",
+      "license": "Apache-2.0",
       "short_description": "Build a documented ModScan read plan",
       "default_prompt": "Use $build-modscan to build a read-only ModScan setup.",
       "path": "plugins/modbus-skills/skills/build-modscan"
@@ -45,6 +50,7 @@
       "id": "build-node-red",
       "display_name": "Build Node-RED",
       "description": "Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.",
+      "license": "Apache-2.0",
       "short_description": "Build a disabled Modbus read flow",
       "default_prompt": "Use $build-node-red to build a disabled read-only Node-RED flow.",
       "path": "plugins/modbus-skills/skills/build-node-red"
@@ -53,6 +59,7 @@
       "id": "build-tool-pack",
       "display_name": "Build Tool Pack",
       "description": "Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan.",
+      "license": "Apache-2.0",
       "short_description": "Build several Modbus tool outputs",
       "default_prompt": "Use $build-tool-pack to build these selected target outputs.",
       "path": "plugins/modbus-skills/skills/build-tool-pack"
@@ -61,6 +68,7 @@
       "id": "capture-sample",
       "display_name": "Capture Sample",
       "description": "Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.",
+      "license": "Apache-2.0",
       "short_description": "Build a bounded one-read probe",
       "default_prompt": "Use $capture-sample to build a one-read probe for this point.",
       "path": "plugins/modbus-skills/skills/capture-sample"
@@ -69,6 +77,7 @@
       "id": "check-byte-order",
       "display_name": "Check Byte Order",
       "description": "Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.",
+      "license": "Apache-2.0",
       "short_description": "Compare every supported byte layout",
       "default_prompt": "Use $check-byte-order to evaluate every layout for these raw words.",
       "path": "plugins/modbus-skills/skills/check-byte-order"
@@ -77,6 +86,7 @@
       "id": "check-map",
       "display_name": "Check Map",
       "description": "Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.",
+      "license": "Apache-2.0",
       "short_description": "Run deterministic register-map checks",
       "default_prompt": "Use $check-map to validate this normalized Modbus map.",
       "path": "plugins/modbus-skills/skills/check-map"
@@ -85,6 +95,7 @@
       "id": "compare-maps",
       "display_name": "Compare Maps",
       "description": "Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.",
+      "license": "Apache-2.0",
       "short_description": "Compare Modbus map revisions",
       "default_prompt": "Use $compare-maps to compare these reviewed register maps.",
       "path": "plugins/modbus-skills/skills/compare-maps"
@@ -93,6 +104,7 @@
       "id": "compile-user-map",
       "display_name": "Compile User Map",
       "description": "Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run.",
+      "license": "Apache-2.0",
       "short_description": "Compile an OEM map into ready user outputs",
       "default_prompt": "Use $compile-user-map to turn this OEM map and measurement intent into organized user-map outputs.",
       "path": "plugins/modbus-skills/skills/compile-user-map"
@@ -101,6 +113,7 @@
       "id": "extract-pdf-map",
       "display_name": "Extract PDF Map",
       "description": "Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.",
+      "license": "Apache-2.0",
       "short_description": "Extract traceable rows from a PDF",
       "default_prompt": "Use $extract-pdf-map to extract register rows from these PDF pages.",
       "path": "plugins/modbus-skills/skills/extract-pdf-map"
@@ -109,6 +122,7 @@
       "id": "modbus-help",
       "display_name": "Modbus Help",
       "description": "Choose the next Modbus skill or short workflow from the user's goal and current artifact.",
+      "license": "Apache-2.0",
       "short_description": "Choose the next Modbus skill or path",
       "default_prompt": "Use $modbus-help to choose the next skill for my goal.",
       "path": "plugins/modbus-skills/skills/modbus-help"
@@ -117,6 +131,7 @@
       "id": "normalize-map",
       "display_name": "Normalize Map",
       "description": "Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.",
+      "license": "Apache-2.0",
       "short_description": "Make Modbus map fields explicit",
       "default_prompt": "Use $normalize-map to normalize these candidate register rows.",
       "path": "plugins/modbus-skills/skills/normalize-map"
@@ -125,6 +140,7 @@
       "id": "parse-map",
       "display_name": "Parse Map",
       "description": "Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds.",
+      "license": "Apache-2.0",
       "short_description": "Parse a structured Modbus register map",
       "default_prompt": "Use $parse-map to parse this register list into traceable candidates.",
       "path": "plugins/modbus-skills/skills/parse-map"
@@ -133,6 +149,7 @@
       "id": "plan-reads",
       "display_name": "Plan Reads",
       "description": "Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04.",
+      "license": "Apache-2.0",
       "short_description": "Compile bounded Modbus read blocks",
       "default_prompt": "Use $plan-reads to compile safe reads for this validated map.",
       "path": "plugins/modbus-skills/skills/plan-reads"
@@ -141,6 +158,7 @@
       "id": "remap-addresses",
       "display_name": "Remap Addresses",
       "description": "Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation.",
+      "license": "Apache-2.0",
       "short_description": "Convert known Modbus address notation",
       "default_prompt": "Use $remap-addresses to preview this address-convention change.",
       "path": "plugins/modbus-skills/skills/remap-addresses"
@@ -149,6 +167,7 @@
       "id": "review-evidence",
       "display_name": "Review Evidence",
       "description": "Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.",
+      "license": "Apache-2.0",
       "short_description": "Group map evidence into exceptions",
       "default_prompt": "Use $review-evidence to automate checks and group these source exceptions.",
       "path": "plugins/modbus-skills/skills/review-evidence"
@@ -157,6 +176,7 @@
       "id": "review-map",
       "display_name": "Review Map",
       "description": "Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome.",
+      "license": "Apache-2.0",
       "short_description": "Review a raw Modbus map end to end",
       "default_prompt": "Use $review-map to review this raw register map without guessing.",
       "path": "plugins/modbus-skills/skills/review-map"

@@ -1,6 +1,7 @@
 ---
 name: remap-addresses
 description: Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation.
+license: Apache-2.0
 ---
 
 # Remap Addresses

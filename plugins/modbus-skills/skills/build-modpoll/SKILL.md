@@ -1,6 +1,7 @@
 ---
 name: build-modpoll
 description: Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles.
+license: Apache-2.0
 ---
 
 # Build Modpoll

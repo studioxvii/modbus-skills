@@ -1,6 +1,7 @@
 ---
 name: check-map
 description: Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
+license: Apache-2.0
 ---
 
 # Check Map

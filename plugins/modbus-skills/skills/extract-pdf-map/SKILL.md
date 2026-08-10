@@ -1,6 +1,7 @@
 ---
 name: extract-pdf-map
 description: Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.
+license: Apache-2.0
 ---
 
 # Extract PDF Map

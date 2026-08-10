@@ -1,6 +1,7 @@
 ---
 name: apply-review
 description: Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.
+license: Apache-2.0
 ---
 
 # Apply Review

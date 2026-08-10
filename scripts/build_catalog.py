@@ -31,6 +31,7 @@ def build() -> list[dict[str, object]]:
                 "id": field(skill_text, "name"),
                 "display_name": field(metadata_text, "display_name"),
                 "description": field(skill_text, "description"),
+                "license": field(skill_text, "license"),
                 "short_description": field(metadata_text, "short_description"),
                 "default_prompt": field(metadata_text, "default_prompt"),
                 "path": f"plugins/modbus-skills/skills/{skill_dir.name}",
