@@ -1,6 +1,7 @@
 ---
 name: analyze-capture
 description: Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence.
+license: Apache-2.0
 ---
 
 # Analyze Capture

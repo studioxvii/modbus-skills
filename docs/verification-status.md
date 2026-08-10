@@ -61,4 +61,6 @@ Generated target manifests still correctly report `verification: "not-run"` for
 those targets. The Node-RED native result above is a separate local acceptance
 record and does not replace the deterministic repository checks.
 
-Do not publish the repository until the remaining items in `publication-checklist.md` are complete. The open-source license, publisher contact, final URLs, native target tests, and new-task plugin install are still release gates.
+Do not publish the repository until the remaining items in `publication-checklist.md`
+are complete. Publisher contact, final URLs, native target tests, and the new-task
+plugin install are still release gates.

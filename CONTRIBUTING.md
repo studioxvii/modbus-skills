@@ -2,6 +2,13 @@
 
 Modbus Skills accepts focused, read-only improvements.
 
+## Contribution license
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for
+inclusion in this project is licensed under the Apache License, Version 2.0, without
+additional terms or conditions, as described in section 5 of [`LICENSE`](LICENSE).
+You must have the right to submit the contribution.
+
 ## Before you change code
 
 - Start with a real Modbus engineering problem and a primary source.
@@ -15,6 +22,7 @@ Modbus Skills accepts focused, read-only improvements.
 
 Each skill must have:
 
+- `license: Apache-2.0` in its `SKILL.md` frontmatter.
 - A precise activation description.
 - A short workflow.
 - Explicit inputs and outputs.

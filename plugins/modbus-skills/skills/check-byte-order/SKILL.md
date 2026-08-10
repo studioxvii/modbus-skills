@@ -1,6 +1,7 @@
 ---
 name: check-byte-order
 description: Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
+license: Apache-2.0
 ---
 
 # Check Byte Order

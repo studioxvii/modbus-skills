@@ -1,6 +1,7 @@
 ---
 name: build-custom-export
 description: Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map.
+license: Apache-2.0
 ---
 
 # Build Custom Export

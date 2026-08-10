@@ -1,6 +1,7 @@
 ---
 name: plan-reads
 description: Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
+license: Apache-2.0
 ---
 
 # Plan Reads

@@ -312,8 +312,21 @@ See [`docs/verification-status.md`](docs/verification-status.md) and [`docs/test
 - Add deterministic tests for each behavior change.
 - Run `python3 scripts/verify_repo.py` before each handoff.
 
+## License
+
+Modbus Skills is licensed under the Apache License, Version 2.0. See
+[`LICENSE`](LICENSE) for the license terms and [`NOTICE`](NOTICE) for the copyright
+notice. Every distributable skill also declares the SPDX identifier `Apache-2.0` in
+its `SKILL.md` metadata.
+
+The license applies to the material distributed by this repository. It does not grant
+rights to third-party vendor manuals, register maps, customer data, product names, or
+tool binaries, none of which are distributed as part of this project.
+
 ## Release status
 
-This repository does not yet have an open-source license. Do not publish or redistribute it until the items in [`docs/publication-checklist.md`](docs/publication-checklist.md) are complete.
+The repository is licensed under Apache-2.0 but remains private and pre-release. Do not
+change its visibility or publish a release until every item in
+[`docs/publication-checklist.md`](docs/publication-checklist.md) is complete.
 
 The GitHub repository must remain private during pre-release.

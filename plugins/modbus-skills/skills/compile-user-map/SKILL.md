@@ -1,6 +1,7 @@
 ---
 name: compile-user-map
 description: Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run.
+license: Apache-2.0
 ---
 
 # Compile User Map

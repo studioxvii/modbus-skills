@@ -1,6 +1,7 @@
 ---
 name: review-map
 description: Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome.
+license: Apache-2.0
 ---
 
 # Review Map

@@ -1,6 +1,7 @@
 ---
 name: modbus-help
 description: Choose the next Modbus skill or short workflow from the user's goal and current artifact.
+license: Apache-2.0
 ---
 
 # Modbus Help

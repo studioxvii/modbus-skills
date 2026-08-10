@@ -1,6 +1,7 @@
 ---
 name: compare-maps
 description: Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
+license: Apache-2.0
 ---
 
 # Compare Maps

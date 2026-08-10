@@ -1,6 +1,7 @@
 ---
 name: build-node-red
 description: Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.
+license: Apache-2.0
 ---
 
 # Build Node-RED
