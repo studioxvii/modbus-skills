@@ -1209,7 +1209,14 @@ def _handle_node_red(args: argparse.Namespace) -> dict[str, Any]:
                 "skill": "capture-sample",
                 "uses": "node-red/flow.json",
                 "produces": "capture.json",
-                "instruction": "Import flow.json, review the local endpoint, then click Run bounded read plan once.",
+                "instruction": (
+                    "Import flow.json, review the local endpoint, then enable the tab. "
+                    "Final mode runs one read plan every five seconds until you disable the tab."
+                    if args.mode == "final"
+                    else
+                    "Import flow.json, review the local endpoint, enable the tab, then click "
+                    "01 Start bounded plan once."
+                ),
             }
             if result.status == "generated"
             else {"action": "resolve-holds"}

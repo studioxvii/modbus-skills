@@ -93,7 +93,7 @@ class ToolPackTests(unittest.TestCase):
         flow = json.loads(pack.files()["node-red/flow.json"])
         reads = [node for node in flow if node["type"] == "modbus-flex-getter"]
         injects = [node for node in flow if node["type"] == "inject"]
-        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        sequencer = next(node for node in flow if node.get("modbusSkillsRole") == "sequencer" and node["type"] == "function")
         self.assertEqual(1, len(reads))
         self.assertEqual(1, len(injects))
         self.assertIn(f'"start_offset":{read_plan.requests[0].start_offset}', sequencer["func"])
@@ -641,6 +641,26 @@ class ToolPackTests(unittest.TestCase):
         self.assertEqual(
             ["target/generated.txt"],
             _find_unsafe_artifact_paths((unsafe,)),
+        )
+
+    def test_dashboard_route_exception_does_not_hide_other_absolute_paths(self) -> None:
+        dashboard = Artifact.text(
+            "target/dashboard.json",
+            "application/json",
+            '{"url":"/modbus-dashboard"}',
+            "generated-target-output",
+        )
+        unsafe_path = Artifact.text(
+            "target/unsafe.json",
+            "application/json",
+            '{"path":"/etc/private-map.json"}',
+            "generated-target-output",
+        )
+
+        self.assertEqual([], _find_unsafe_artifact_paths((dashboard,)))
+        self.assertEqual(
+            ["target/unsafe.json"],
+            _find_unsafe_artifact_paths((unsafe_path,)),
         )
 
     def test_final_unresolved_value_holds_every_selected_target(self) -> None:
