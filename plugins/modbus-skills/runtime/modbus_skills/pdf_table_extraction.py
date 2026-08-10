@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import json
 import re
 from pathlib import Path
@@ -16,12 +16,15 @@ class PdfTableExtractionError(ValueError):
     """Raised when the optional grid extractor cannot run safely."""
 
 
-_ADDRESS = re.compile(r"^(\d+)(?:/(\d+))?(\*)?$")
+_ADDRESS_TOKEN = r"(?:0[xX][0-9A-Fa-f]+|\d+)"
+_ADDRESS = re.compile(rf"^({_ADDRESS_TOKEN})(?:/({_ADDRESS_TOKEN}))?(\*)?$")
 _PAIR_SUFFIX = re.compile(r"\s*\((MSR|LSR)\)$", re.IGNORECASE)
 _HEADER_NAMES = {
     "address": "address",
     "register": "address",
     "register address": "address",
+    "start": "address",
+    "start address": "address",
     "reg": "address",
     "reg.": "address",
     "r/w": "access",
@@ -30,9 +33,13 @@ _HEADER_NAMES = {
     "format": "format",
     "data type": "format",
     "datatype": "format",
+    "type": "format",
+    "size": "word_count",
+    "width": "word_count",
     "units": "units",
     "unit": "units",
     "scale": "scale",
+    "scale factor": "scale",
     "range": "range",
     "description": "description",
     "name": "description",
@@ -46,10 +53,10 @@ _MAX_GRID_OUTPUT_BYTES = 32_000_000
 _GRID_TIMEOUT_SECONDS = 60
 
 
-def extract_pdf_table_rows(
+def extract_pdf_table_evidence(
     path: Path, *, pages: Sequence[int] | None = None, timeout_seconds: int = _GRID_TIMEOUT_SECONDS
-) -> list[dict[str, Any]]:
-    """Extract register rows in a killable, output-bounded worker process."""
+) -> dict[str, list[dict[str, Any]]]:
+    """Extract accepted and quarantined rows through a bounded worker."""
 
     selected = sorted(set(pages)) if pages is not None else None
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= _GRID_TIMEOUT_SECONDS:
@@ -63,6 +70,22 @@ def extract_pdf_table_rows(
             raise PdfTableExtractionError(
                 f"grid extraction is limited to {_MAX_GRID_PAGES} selected pages"
             )
+    return _run_grid_worker(path, selected, timeout_seconds)
+
+
+def extract_pdf_table_rows(
+    path: Path, *, pages: Sequence[int] | None = None, timeout_seconds: int = _GRID_TIMEOUT_SECONDS
+) -> list[dict[str, Any]]:
+    """Compatibility projection containing only accepted grid rows."""
+
+    return extract_pdf_table_evidence(
+        path, pages=pages, timeout_seconds=timeout_seconds
+    )["records"]
+
+
+def _run_grid_worker(
+    path: Path, selected: Sequence[int] | None, timeout_seconds: int
+) -> dict[str, list[dict[str, Any]]]:
     argv = [sys.executable, str(Path(__file__).resolve()), "--worker", str(path)]
     if selected is not None:
         argv.append(",".join(map(str, selected)))
@@ -94,14 +117,25 @@ def extract_pdf_table_rows(
         decoded = json.loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PdfTableExtractionError("grid extraction worker returned malformed output") from exc
-    if not isinstance(decoded, list) or any(not isinstance(row, dict) for row in decoded):
-        raise PdfTableExtractionError("grid extraction worker returned an invalid record list")
-    return decoded
+    if not isinstance(decoded, Mapping) or set(decoded) != {
+        "records",
+        "quarantined_records",
+    }:
+        raise PdfTableExtractionError("grid extraction worker returned invalid evidence")
+    result: dict[str, list[dict[str, Any]]] = {}
+    for field in ("records", "quarantined_records"):
+        rows = decoded.get(field)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise PdfTableExtractionError(
+                f"grid extraction worker returned an invalid {field} list"
+            )
+        result[field] = rows
+    return result
 
 
 def _extract_pdf_table_rows_in_process(
     path: Path, *, pages: Sequence[int] | None = None
-) -> list[dict[str, Any]]:
+) -> dict[str, list[dict[str, Any]]]:
     """Run pdfplumber inside the bounded worker process."""
 
     try:
@@ -112,7 +146,7 @@ def _extract_pdf_table_rows_in_process(
         ) from exc
 
     selected = set(pages) if pages is not None else None
-    records: list[dict[str, Any]] = []
+    evidence = {"records": [], "quarantined_records": []}
     try:
         with pdfplumber.open(path) as document:
             if selected is None and len(document.pages) > _MAX_GRID_PAGES:
@@ -123,14 +157,16 @@ def _extract_pdf_table_rows_in_process(
                 if selected is not None and page_number not in selected:
                     continue
                 for table_index, table in enumerate(page.extract_tables()):
-                    records.extend(
-                        parse_pdf_table(
-                            table,
-                            page_number=page_number,
-                            table_index=table_index,
-                        )
+                    parsed = parse_pdf_table_evidence(
+                        table,
+                        page_number=page_number,
+                        table_index=table_index,
                     )
-                    if len(records) > _MAX_GRID_RECORDS:
+                    evidence["records"].extend(parsed["records"])
+                    evidence["quarantined_records"].extend(
+                        parsed["quarantined_records"]
+                    )
+                    if sum(map(len, evidence.values())) > _MAX_GRID_RECORDS:
                         raise PdfTableExtractionError(
                             f"grid extraction exceeds {_MAX_GRID_RECORDS} records"
                         )
@@ -140,52 +176,113 @@ def _extract_pdf_table_rows_in_process(
         raise PdfTableExtractionError(
             "pdfplumber could not extract bounded table geometry"
         ) from exc
-    return records
+    return evidence
 
 
 def parse_pdf_table(
     table: Sequence[Sequence[Any]], *, page_number: int, table_index: int
 ) -> list[dict[str, Any]]:
-    """Parse one grid table when its columns establish register semantics."""
+    """Compatibility projection containing accepted rows from one grid table."""
+
+    return parse_pdf_table_evidence(
+        table, page_number=page_number, table_index=table_index
+    )["records"]
+
+
+def parse_pdf_table_evidence(
+    table: Sequence[Sequence[Any]], *, page_number: int, table_index: int
+) -> dict[str, list[dict[str, Any]]]:
+    """Parse one grid table and retain ambiguous rows separately."""
 
     if not table:
-        return []
+        return {"records": [], "quarantined_records": []}
     header_index, columns = _find_header(table)
     if columns is None:
-        return []
+        return {"records": [], "quarantined_records": []}
     records: list[dict[str, Any]] = []
-    inherited: dict[str, str] = {}
+    quarantined: list[dict[str, Any]] = []
+    inherited: dict[str, tuple[str, dict[str, Any]]] = {}
     for row_index, raw_row in enumerate(table[header_index + 1 :], start=header_index + 1):
         row = list(raw_row)
-        address_text = _clean(_cell(row, columns["address"]))
+        resolved, conflicts = _resolve_cells(row, columns)
+        region = f"p{page_number}:t{table_index}:r{row_index}"
+        if conflicts:
+            address_text = resolved.get("address", "") or " | ".join(
+                _clean_values(
+                    _cell(row, column) for column, _header in columns["address"]
+                )
+            )
+            quarantined.append(
+                {
+                    "code": "pdf-grid-column-ambiguous",
+                    "fields": sorted(conflicts),
+                    "source_register": address_text,
+                    "_source": {
+                        "format": "pdf",
+                        "page": page_number,
+                        "row": row_index,
+                        "region": region,
+                        "parser_id": "pdfplumber-table/v1",
+                        "method": "coordinate-derived",
+                        "excerpt": " | ".join(_clean_values(row))[:300],
+                    },
+                }
+            )
+            continue
+        address_text = resolved.get("address", "")
         address_match = _ADDRESS.fullmatch(address_text)
         if address_match is None:
             continue
-        first_address = int(address_match.group(1))
+        first_address = _address_number(address_match.group(1))
         second_address = (
-            int(address_match.group(2)) if address_match.group(2) else None
+            _address_number(address_match.group(2)) if address_match.group(2) else None
         )
         if second_address is not None and second_address != first_address + 1:
             continue
         values: dict[str, str] = {}
-        for field, column in columns.items():
+        claims: list[dict[str, Any]] = []
+        for field, candidates in columns.items():
             if field == "address":
+                value = address_text
+            else:
+                value = resolved.get(field, "")
+            inherited_claim = inherited.get(field) if not value else None
+            if field in _INHERITED_FIELDS and inherited_claim is not None:
+                value, claim = inherited_claim
+                claims.append(dict(claim))
+                values[field] = value
                 continue
-            raw_value = _cell(row, column)
-            value = _clean(raw_value)
-            if field in _INHERITED_FIELDS and raw_value is None:
-                value = inherited.get(field, "")
-            elif field in _INHERITED_FIELDS:
-                inherited[field] = value
-            values[field] = value
-        description_column = columns.get("description")
+            if field != "address":
+                values[field] = value
+            chosen = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if _clean(_cell(row, candidate[0])) == value
+                ),
+                candidates[0],
+            )
+            claim = {
+                "parser_id": "pdfplumber-table/v1",
+                "field": field,
+                "value": value,
+                "raw_header": chosen[1],
+                "raw_value": _clean(_cell(row, chosen[0])),
+                "column_index": chosen[0],
+                "source_locator": {
+                    "page": page_number,
+                    "row": row_index,
+                    "region": region,
+                },
+            }
+            claims.append(claim)
+            if field in _INHERITED_FIELDS and value:
+                inherited[field] = (value, claim)
+        description_candidates = columns.get("description", [])
+        description_column = max((item[0] for item in description_candidates), default=None)
         trailing = []
         if description_column is not None:
-            trailing = [
-                _clean(value)
-                for value in row[description_column + 1 :]
-                if _clean(value)
-            ]
+            trailing = _clean_values(row[description_column + 1 :])
         description = values.get("description", "")
         if trailing and trailing[0] in {"MSR", "LSR"}:
             suffix = trailing.pop(0)
@@ -198,7 +295,6 @@ def parse_pdf_table(
                     str(records[-1].get("description", "")),
                 ).strip()
                 description = f"{base} ({suffix})" if base else suffix
-        region = f"p{page_number}:t{table_index}:r{row_index}"
         record: dict[str, Any] = {
             "source_register": address_text,
             "address": first_address,
@@ -207,6 +303,7 @@ def parse_pdf_table(
             **{field: value for field, value in values.items() if value},
             "name": description,
             "description": description,
+            "_claims": claims,
             "_source": {
                 "format": "pdf",
                 "page": page_number,
@@ -222,7 +319,7 @@ def parse_pdf_table(
         if trailing:
             record["notes"] = " | ".join(trailing)
         records.append(record)
-    return records
+    return {"records": records, "quarantined_records": quarantined}
 
 
 def prepare_pdf_records(parsed: Mapping[str, Any]) -> dict[str, Any]:
@@ -296,6 +393,9 @@ def _prepare_pdf_record(raw: Mapping[str, Any]) -> dict[str, Any]:
     source_format = str(record.get("format") or "").strip()
     if source_format:
         record["datatype"] = source_format
+    word_count = str(record.get("word_count") or "").strip()
+    if word_count.isdigit():
+        record["word_count"] = int(word_count)
     units = str(record.get("units") or "").strip()
     if units:
         record["engineering_unit"] = units
@@ -347,20 +447,44 @@ def _source_register_number(value: Any) -> int | None:
 
 def _find_header(
     table: Sequence[Sequence[Any]],
-) -> tuple[int, dict[str, int] | None]:
+) -> tuple[int, dict[str, list[tuple[int, str]]] | None]:
     for row_index, row in enumerate(table[:5]):
-        columns: dict[str, int] = {}
+        columns: dict[str, list[tuple[int, str]]] = {}
         for column, value in enumerate(row):
-            name = _HEADER_NAMES.get(_header_text(value))
-            if name is not None and name not in columns:
-                columns[name] = column
-        if "address" not in columns and "access" in columns and columns["access"] > 0:
-            columns["address"] = columns["access"] - 1
+            header = _clean(value)
+            name = _HEADER_NAMES.get(_header_text(header))
+            if name is not None:
+                columns.setdefault(name, []).append((column, header))
         if "address" in columns and "description" in columns and (
             "access" in columns or "format" in columns
         ):
             return row_index, columns
     return 0, None
+
+
+def _resolve_cells(
+    row: Sequence[Any], columns: Mapping[str, Sequence[tuple[int, str]]]
+) -> tuple[dict[str, str], set[str]]:
+    values: dict[str, str] = {}
+    conflicts: set[str] = set()
+    for field, candidates in columns.items():
+        distinct = set(
+            _clean_values(_cell(row, column) for column, _header in candidates)
+        )
+        if len(distinct) > 1:
+            conflicts.add(field)
+            continue
+        values[field] = next(iter(distinct), "")
+    return values, conflicts
+
+
+def _address_number(value: str) -> int:
+    return int(value, 16 if value.lower().startswith("0x") else 10)
+
+
+def _clean_values(values: Iterable[Any]) -> list[str]:
+    cleaned = (_clean(value) for value in values)
+    return [value for value in cleaned if value]
 
 
 def _header_text(value: Any) -> str:
@@ -379,8 +503,10 @@ def _clean(value: Any) -> str:
 
 __all__ = [
     "PdfTableExtractionError",
+    "extract_pdf_table_evidence",
     "extract_pdf_table_rows",
     "parse_pdf_table",
+    "parse_pdf_table_evidence",
     "prepare_pdf_records",
 ]
 
@@ -390,8 +516,8 @@ def _worker_main(argv: Sequence[str]) -> int:
         return 2
     pages = [int(value) for value in argv[3].split(",")] if len(argv) == 4 and argv[3] else None
     try:
-        records = _extract_pdf_table_rows_in_process(Path(argv[2]), pages=pages)
-        payload = json.dumps(records, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+        evidence = _extract_pdf_table_rows_in_process(Path(argv[2]), pages=pages)
+        payload = json.dumps(evidence, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
         if len(payload) > _MAX_GRID_OUTPUT_BYTES:
             raise PdfTableExtractionError(
                 f"grid extraction output exceeds {_MAX_GRID_OUTPUT_BYTES} bytes"

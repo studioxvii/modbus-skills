@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from itertools import chain
 import os
 import re
 import selectors
@@ -19,11 +20,16 @@ from .artifacts import (
     assert_artifact_envelope,
     stable_input_hash,
 )
-from .pdf_table_extraction import PdfTableExtractionError, extract_pdf_table_rows
+from .pdf_table_extraction import PdfTableExtractionError, extract_pdf_table_evidence
 
 
 class PdfExtractionError(ValueError):
     """Raised when supplied PDF evidence violates the public contract."""
+
+
+_CONTINUATION_ROW = re.compile(
+    r"(?im)^\s*(?:\d+|0x[0-9a-f]+)\b.*\b(?:bool(?:ean)?|bit|u?int(?:16|32|64)?|sint|word|dword|ulong|float(?:32|64)?|real|double|string|ascii|r/w|ro|rw|r)\b"
+)
 
 
 _HEADER_ALIASES = {
@@ -157,13 +163,19 @@ def parse_layout_rows(
 
 def discover_register_pages(text: str, *, first_page: int = 1) -> list[int]:
     pages: list[int] = []
+    previous_was_register = False
     for page_number, page in enumerate(text.split("\f"), start=first_page):
         has_header = any(_header(line) is not None for line in page.splitlines())
         has_register_signal = bool(re.search(r"\b(?:modbus|register|address)\b", page, re.IGNORECASE)) and bool(
             re.search(r"\b(?:[1-4][0-9]{4,5}|0[xX][0-9A-Fa-f]+)\b", page)
         )
-        if has_header or has_register_signal:
+        is_continuation = previous_was_register and not (
+            has_header or has_register_signal
+        ) and _CONTINUATION_ROW.search(page) is not None
+        is_register = has_header or has_register_signal or is_continuation
+        if is_register:
             pages.append(page_number)
+        previous_was_register = is_register
     return pages
 
 
@@ -544,6 +556,7 @@ def _source_coverage(
 ) -> dict[str, Any]:
     parser_sets: list[set[str]] = []
     regions: set[str] = set()
+    covered_pages: set[int] = set()
     for record in records:
         source = record.get("_source", {})
         parsers = {
@@ -556,15 +569,32 @@ def _source_coverage(
                 parsers.add(str(source["parser_id"]))
             if source.get("region"):
                 regions.add(str(source["region"]))
+            if isinstance(source.get("page"), int):
+                covered_pages.add(int(source["page"]))
         parser_sets.append(parsers)
-    complete = discovery_complete and bool(records) and not rejected and not quarantined
+    for row in chain(rejected, quarantined):
+        source = row.get("_source", {}) if isinstance(row, Mapping) else {}
+        page = row.get("page") if isinstance(row, Mapping) else None
+        if isinstance(source, Mapping) and isinstance(source.get("page"), int):
+            covered_pages.add(int(source["page"]))
+        elif isinstance(page, int):
+            covered_pages.add(page)
+    detected = sorted(set(discovered_pages))
+    complete = (
+        discovery_complete
+        and bool(records)
+        and not rejected
+        and not quarantined
+        and set(detected).issubset(covered_pages)
+    )
     independently_supported = sum(len(parsers) >= 2 for parsers in parser_sets)
     return {
         "status": "complete" if complete else "unknown",
         "accepted_row_count": len(records),
         "rejected_row_count": len(rejected),
         "quarantined_row_count": len(quarantined),
-        "detected_pages": sorted(set(discovered_pages)),
+        "detected_pages": detected,
+        "covered_pages": sorted(covered_pages),
         "detected_regions": sorted(regions),
         "basis": "bounded-discovery" if complete else "incomplete-or-conflicting-discovery",
         "discovery_complete": discovery_complete,
@@ -628,7 +658,7 @@ def extract_pdf(
     discovered = list(range(page_range[0], page_range[1] + 1)) if page_range else discover_register_pages(text, first_page=first_page)
     if not discovered:
         try:
-            grid, discovered = _recover_grid_rows(path)
+            grid, grid_quarantined, discovered = _recover_grid_rows(path)
         except PdfTableExtractionError as exc:
             return _hold_result(path, source, "pdf-register-pages-unavailable", f"No likely register pages were discovered and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
         return _envelope(
@@ -641,6 +671,7 @@ def extract_pdf(
             page_range,
             capability=capability,
             discovered_pages=discovered,
+            quarantined=grid_quarantined,
         )
     page_filter = set(discovered)
     strict, rejected = parse_layout_rows(text, first_page=first_page, pages=page_filter)
@@ -668,16 +699,18 @@ def extract_pdf(
     coordinate = [record for record in coordinate if record["_source"]["page"] in page_filter]
     if not coordinate and not strict:
         try:
-            grid, _grid_pages = _recover_grid_rows(path, pages=discovered)
+            grid, grid_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered)
         except PdfTableExtractionError as exc:
             return _hold_result(path, source, "pdf-structured-rows-unavailable", f"Text and coordinate parsing produced no rows, and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
         findings.append(_GRID_RECOVERY_FINDING)
-        return _envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered)
+        return _envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered, quarantined=grid_quarantined)
     records, quarantined, conflicts = _reconcile(strict, coordinate)
     try:
-        grid, _grid_pages = _recover_grid_rows(path, pages=discovered)
+        grid, grid_source_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered)
     except PdfTableExtractionError:
         grid = []
+        grid_source_quarantined = []
+    quarantined.extend(grid_source_quarantined)
     if grid:
         records, grid_quarantined, grid_conflicts = _reconcile(records, grid)
         quarantined.extend(grid_quarantined)
@@ -785,13 +818,15 @@ def _extract_large_pdf_in_chunks(
             if remaining <= 0:
                 break
             try:
-                grid, _ = _recover_grid_rows(
+                grid, grid_source_quarantined, _ = _recover_grid_rows(
                     path,
                     pages=chunk_pages,
                     timeout_seconds=min(60, remaining),
                 )
             except PdfTableExtractionError:
                 grid = []
+                grid_source_quarantined = []
+            chunk_quarantined.extend(grid_source_quarantined)
             if grid:
                 chunk_records, grid_quarantined, grid_conflicts = _reconcile(
                     chunk_records, grid
@@ -875,14 +910,21 @@ def _recover_grid_rows(
     *,
     pages: Sequence[int] | None = None,
     timeout_seconds: int = 60,
-) -> tuple[list[dict[str, Any]], list[int]]:
-    records = extract_pdf_table_rows(
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[int]]:
+    evidence = extract_pdf_table_evidence(
         path, pages=pages, timeout_seconds=timeout_seconds
     )
-    if not records:
+    records = evidence["records"]
+    quarantined = evidence["quarantined_records"]
+    if not records and not quarantined:
         raise PdfTableExtractionError("table geometry contained no register rows")
-    discovered = sorted({int(record["_source"]["page"]) for record in records})
-    return records, discovered
+    discovered = sorted(
+        {
+            int(record["_source"]["page"])
+            for record in chain(records, quarantined)
+        }
+    )
+    return records, quarantined, discovered
 
 
 def _recover_grid_or(
@@ -899,7 +941,7 @@ def _recover_grid_or(
         else None
     )
     try:
-        grid, discovered = _recover_grid_rows(path, pages=pages)
+        grid, quarantined, discovered = _recover_grid_rows(path, pages=pages)
     except PdfTableExtractionError:
         return fallback
     return _envelope(
@@ -912,6 +954,7 @@ def _recover_grid_or(
         page_range,
         capability=capability,
         discovered_pages=discovered,
+        quarantined=quarantined,
     )
 
 

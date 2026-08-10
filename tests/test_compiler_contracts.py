@@ -86,6 +86,7 @@ class CompilerContractTests(unittest.TestCase):
             "rejected_row_count": 0,
             "quarantined_row_count": 0,
             "detected_pages": [2],
+            "covered_pages": [2],
             "detected_regions": ["p2:t0:r4"],
             "basis": "bounded-discovery",
             "discovery_complete": True,
@@ -107,6 +108,7 @@ class CompilerContractTests(unittest.TestCase):
             "rejected_row_count": 0,
             "quarantined_row_count": 0,
             "detected_pages": [2],
+            "covered_pages": [2],
             "detected_regions": ["p2:t0:r4"],
             "basis": "bounded-discovery",
             "discovery_complete": True,
@@ -116,6 +118,8 @@ class CompilerContractTests(unittest.TestCase):
             {**valid, "accepted_row_count": -1},
             {**valid, "detected_pages": "2"},
             {**valid, "discovery_complete": "yes"},
+            {**valid, "covered_pages": []},
+            {**valid, "detected_pages": [], "covered_pages": []},
         )
 
         for coverage in invalid_cases:
@@ -125,6 +129,52 @@ class CompilerContractTests(unittest.TestCase):
                     source_hash="a" * 64,
                     source_coverage=coverage,
                 )
+
+    def test_legacy_complete_coverage_without_covered_pages_remains_readable(self) -> None:
+        coverage = {
+            "status": "complete",
+            "accepted_row_count": 1,
+            "rejected_row_count": 0,
+            "quarantined_row_count": 0,
+            "detected_pages": [2],
+            "detected_regions": ["p2:t0:r4"],
+            "basis": "legacy-bounded-discovery",
+            "discovery_complete": True,
+        }
+
+        artifact = build_oem_map(
+            [oem_points()[0]], source_hash="a" * 64, source_coverage=coverage
+        )
+
+        validate_oem_map(artifact)
+
+    def test_pdf_field_evidence_requires_raw_and_normalized_values(self) -> None:
+        point = copy.deepcopy(oem_points()[0])
+        point["source_field_evidence"] = [
+            {
+                "field": "datatype",
+                "raw_header": "Type",
+                "raw_value": "int16",
+                "normalized_value": "int16",
+                "source_ref": "p2:t0:r4",
+                "status": "confirmed",
+            }
+        ]
+        artifact = build_oem_map(
+            [point],
+            source_hash="a" * 64,
+            source_reference={"filename": "synthetic.pdf", "format": "pdf"},
+        )
+        validate_oem_map(artifact)
+
+        invalid = copy.deepcopy(point)
+        invalid["source_field_evidence"][0].pop("raw_value")
+        with self.assertRaises(CompilerContractError):
+            build_oem_map(
+                [invalid],
+                source_hash="a" * 64,
+                source_reference={"filename": "synthetic.pdf", "format": "pdf"},
+            )
 
     def test_contracts_are_deterministic_and_hash_bound(self) -> None:
         first_oem = build_oem_map(

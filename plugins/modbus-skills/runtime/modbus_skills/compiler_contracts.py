@@ -20,6 +20,7 @@ from .artifacts import (
     assert_artifact_envelope,
     stable_input_hash,
 )
+from .models import DataType
 
 
 OEM_MAP_SCHEMA_VERSION = "modbus-oem-map/v1"
@@ -27,6 +28,17 @@ USER_SELECTION_SCHEMA_VERSION = "modbus-user-selection/v1"
 DEVICE_BINDING_SCHEMA_VERSION = "modbus-device-binding/v1"
 USER_MAP_SCHEMA_VERSION = "modbus-user-map/v1"
 COMPILE_CASE_SCHEMA_VERSION = "modbus-compile-case/v1"
+
+_MATERIAL_PDF_FIELDS = frozenset(
+    {
+        "protocol_offset",
+        "datatype",
+        "access",
+        "engineering_unit",
+        "scale",
+        "description",
+    }
+)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _POINT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -133,8 +145,54 @@ def validate_oem_map(value: Mapping[str, Any]) -> None:
                 raise CompilerContractError(
                     f"source_coverage.{field} must be a non-negative integer"
                 )
-        for field in ("detected_pages", "detected_regions"):
-            _array(coverage.get(field), f"source_coverage.{field}")
+        detected_pages = _array(
+            coverage.get("detected_pages"), "source_coverage.detected_pages"
+        )
+        for page in detected_pages:
+            if isinstance(page, bool) or not isinstance(page, int) or page < 0:
+                raise CompilerContractError(
+                    "source_coverage.detected_pages must contain non-negative integers"
+                )
+        if (
+            coverage.get("status") == "complete"
+            and coverage["accepted_row_count"] > 0
+            and not detected_pages
+        ):
+            raise CompilerContractError(
+                "complete source coverage with accepted rows requires detected_pages"
+            )
+        _array(coverage.get("detected_regions"), "source_coverage.detected_regions")
+        covered_pages = coverage.get("covered_pages")
+        if covered_pages is not None:
+            covered = _array(covered_pages, "source_coverage.covered_pages")
+            if any(
+                isinstance(page, bool) or not isinstance(page, int) or page < 0
+                for page in covered
+            ):
+                raise CompilerContractError(
+                    "source_coverage.covered_pages must contain non-negative integers"
+                )
+            if (
+                not set(detected_pages).issubset(set(covered))
+                and coverage.get("status") == "complete"
+            ):
+                raise CompilerContractError(
+                    "complete source coverage must cover every detected page"
+                )
+        independent = coverage.get("independent_parser_row_count")
+        single = coverage.get("single_parser_row_count")
+        if independent is not None or single is not None:
+            if any(
+                isinstance(count, bool) or not isinstance(count, int) or count < 0
+                for count in (independent, single)
+            ):
+                raise CompilerContractError(
+                    "source coverage parser row counts must be non-negative integers"
+                )
+            if independent + single != coverage["accepted_row_count"]:
+                raise CompilerContractError(
+                    "source coverage parser row counts must equal accepted rows"
+                )
         if not isinstance(coverage.get("discovery_complete"), bool):
             raise CompilerContractError(
                 "source_coverage.discovery_complete must be boolean"
@@ -153,6 +211,87 @@ def validate_oem_map(value: Mapping[str, Any]) -> None:
                 raise CompilerContractError(f"duplicate OEM point ID: {point_id}")
             raise CompilerContractError(f"OEM point ID collision: {point_id}")
         seen[point_id] = point
+
+
+def pdf_completion_issues(
+    oem_map: Mapping[str, Any], selection: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Return selected PDF points that cannot support a completion claim."""
+
+    reference = oem_map.get("source_reference", {})
+    if not isinstance(reference, Mapping) or reference.get("format") != "pdf":
+        return []
+    selected = {
+        item.get("oem_point_id")
+        for item in selection.get("included", ())
+        if isinstance(item, Mapping) and isinstance(item.get("oem_point_id"), str)
+    }
+    issues = []
+    for point in oem_map.get("points", ()):
+        if not isinstance(point, Mapping) or point.get("oem_point_id") not in selected:
+            continue
+        fields = _pdf_point_issue_fields(point)
+        if fields:
+            issues.append(
+                {
+                    "code": "pdf-field-evidence-unconfirmed",
+                    "point_id": str(point["oem_point_id"]),
+                    "fields": fields,
+                    "evidence_refs": point_evidence_refs(point),
+                }
+            )
+    return sorted(issues, key=lambda item: str(item["point_id"]))
+
+
+def _pdf_point_issue_fields(point: Mapping[str, Any]) -> list[str]:
+    required = {
+        field
+        for field in _MATERIAL_PDF_FIELDS
+        if point.get(field) not in (None, "")
+    }
+    if point.get("word_span") not in (None, ""):
+        required.add("word_span")
+    evidence = point.get("source_field_evidence")
+    if (
+        not isinstance(evidence, Sequence)
+        or isinstance(evidence, (str, bytes, bytearray))
+        or not evidence
+    ):
+        return sorted(required)
+    evidence_by_field = {
+        str(item["field"]): item for item in evidence if isinstance(item, Mapping)
+    }
+    source_refs = set(point_evidence_refs(point))
+    compared_fields = _MATERIAL_PDF_FIELDS | {"word_span"}
+    issues = set()
+    for item in evidence:
+        if not isinstance(item, Mapping):
+            issues.update(required)
+            continue
+        field = str(item.get("field"))
+        if item.get("status") != "confirmed" or (
+            field in compared_fields
+            and (
+                item.get("normalized_value") != point.get(field)
+                or item.get("source_ref") not in source_refs
+            )
+        ):
+            issues.add(field)
+    confirmed = {
+        field
+        for field, item in evidence_by_field.items()
+        if item.get("status") == "confirmed"
+        and item.get("raw_value") not in (None, "")
+    }
+    issues.update(required - confirmed)
+    word_span = point.get("word_span")
+    width = evidence_by_field.get("word_span")
+    if word_span not in (None, "") and (
+        width is None or width.get("raw_value") in (None, "")
+    ):
+        if DataType.coerce(point.get("datatype")).span == word_span:
+            issues.discard("word_span")
+    return sorted(issues)
 
 
 def build_user_selection(
@@ -516,6 +655,31 @@ def _validate_oem_point(point: Mapping[str, Any]) -> None:
                     )
         if has_record_locator:
             _text(ref.get("record_id"), "OEM point source reference record_id")
+    field_evidence = point.get("source_field_evidence")
+    if field_evidence is not None:
+        seen_fields: set[str] = set()
+        for raw_item in _array(field_evidence, "OEM point source_field_evidence"):
+            item = _mapping(raw_item, "OEM point source field evidence")
+            field = _text(item.get("field"), "source field evidence field")
+            if field in seen_fields:
+                raise CompilerContractError(
+                    f"duplicate source field evidence: {field}"
+                )
+            seen_fields.add(field)
+            _text(item.get("raw_header"), "source field evidence raw_header")
+            if "raw_value" not in item:
+                raise CompilerContractError(
+                    "source field evidence raw_value is required"
+                )
+            if "normalized_value" not in item:
+                raise CompilerContractError(
+                    "source field evidence normalized_value is required"
+                )
+            _text(item.get("source_ref"), "source field evidence source_ref")
+            if item.get("status") not in {"confirmed", "contradiction", "unresolved"}:
+                raise CompilerContractError(
+                    "source field evidence status must be confirmed, contradiction, or unresolved"
+                )
 
 
 def _validate_schema(value: Mapping[str, Any], schema_version: str) -> None:
@@ -670,6 +834,7 @@ __all__ = [
     "build_user_map",
     "build_user_selection",
     "point_evidence_refs",
+    "pdf_completion_issues",
     "validate_compile_case",
     "validate_device_binding",
     "validate_oem_map",

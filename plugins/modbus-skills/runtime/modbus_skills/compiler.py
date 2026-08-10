@@ -15,6 +15,7 @@ from .compiler_contracts import (
     COMPILE_CASE_SCHEMA_VERSION,
     CompilerContractError,
     build_compile_case,
+    pdf_completion_issues,
     validate_compile_case,
     validate_device_binding,
     validate_oem_map,
@@ -320,11 +321,25 @@ def _advance(
     _store_bundle(root, index, bundle)
     blocking_user_holds = _blocking_holds(bundle["user_map"])
     source_coverage = oem_map.get("source_coverage", {})
-    coverage_incomplete = bool(source_coverage) and (
-        source_coverage.get("status") != "complete"
-        or source_coverage.get("discovery_complete") is not True
+    coverage_incomplete = (
+        not _pdf_coverage_complete(oem_map)
+        if _is_pdf_source(oem_map)
+        else bool(source_coverage)
+        and (
+            source_coverage.get("status") != "complete"
+            or source_coverage.get("discovery_complete") is not True
+        )
     )
-    if blocking_user_holds or coverage_incomplete:
+    pdf_evidence_issues = pdf_completion_issues(oem_map, bundle["selection"])
+    if blocking_user_holds or coverage_incomplete or pdf_evidence_issues:
+        affected_count = sum(
+            int(hold.get("affected_count", 1)) for hold in blocking_user_holds
+        ) + len(pdf_evidence_issues)
+        correction_issues = _correction_issue_refs(
+            blocking_user_holds,
+            coverage_incomplete=coverage_incomplete,
+            pdf_evidence_issues=pdf_evidence_issues,
+        )
         return _commit(
             root,
             request,
@@ -340,14 +355,10 @@ def _advance(
                 "kind": "provide-corrected-source",
                 "accepted_schema": COMPILE_REQUEST_SCHEMA_VERSION,
                 "starts_new_case": True,
-                "reason": "selected points still have grouped blocking source exceptions; keep the useful output and start a corrected hash-bound case",
-                "affected_count": max(
-                    1,
-                    sum(
-                        int(hold.get("affected_count", 1))
-                        for hold in blocking_user_holds
-                    ),
-                ),
+                "reason": "selected points still have blocking source exceptions or unconfirmed PDF evidence; keep the useful output and start a corrected hash-bound case",
+                "affected_count": max(1, affected_count),
+                "issues": correction_issues,
+                "evidence_artifact": "artifacts/oem-map.json",
             },
             started=started,
             timer=timer,
@@ -612,6 +623,57 @@ def _blocking_holds(value: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         and hold.get("blocking", True) is not False
         and str(hold.get("severity", "hold")).lower() in {"error", "hold"}
     ]
+
+
+def _correction_issue_refs(
+    holds: Sequence[Mapping[str, Any]],
+    *,
+    coverage_incomplete: bool,
+    pdf_evidence_issues: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    issues = [
+        {
+            "code": str(hold.get("code", "source-exception")),
+            "point_ids": sorted(
+                str(point_id) for point_id in hold.get("point_ids", ())
+            ),
+            "field": hold.get("field"),
+        }
+        for hold in holds
+    ]
+    if coverage_incomplete:
+        issues.append(
+            {
+                "code": "pdf-source-coverage-incomplete",
+                "point_ids": [],
+                "field": None,
+            }
+        )
+    issues.extend(dict(issue) for issue in pdf_evidence_issues)
+    return issues
+
+
+def _is_pdf_source(oem_map: Mapping[str, Any]) -> bool:
+    reference = oem_map.get("source_reference", {})
+    return isinstance(reference, Mapping) and reference.get("format") == "pdf"
+
+
+def _pdf_coverage_complete(oem_map: Mapping[str, Any]) -> bool:
+    coverage = oem_map.get("source_coverage")
+    if not isinstance(coverage, Mapping):
+        return False
+    detected = coverage.get("detected_pages")
+    covered = coverage.get("covered_pages")
+    return (
+        coverage.get("status") == "complete"
+        and coverage.get("discovery_complete") is True
+        and isinstance(detected, Sequence)
+        and not isinstance(detected, (str, bytes, bytearray))
+        and bool(detected)
+        and isinstance(covered, Sequence)
+        and not isinstance(covered, (str, bytes, bytearray))
+        and set(detected).issubset(set(covered))
+    )
 
 
 def _requires_source_correction(
