@@ -15,6 +15,12 @@ PLUGIN = ROOT / "plugins" / "modbus-skills"
 SKILLS = PLUGIN / "skills"
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 EXPECTED_LICENSE = "Apache-2.0"
+APACHE_LICENSE_MARKERS = (
+    "Apache License\n                           Version 2.0, January 2004",
+    "http://www.apache.org/licenses/",
+    "END OF TERMS AND CONDITIONS",
+)
+EXPECTED_COPYRIGHT = "Copyright 2026 Studio Seventeen"
 
 
 def parse_frontmatter(path: Path) -> dict[str, str]:
@@ -42,11 +48,13 @@ def parse_openai_yaml(path: Path) -> dict[str, str]:
     return values
 
 
-def validate() -> list[str]:
+def validate(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
-    manifest_path = PLUGIN / ".codex-plugin" / "plugin.json"
-    marketplace_path = ROOT / ".agents" / "plugins" / "marketplace.json"
-    pyproject_path = ROOT / "pyproject.toml"
+    plugin = root / "plugins" / "modbus-skills"
+    skills = plugin / "skills"
+    manifest_path = plugin / ".codex-plugin" / "plugin.json"
+    marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
+    pyproject_path = root / "pyproject.toml"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
@@ -66,21 +74,26 @@ def validate() -> list[str]:
     if len(entries) != 1 or entries[0].get("source", {}).get("path") != "./plugins/modbus-skills":
         errors.append("marketplace must point at ./plugins/modbus-skills")
 
-    root_license = ROOT / "LICENSE"
-    plugin_license = PLUGIN / "LICENSE"
-    root_notice = ROOT / "NOTICE"
-    plugin_notice = PLUGIN / "NOTICE"
-    for license_path in (root_license, plugin_license, root_notice, plugin_notice):
-        if not license_path.exists():
-            errors.append(f"missing {license_path.relative_to(ROOT)}")
+    root_license = root / "LICENSE"
+    plugin_license = plugin / "LICENSE"
+    root_notice = root / "NOTICE"
+    plugin_notice = plugin / "NOTICE"
+    for path in (root_license, plugin_license, root_notice, plugin_notice):
+        if not path.exists():
+            errors.append(f"missing {path.relative_to(root)}")
     if root_license.exists() and plugin_license.exists():
         if root_license.read_bytes() != plugin_license.read_bytes():
             errors.append("plugin LICENSE must match the repository LICENSE")
+        license_text = root_license.read_text(encoding="utf-8")
+        if not all(marker in license_text for marker in APACHE_LICENSE_MARKERS):
+            errors.append("LICENSE must contain the Apache License 2.0 text")
     if root_notice.exists() and plugin_notice.exists():
         if root_notice.read_bytes() != plugin_notice.read_bytes():
             errors.append("plugin NOTICE must match the repository NOTICE")
+        if EXPECTED_COPYRIGHT not in root_notice.read_text(encoding="utf-8"):
+            errors.append(f"NOTICE must contain {EXPECTED_COPYRIGHT}")
 
-    skill_dirs = sorted(path for path in SKILLS.iterdir() if path.is_dir())
+    skill_dirs = sorted(path for path in skills.iterdir() if path.is_dir())
     if not skill_dirs:
         errors.append("no skills found")
     for skill_dir in skill_dirs:
@@ -128,7 +141,7 @@ def validate() -> list[str]:
         if name != "modbus-help" and not (skill_dir / "scripts" / "run.py").exists():
             errors.append(f"{skill_dir.name}: missing deterministic script wrapper")
 
-    outcome = SKILLS / "compile-user-map"
+    outcome = skills / "compile-user-map"
     if outcome.exists():
         outcome_text = (outcome / "SKILL.md").read_text(encoding="utf-8")
         wrapper_text = (outcome / "scripts" / "run.py").read_text(encoding="utf-8")
