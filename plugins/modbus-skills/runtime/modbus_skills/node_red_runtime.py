@@ -96,10 +96,22 @@ def validate_flow(flow: Sequence[Mapping[str, Any]]) -> None:
             ):
                 continue
             raise CampaignError(f"unsafe Node-RED node: {node.get('type', '')}")
-        if node_type == "inject" and (
-            node.get("repeat", "") or node.get("crontab", "") or node.get("once", False)
-        ):
-            raise CampaignError("Node-RED trigger must be manual one-shot")
+        if node_type == "inject":
+            is_one_shot = (
+                node.get("repeat", "") in ("", None)
+                and node.get("crontab", "") in ("", None)
+                and not node.get("once", False)
+            )
+            is_bounded_poll = (
+                node.get("modbusSkillsRole") == "live-poll"
+                and str(node.get("repeat", "")) == "5"
+                and node.get("crontab", "") in ("", None)
+                and not node.get("once", False)
+            )
+            if not (is_one_shot or is_bounded_poll):
+                raise CampaignError(
+                    "Node-RED trigger must be manual one-shot or the bounded 5-second live poll"
+                )
         if node_type != "modbus-flex-getter":
             continue
         raw_codes = node.get("modbusSkillsAllowedFunctionCodes")
@@ -132,7 +144,10 @@ def planned_requests(flow: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         node
         for node in flow
         if node.get("type") == "function"
-        and node.get("name") == "Run bounded read plan"
+        and (
+            node.get("modbusSkillsRole") == "sequencer"
+            or node.get("name") in {"Run bounded read plan", "02 Sequence read blocks"}
+        )
         and isinstance(node.get("modbusSkillsBlocks"), list)
     ]
     if len(sequencers) != 1:
@@ -206,6 +221,7 @@ class NodeRedAdminClient:
                 final_url = response.geturl() if hasattr(response, "geturl") else request.full_url
                 if not _same_origin(final_url, self.base_url):
                     raise CampaignError("Node-RED admin redirected away from loopback")
+                status = getattr(response, "status", 200)
                 raw = response.read()
         except (HTTPError, URLError, OSError, TimeoutError) as exc:
             raise CampaignError(f"Node-RED admin request failed: {exc}") from exc
@@ -214,6 +230,8 @@ class NodeRedAdminClient:
         try:
             return json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            if method == "POST" and 200 <= status < 300 and raw.strip() in {b"", b"OK"}:
+                return None
             raise CampaignError("Node-RED admin returned invalid JSON") from exc
 
     def flows(self) -> list[dict[str, Any]]:
@@ -245,8 +263,13 @@ class NodeRedAdminClient:
             if current_mtime is not None and current_mtime != previous_mtime:
                 try:
                     capture = json.loads(capture_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError) as exc:
-                    raise CampaignError("Node-RED capture sink wrote invalid JSON") from exc
+                except (OSError, json.JSONDecodeError):
+                    # The Node-RED file node can update mtime before its final
+                    # write buffer is visible. Keep the same bounded deadline
+                    # and retry instead of treating a transient partial file
+                    # as a campaign failure.
+                    self._wait(0.05)
+                    continue
                 if not isinstance(capture, dict):
                     raise CampaignError("Node-RED capture sink wrote a non-object capture")
                 return capture
@@ -285,6 +308,11 @@ class NodeRedAdminClient:
             raise CampaignError(
                 "Node-RED campaign requires one tab and one manual start button"
             )
+        # Native campaign runs are explicitly bounded. Temporarily disable the
+        # final flow's live poll so the harness can trigger exactly one plan and
+        # collect one deterministic capture; restore the polling flow on exit.
+        if injects[0].get("modbusSkillsRole") == "live-poll":
+            injects[0]["repeat"] = ""
         tabs[0]["disabled"] = False
         tabs[0]["env"] = [
             {"name": name, "value": str(value), "type": "str"}
@@ -309,6 +337,10 @@ class NodeRedAdminClient:
 
         try:
             self.deploy(deployed)
+            # Node-RED returns 204 before the newly deployed tab has finished
+            # registering its admin routes. Give the runtime a short bounded
+            # startup window before the first manual trigger.
+            self._wait(1.0)
             yield run_round
         finally:
             self.deploy(original)

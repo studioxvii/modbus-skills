@@ -1,8 +1,15 @@
 {
-  "adapter_version": "2.0.0",
+  "adapter_version": "2.1.0",
   "artifact_type": "modbus-target-manifest",
   "assumptions": [],
   "capture_contract": "capture/v1",
+  "dashboard": {
+    "auto_refresh_seconds": 3,
+    "endpoint": "/modbus-dashboard",
+    "nodes": 3,
+    "read_only": true,
+    "type": "core-http"
+  },
   "disabled_by_default": true,
   "environment": [
     "MODBUS_HOST",
@@ -20,6 +27,7 @@
   "max_in_flight": 1,
   "mode": "final",
   "physical_read_nodes": 1,
+  "poll_interval_seconds": 5,
   "read_block_ids": [
     "read-0001"
   ],
@@ -36,11 +44,11 @@
     "network_discovery": false,
     "read_only": true
   },
-  "scheduled_polling": false,
+  "scheduled_polling": true,
   "schema_version": "modbus-target-manifest/v1",
   "sequencing": "response-driven",
   "target": "node-red",
   "trigger_nodes": 1,
-  "trigger_type": "sequenced-manual-plan",
+  "trigger_type": "sequenced-live-poll",
   "verification": "not-run"
 }

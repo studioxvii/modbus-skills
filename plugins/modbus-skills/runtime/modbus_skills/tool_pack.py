@@ -55,6 +55,10 @@ _EMBEDDED_UNIX_PATH = re.compile(
     r"(?:^|[\s'\"`(=:\[,])/(?!/)[^\s,;\"'`)\]}]+"
 )
 _EMBEDDED_TILDE_PATH = re.compile(r"(?:^|[\s'\"`(=:\[,])~[\\/][^\s,;\"'`)\]}]+")
+_EMBEDDED_HTTP_ROUTE = re.compile(
+    r"(?:GET\s+|[\"'](?:url|endpoint)[\"']\s*:\s*[\"']?)/modbus-dashboard\b",
+    re.IGNORECASE,
+)
 _SENSITIVE_VALUE = re.compile(
     r"(?:"
     r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}"
@@ -763,6 +767,10 @@ def _find_embedded_local_path_fields(value: Any, *, path: str) -> list[str]:
 
 
 def _contains_embedded_local_path(value: str) -> bool:
+    # HTTP route paths are intentionally slash-prefixed, but they are not
+    # local filesystem paths. Remove only the explicit route forms before
+    # applying the stricter local-path checks below.
+    value = _EMBEDDED_HTTP_ROUTE.sub("route", value)
     lowered = value.lower()
     return (
         "file://" in lowered

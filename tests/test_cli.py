@@ -163,6 +163,26 @@ class CliIntegrationTests(unittest.TestCase):
                 self.assertEqual("run-bounded-read-plan", receipt["next_action"]["action"])
                 self.assertEqual("capture-sample", receipt["next_action"]["skill"])
                 self.assertEqual("node-red/flow.json", receipt["next_action"]["uses"])
+                self.assertIn(
+                    "every five seconds until you disable the tab",
+                    receipt["next_action"]["instruction"],
+                )
+
+        probe_receipt = self.run_command(
+            "generate-node-red",
+            "--map",
+            canonical,
+            "--plan",
+            plan,
+            "--mode",
+            "probe",
+            "--output",
+            self.root / "node-probe",
+        )
+        self.assertIn(
+            "click 01 Start bounded plan once",
+            probe_receipt["next_action"]["instruction"],
+        )
 
         self.assertTrue((self.root / "node" / "node-red" / "flow.json").is_file())
         self.assertTrue((self.root / "modpoll" / "modpoll" / "gavinying-cli" / "synthetic-loop.csv").is_file())

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import combinations
 import json
 import re
 import shutil
@@ -88,6 +89,128 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertEqual(len(read_plan["requests"]), len(sequencer["modbusSkillsBlocks"]))
         self.assertFalse(any("write" in node["type"].lower() for node in flow))
 
+    def test_flow_has_human_readable_sections_and_read_only_dashboard(self) -> None:
+        canonical_map, read_plan = inputs()
+        result = export_node_red(canonical_map, read_plan)
+        flow = json.loads(artifact_text(result, "flow.json"))
+        groups = {node["name"]: node for node in flow if node["type"] == "group"}
+        self.assertEqual(
+            {
+                "PRIMARY READ PATH",
+                "HEALTH & FAILURE HANDLING",
+                "RETRY & WATCHDOG",
+                "LIVE CAPTURE DASHBOARD",
+            },
+            set(groups),
+        )
+        self.assertTrue(all(group["nodes"] for group in groups.values()))
+        comments = {node["name"] for node in flow if node["type"] == "comment"}
+        self.assertIn("PRIMARY READ PATH · one request in flight", comments)
+        self.assertIn("HEALTH & FAILURE HANDLING · status / timeout / errors", comments)
+        self.assertIn("RETRY & WATCHDOG · bounded recovery", comments)
+        self.assertIn("LIVE CAPTURE DASHBOARD · GET /modbus-dashboard", comments)
+        dashboard_http = next(node for node in flow if node["type"] == "http in")
+        dashboard_render = next(node for node in flow if node.get("name") == "Render live dashboard")
+        dashboard_response = next(node for node in flow if node["type"] == "http response")
+        self.assertEqual("/modbus-dashboard", dashboard_http["url"])
+        self.assertEqual([dashboard_render["id"]], dashboard_http["wires"][0])
+        self.assertEqual([dashboard_response["id"]], dashboard_render["wires"][0])
+        self.assertIn("modbusSkillsCapture", dashboard_render["func"])
+        self.assertIn("refresh", dashboard_render["func"])
+        self.assertIn("Register data", dashboard_render["func"])
+        self.assertIn("Engineering value", dashboard_render["func"])
+        self.assertIn("Enable the flow to start live polling", dashboard_render["func"])
+        self.assertNotIn("inject", dashboard_render["func"])
+        manifest = json.loads(artifact_text(result, "manifest.json"))
+        self.assertEqual("core-http", manifest["dashboard"]["type"])
+        self.assertTrue(manifest["dashboard"]["read_only"])
+
+    def test_primary_path_is_ordered_and_diagnostics_are_below_it(self) -> None:
+        canonical_map, read_plan = inputs()
+        flow = json.loads(artifact_text(export_node_red(canonical_map, read_plan), "flow.json"))
+        groups = {node["name"]: node for node in flow if node["type"] == "group"}
+        names = {
+            node["name"]: node
+            for node in flow
+            if node["type"] in {"inject", "function", "modbus-flex-getter", "file"}
+        }
+        primary = [
+            names["01 Live poll (5s)"],
+            names["02 Sequence read blocks"],
+            names["03 Read route: default"],
+            names["04 Validate response"],
+            names["05 Decode points"],
+            names["06 Terminal gate"],
+            names["07 Build capture/v1"],
+            names["08 Write capture.json"],
+        ]
+        self.assertEqual(sorted(node["x"] for node in primary), [node["x"] for node in primary])
+        self.assertEqual(1, len({node["y"] for node in primary[:5]}))
+        self.assertGreater(names["06 Terminal gate"]["y"], names["05 Decode points"]["y"])
+        self.assertGreater(names["07 Build capture/v1"]["y"], names["06 Terminal gate"]["y"])
+        continuation = names["07a Continue plan"]
+        self.assertEqual(continuation["y"], names["07 Build capture/v1"]["y"])
+        self.assertIn(names["02 Sequence read blocks"]["id"], continuation["wires"][0])
+        continuation_lane = {
+            node["name"]
+            for node in flow
+            if node.get("y") == continuation["y"]
+            and node.get("type") not in {"group", "comment"}
+        }
+        self.assertEqual(
+            {"07a Continue plan", "07 Build capture/v1", "08 Write capture.json"},
+            continuation_lane,
+        )
+        diagnostics = [node for node in flow if node.get("g") == next(g["id"] for g in flow if g.get("name") == "HEALTH & FAILURE HANDLING")]
+        self.assertTrue(all(node["y"] >= 300 for node in diagnostics))
+        visual_nodes = [
+            node
+            for node in flow
+            if node.get("type") not in {"group", "comment", "tab", "modbus-client"}
+            and isinstance(node.get("x"), int)
+            and isinstance(node.get("y"), int)
+        ]
+        for left, right in combinations(visual_nodes, 2):
+            with self.subTest(left=left["name"], right=right["name"]):
+                self.assertTrue(
+                    abs(left["x"] - right["x"]) >= 180
+                    or abs(left["y"] - right["y"]) >= 40,
+                    "Node-RED nodes must not overlap",
+                )
+        for group in groups.values():
+            for node in flow:
+                if node.get("g") != group["id"]:
+                    continue
+                self.assertGreaterEqual(node["x"], group["x"])
+                self.assertLessEqual(node["x"], group["x"] + group["w"])
+                self.assertGreaterEqual(node["y"], group["y"])
+                self.assertLessEqual(node["y"], group["y"] + group["h"])
+        self.assertLess(
+            next(node for node in flow if node.get("name", "").startswith("PRIMARY READ PATH ·"))["y"],
+            groups["PRIMARY READ PATH"]["y"],
+        )
+        self.assertLess(
+            next(node for node in flow if node.get("name", "").startswith("HEALTH & FAILURE HANDLING ·"))["y"],
+            groups["HEALTH & FAILURE HANDLING"]["y"],
+        )
+        self.assertLess(
+            next(node for node in flow if node.get("name", "").startswith("LIVE CAPTURE DASHBOARD ·"))["y"],
+            groups["LIVE CAPTURE DASHBOARD"]["y"],
+        )
+
+    def test_probe_dashboard_and_readme_use_manual_one_shot_language(self) -> None:
+        canonical_map, read_plan = inputs()
+        result = export_node_red(canonical_map, read_plan, mode="probe")
+        flow = json.loads(artifact_text(result, "flow.json"))
+        dashboard = next(
+            node for node in flow if node.get("name") == "Render live dashboard"
+        )
+        self.assertIn("Start the bounded plan once", dashboard["func"])
+        self.assertNotIn("start live polling", dashboard["func"])
+        readme = artifact_text(result, "README.md")
+        self.assertIn("Probe mode is manual one-shot and does not poll", readme)
+        self.assertNotIn("every five seconds while the tab stays enabled", readme)
+
     def test_ids_are_unique_and_environment_values_are_placeholders(self) -> None:
         canonical_map, read_plan = inputs()
         result = export_node_red(canonical_map, read_plan)
@@ -99,10 +222,11 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertEqual("${MODBUS_PORT}", client["tcpPort"])
         read = next(node for node in flow if node["type"] == "modbus-flex-getter")
         inject = next(node for node in flow if node["type"] == "inject")
-        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        sequencer = next(node for node in flow if node.get("name") == "02 Sequence read blocks" and node["type"] == "function")
         self.assertEqual(sequencer["id"], inject["wires"][0][0])
         self.assertIn(read["id"], sequencer["wires"][0])
-        self.assertEqual("", inject["repeat"])
+        self.assertEqual("5", inject["repeat"])
+        self.assertEqual("live-poll", inject["modbusSkillsRole"])
         self.assertEqual("", inject["crontab"])
         self.assertFalse(inject["once"])
 
@@ -113,10 +237,10 @@ class NodeRedExporterTests(unittest.TestCase):
         derive = next(
             node
             for node in flow
-            if node["type"] == "function" and node["name"] == "Derive points"
+            if node["type"] == "function" and node["name"] == "05 Decode points"
         )
         self.assertIn("raw_values", derive["func"])
-        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        sequencer = next(node for node in flow if node.get("name") == "02 Sequence read blocks" and node["type"] == "function")
         self.assertIn('"datatype":"float32"', sequencer["func"])
         self.assertIn('"byte_order":"ABCD"', sequencer["func"])
         self.assertIn('"scale":0.1', sequencer["func"])
@@ -127,8 +251,8 @@ class NodeRedExporterTests(unittest.TestCase):
             point(logical_point_id="temperature", protocol_offset=110, datatype="int16", word_span=1),
         )
         flow = json.loads(artifact_text(export_node_red(canonical_map, read_plan), "flow.json"))
-        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
-        capture = next(node for node in flow if node.get("name") == "Build capture/v1")
+        sequencer = next(node for node in flow if node.get("name") == "02 Sequence read blocks" and node["type"] == "function")
+        capture = next(node for node in flow if node.get("name") == "07 Build capture/v1")
         sink = next(node for node in flow if node["type"] == "file")
         self.assertIn("flow.set('modbusSkillsQueue'", sequencer["func"])
         self.assertIn("modbusSkillsContinue", sequencer["func"])
@@ -147,7 +271,9 @@ class NodeRedExporterTests(unittest.TestCase):
         self.assertIn("modbusSkillsRetry", sequencer["func"])
         self.assertIn("retry_limit: 1", sequencer["func"])
         self.assertIn("finalize('drained')", sequencer["func"])
-        self.assertIn(sequencer["id"], capture["wires"][1])
+        continuation = next(node for node in flow if node.get("name") == "07a Continue plan")
+        self.assertIn(continuation["id"], capture["wires"][1])
+        self.assertIn(sequencer["id"], continuation["wires"][0])
         self.assertEqual(sink["id"], capture["wires"][0][0])
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required to execute generated functions")
@@ -157,12 +283,12 @@ class NodeRedExporterTests(unittest.TestCase):
         sequencer = next(
             node["func"]
             for node in flow
-            if node.get("type") == "function" and node.get("name") == "Run bounded read plan"
+            if node.get("type") == "function" and node.get("name") == "02 Sequence read blocks"
         )
         capture = next(
             node["func"]
             for node in flow
-            if node.get("type") == "function" and node.get("name") == "Build capture/v1"
+            if node.get("type") == "function" and node.get("name") == "07 Build capture/v1"
         )
         harness = f"""
 const store = new Map();
@@ -199,7 +325,7 @@ if (routed.at(-1).payload.state !== 'cancelled' || store.get('modbusSkillsRunnin
         result = export_node_red(canonical_map, read_plan, mode="probe")
         self.assertEqual("generated", result.status)
         flow = json.loads(artifact_text(result, "flow.json"))
-        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        sequencer = next(node for node in flow if node.get("name") == "02 Sequence read blocks" and node["type"] == "function")
         self.assertIn('"datatype":null', sequencer["func"])
 
     def test_probe_one_read_feeds_all_four_32_bit_byte_order_candidates(self) -> None:
@@ -218,15 +344,16 @@ if (routed.at(-1).payload.state !== 'cancelled' || store.get('modbusSkillsRunnin
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"].startswith("Derive points")
+            and node["name"].startswith("05 Decode points")
         ]
 
         self.assertEqual(1, len(injects))
         self.assertEqual(1, len(reads))
         self.assertEqual(1, len(derives))
         self.assertEqual("", injects[0]["repeat"])
+        self.assertEqual("manual-start", injects[0]["modbusSkillsRole"])
         self.assertFalse(injects[0]["once"])
-        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        sequencer = next(node for node in flow if node.get("name") == "02 Sequence read blocks" and node["type"] == "function")
         self.assertEqual(sequencer["id"], injects[0]["wires"][0][0])
         watchdog = next(node for node in flow if node["type"] == "trigger")
         self.assertIn(reads[0]["id"], sequencer["wires"][0])
@@ -235,27 +362,30 @@ if (routed.at(-1).payload.state !== 'cancelled' || store.get('modbusSkillsRunnin
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"] == "Reset watchdog"
+            and node["name"] == "Retry / watchdog handoff"
         )
+        read_error = next(node for node in flow if node.get("name") == "03a Read error lane")
         gate = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"] == "Accept complete read"
+            and node["name"] == "04 Validate response"
         )
         terminal = next(
             node for node in flow
-            if node.get("name") == "Accept first terminal result"
+            if node.get("name") == "06 Terminal gate"
         )
         error_debug = next(
-            node for node in flow if node.get("name") == "Modbus read errors"
+            node for node in flow if node.get("name") == "Errors → Debug"
         )
         self.assertEqual([gate["id"]], reads[0]["wires"][0])
-        self.assertIn(error_debug["id"], reads[0]["wires"][1])
+        self.assertIn(read_error["id"], reads[0]["wires"][1])
+        self.assertIn(terminal["id"], read_error["wires"][0])
         self.assertIn(derives[0]["id"], gate["wires"][0])
         self.assertEqual([[terminal["id"]]], derives[0]["wires"])
         self.assertEqual([[reset["id"]], [error_debug["id"]]], terminal["wires"])
         self.assertIn("request.block_id !== active", terminal["func"])
+        self.assertIn("duplicate-raw-response", terminal["func"])
         self.assertIn("modbusSkillsActiveBlockId', null", terminal["func"])
         self.assertNotIn(reset["id"], reads[0]["wires"][0])
         self.assertNotIn(watchdog["id"], reads[0]["wires"][0])
@@ -314,7 +444,7 @@ if (routed.at(-1).payload.state !== 'cancelled' || store.get('modbusSkillsRunnin
         injects = [node for node in flow if node["type"] == "inject"]
         self.assertEqual(1, len(reads))
         self.assertEqual(1, len(injects))
-        sequencer = next(node for node in flow if node.get("name") == "Run bounded read plan" and node["type"] == "function")
+        sequencer = next(node for node in flow if node.get("name") == "02 Sequence read blocks" and node["type"] == "function")
         self.assertEqual(sequencer["id"], injects[0]["wires"][0][0])
         watchdog = next(node for node in flow if node["type"] == "trigger")
         self.assertIn(reads[0]["id"], sequencer["wires"][0])
@@ -323,44 +453,48 @@ if (routed.at(-1).payload.state !== 'cancelled' || store.get('modbusSkillsRunnin
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"] == "Reset watchdog"
+            and node["name"] == "Retry / watchdog handoff"
         )
+        read_error = next(node for node in flow if node.get("name") == "03a Read error lane")
         gate = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"] == "Accept complete read"
+            and node["name"] == "04 Validate response"
         )
         terminal = next(
             node for node in flow
-            if node.get("name") == "Accept first terminal result"
+            if node.get("name") == "06 Terminal gate"
         )
         derive = next(
             node
             for node in flow
             if node["type"] == "function"
-            and node["name"] == "Derive points"
+            and node["name"] == "05 Decode points"
         )
         error_debug = next(
-            node for node in flow if node.get("name") == "Modbus read errors"
+            node for node in flow if node.get("name") == "Errors → Debug"
         )
         self.assertEqual([gate["id"]], reads[0]["wires"][0])
-        self.assertIn(error_debug["id"], reads[0]["wires"][1])
+        self.assertIn(read_error["id"], reads[0]["wires"][1])
+        self.assertIn(terminal["id"], read_error["wires"][0])
         self.assertIn(derive["id"], gate["wires"][0])
         self.assertEqual([[terminal["id"]]], derive["wires"])
         self.assertEqual([[reset["id"]], [error_debug["id"]]], terminal["wires"])
+        self.assertIn("duplicate-raw-response", terminal["func"])
         self.assertNotIn(reset["id"], reads[0]["wires"][0])
         self.assertNotIn(watchdog["id"], reads[0]["wires"][0])
         self.assertIn("msg.reset = true", reset["func"])
-        self.assertEqual("", injects[0]["repeat"])
+        self.assertEqual("5", injects[0]["repeat"])
+        self.assertEqual("live-poll", injects[0]["modbusSkillsRole"])
         self.assertEqual("", injects[0]["crontab"])
         self.assertFalse(injects[0]["once"])
         self.assertFalse(any(node["type"] == "modbus-read" for node in flow))
         self.assertNotIn("MODBUS_POLL_INTERVAL_MS", json.dumps(flow))
         manifest = json.loads(artifact_text(result, "manifest.json"))
-        self.assertEqual("sequenced-manual-plan", manifest["trigger_type"])
+        self.assertEqual("sequenced-live-poll", manifest["trigger_type"])
         self.assertEqual(1, manifest["trigger_nodes"])
-        self.assertFalse(manifest["scheduled_polling"])
+        self.assertTrue(manifest["scheduled_polling"])
         self.assertNotIn("MODBUS_POLL_INTERVAL_MS", manifest["environment"])
 
     def test_final_flow_holds_an_unconfirmed_byte_order(self) -> None:
