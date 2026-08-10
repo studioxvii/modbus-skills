@@ -141,6 +141,25 @@ def _selected_counts(case_root: Path) -> dict[str, int]:
     }
 
 
+def _offline_artifacts_agree(case_root: Path) -> bool:
+    counts = _selected_counts(case_root)
+    case = json.loads((case_root / "case.json").read_text(encoding="utf-8"))
+    artifacts = case["artifacts"]
+    expected = {
+        "user_map_human": "output/user-map.md",
+        "user_map": "output/user-map.json",
+        "user_map_csv": "output/user-map.csv",
+    }
+    hashes_match = all(
+        artifacts[name]["path"] == relative
+        and artifacts[name]["sha256"] == fixture_sha256(case_root / relative)
+        for name, relative in expected.items()
+    )
+    user_map = json.loads((case_root / "output/user-map.json").read_text(encoding="utf-8"))
+    has_lineage = all(point.get("source_refs") for point in user_map["points"])
+    return len(set(counts.values())) == 1 and hashes_match and has_lineage
+
+
 def _clean_case(output: Path) -> dict[str, Any]:
     source_path = output / "inputs" / "clean-registers.csv"
     source_path.parent.mkdir(parents=True, exist_ok=True)
@@ -264,6 +283,56 @@ else:
             {"kind": "compiler-invocation"},
             {"kind": "internal-parser-fallback"},
         ],
+    }
+    validate_transcript(transcript)
+    return transcript
+
+
+def _partial_case(output: Path) -> dict[str, Any]:
+    point = _point("capacitance", 67, "capacitance")
+    source = build_oem_map(
+        [point],
+        source_hash="b" * 64,
+        source_reference={"filename": "synthetic.pdf", "format": "pdf"},
+        source_coverage={
+            "status": "complete",
+            "accepted_row_count": 1,
+            "rejected_row_count": 0,
+            "quarantined_row_count": 0,
+            "detected_pages": [1],
+            "covered_pages": [1],
+            "detected_regions": ["row-67"],
+            "basis": "synthetic-complete-coverage",
+            "discovery_complete": True,
+            "independent_parser_row_count": 1,
+            "single_parser_row_count": 0,
+        },
+    )
+    root = output / "useful-partial"
+    result = compile_user_map(_request(source, ["capacitance"]), root)
+    if result["state"] != "partial":
+        raise WorkflowFailure("unconfirmed PDF field evidence reported complete")
+    if result["next_action"].get("kind") != "provide-corrected-source":
+        raise WorkflowFailure("partial output did not name one bounded next action")
+    if not _offline_artifacts_agree(root):
+        raise WorkflowFailure("partial offline map artifacts disagree")
+    case = json.loads((root / "case.json").read_text(encoding="utf-8"))
+    transcript = {
+        "case_id": "useful-partial",
+        "invocation_count": 1,
+        "question_count": 0,
+        "decision_packet_count": int(case.get("active_packet") is not None),
+        "resume_exchange_count": 0,
+        "stage_handoffs": 0,
+        "repeated_hold_signatures": [],
+        "state_transitions": [result["state"]],
+        "selected_point_counts": _selected_counts(root),
+        "offline_artifacts_agree": True,
+        "actionable_correction_count": int(
+            result["next_action"].get("kind") == "provide-corrected-source"
+        ),
+        "affected_count": result["next_action"]["affected_count"],
+        "events": [{"kind": "compiler-invocation"}],
     }
     validate_transcript(transcript)
     return transcript
@@ -422,6 +491,7 @@ def run(fixtures: Path, output: Path, *, benchmark: bool = False) -> dict[str, A
     cases = [
         _clean_case(output),
         _fallback_case(output),
+        _partial_case(output),
         _selection_case(output),
         _binding_case(output),
     ]

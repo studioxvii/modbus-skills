@@ -343,7 +343,103 @@ def _oem_point(point: Mapping[str, Any], index: int) -> dict[str, Any]:
         result["source_register"] = str(source_register)
     elif isinstance(source_address, Mapping) and source_address.get("raw") not in (None, ""):
         result["source_register"] = str(source_address["raw"])
-    result["source_refs"] = [_source_ref(point.get("source_location"), index)]
+    source_refs = [_source_ref(point.get("source_location"), index)]
+    for claim in point.get("source_claims", ()):
+        if not isinstance(claim, Mapping):
+            continue
+        locator = claim.get("source_locator", claim.get("source"))
+        if not isinstance(locator, Mapping):
+            continue
+        reference = _source_ref(locator, index)
+        if reference not in source_refs:
+            source_refs.append(reference)
+    result["source_refs"] = source_refs
+    field_evidence = _source_field_evidence(point, result["source_refs"][0])
+    if field_evidence:
+        result["source_field_evidence"] = field_evidence
+    return result
+
+
+_CLAIM_TO_POINT_FIELD = {
+    "address": "protocol_offset",
+    "protocol_offset": "protocol_offset",
+    "access": "access",
+    "format": "datatype",
+    "datatype": "datatype",
+    "units": "engineering_unit",
+    "engineering_unit": "engineering_unit",
+    "scale": "scale",
+    "word_count": "word_span",
+    "word_span": "word_span",
+    "description": "description",
+}
+
+
+def _source_field_evidence(
+    point: Mapping[str, Any], source_ref: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    claims = point.get("source_claims", ())
+    raw_claims: dict[str, Mapping[str, Any]] = {}
+    if isinstance(claims, Sequence) and not isinstance(
+        claims, (str, bytes, bytearray)
+    ):
+        for claim in claims:
+            if isinstance(claim, Mapping) and isinstance(claim.get("field"), str):
+                target = _CLAIM_TO_POINT_FIELD.get(str(claim["field"]))
+                if target is not None:
+                    raw_claims.setdefault(target, claim)
+    raw_evidence = point.get("source_evidence", ())
+    evidence = (
+        raw_evidence
+        if isinstance(raw_evidence, Sequence)
+        and not isinstance(raw_evidence, (str, bytes, bytearray))
+        else ()
+    )
+    normalized_evidence: dict[str, Mapping[str, Any]] = {}
+    for item in evidence:
+        if not isinstance(item, Mapping):
+            continue
+        source_field = str(item.get("source_field", item.get("field", "")))
+        target = _CLAIM_TO_POINT_FIELD.get(
+            str(item.get("field", "")), _CLAIM_TO_POINT_FIELD.get(source_field)
+        )
+        if target is not None:
+            normalized_evidence.setdefault(target, item)
+    source_ref_text = point_evidence_refs({"source_refs": [source_ref]})[0]
+    result: list[dict[str, Any]] = []
+    for target in sorted(set(raw_claims) | set(normalized_evidence)):
+        item = normalized_evidence.get(target, {})
+        source_field = str(item.get("source_field", target))
+        raw_claim = raw_claims.get(target, {})
+        raw_value = raw_claim.get(
+            "raw_value", raw_claim.get("value", item.get("source_value"))
+        )
+        normalized_value = point.get(target)
+        if raw_value in (None, "") and normalized_value in (None, ""):
+            continue
+        locator = raw_claim.get("source_locator", raw_claim.get("source"))
+        claim_ref = (
+            _source_ref(locator, 0) if isinstance(locator, Mapping) else source_ref
+        )
+        claim_ref_text = point_evidence_refs({"source_refs": [claim_ref]})[0]
+        result.append(
+            {
+                "field": target,
+                "raw_header": str(
+                    raw_claim.get("raw_header", source_field or target)
+                ),
+                "raw_value": raw_value,
+                "normalized_value": normalized_value,
+                "source_ref": claim_ref_text,
+                "status": (
+                    "unresolved"
+                    if raw_value not in (None, "") and normalized_value in (None, "")
+                    else "contradiction"
+                    if item.get("value", normalized_value) != normalized_value
+                    else "confirmed"
+                ),
+            }
+        )
     return result
 
 

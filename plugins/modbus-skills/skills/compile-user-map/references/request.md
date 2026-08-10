@@ -36,10 +36,14 @@ require device binding.
 ## Resume
 
 Include the existing case reference and exactly one typed input requested by its
-`next_action`: a source-decision candidate, binding, immutable capture, or byte-order
+`next_action`: a selection decision, binding, immutable capture, or byte-order
 decision. Copy the expected case, phase, input, and packet hashes exactly. A plain-
 language reply may be translated into the offered candidate shape, but deterministic
 runtime validation remains authoritative.
+
+`provide-corrected-source` is not a resume. Copy the original request, replace the
+source path or typed source data, choose a new empty case directory, and start a new
+run. Keep the previous partial map files available while the corrected case runs.
 
 ## Result
 
@@ -47,4 +51,6 @@ Treat `compile-result.json` as the status interface. Report completed artifacts 
 then grouped exclusions or holds, then the one permitted next action. Never replay
 completed stages manually or turn one decision packet into page, row, or point prompts.
 The three human deliverables are the only files in `output/`. A result is not complete
-when source coverage is unknown or any selected point still has a blocking hold.
+when source coverage is unknown, selected PDF fields lack confirmed source evidence, or
+any selected point still has a blocking hold. A `partial` result keeps its usable output
+files and does not need a decision reply unless the state explicitly says `awaiting-*`.

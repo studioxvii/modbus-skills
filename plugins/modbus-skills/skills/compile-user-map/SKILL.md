@@ -12,16 +12,10 @@ Follow `../../references/interaction-contract.md`.
 ## Process
 
 1. Read `references/request.md`.
-2. For PDF input, locate the bundled workspace dependency runtime and use its Python
-   executable when it provides `pdfplumber`. Do not install dependencies during the
-   workflow. For structured input, the active Python 3.11+ runtime is sufficient.
-3. Put the OEM source, measurement intent, optional targets, and any resume input in
-   one request file.
+2. For PDF input, locate the bundled workspace dependency runtime and use its Python executable when it provides `pdfplumber`. Do not install dependencies during the workflow. For structured input, the active Python 3.11+ runtime is sufficient.
+3. Put the OEM source, measurement intent, optional targets, and any resume input in one request file.
 4. Run `<selected-python> <skill-dir>/scripts/run.py --request <request.json> --output <case-directory>`.
-5. Inspect the result plus the user-map holds and target statuses against the user's
-   requested outcome. `offline-complete` is valid only when source coverage is complete
-   and selected points have no blocking holds. Return the state, elapsed time, artifact
-   paths, exclusions, and one useful next step; never treat `next_action: none` alone as proof of completion.
+5. Inspect the result plus the user-map holds and target statuses against the user's requested outcome. `offline-complete` is valid only when source coverage is complete, selected PDF fields have confirmed source evidence, and selected points have no blocking holds. Return the state, elapsed time, artifact paths, exclusions, and one useful next step; never treat `next_action: none` alone as proof of completion.
 6. When the result needs a decision, present its complete grouped packet once, encode
    the reply in a new request, and rerun the same case. Do not invent fields or bypass
    case, source, packet, or artifact hashes.
@@ -46,6 +40,7 @@ Normally leave these alone:
 
 Completion requires `compile-result.json` plus the complete offline user-map bundle.
 Requested targets may remain independently held without invalidating completed outputs.
+A `partial` result still contains useful map files. Report those files and the one correction needed. Ask for input only when the state is `awaiting-source-decision`, `awaiting-selection-decision`, `awaiting-binding`, `awaiting-physical-read`, or `awaiting-byte-order-decision`. A corrected source starts a new case; do not describe it as a resume.
 
 ## Finish
 

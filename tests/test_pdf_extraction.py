@@ -11,7 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
 sys.path.insert(0, str(RUNTIME))
 
-from modbus_skills.pdf_extraction import PdfExtractionError, _call, extract_pdf  # noqa: E402
+from modbus_skills.pdf_extraction import (  # noqa: E402
+    PdfExtractionError,
+    _call,
+    _source_coverage,
+    discover_register_pages,
+    extract_pdf,
+)
 
 
 VERSION = subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n")
@@ -53,8 +59,11 @@ class PdfExtractionTests(unittest.TestCase):
         ), mock.patch(
             "modbus_skills.pdf_extraction._call", side_effect=effects
         ) as run_mock, mock.patch(
-            "modbus_skills.pdf_extraction.extract_pdf_table_rows",
-            return_value=[] if grid_rows is None else grid_rows,
+            "modbus_skills.pdf_extraction.extract_pdf_table_evidence",
+            return_value={
+                "records": [] if grid_rows is None else grid_rows,
+                "quarantined_records": [],
+            },
         ):
             result = extract_pdf(Path(name), b"%PDF synthetic")
         return result, run_mock
@@ -134,8 +143,8 @@ class PdfExtractionTests(unittest.TestCase):
         with mock.patch(
             "modbus_skills.pdf_extraction.shutil.which", return_value=None
         ), mock.patch(
-            "modbus_skills.pdf_extraction.extract_pdf_table_rows",
-            return_value=[grid_row],
+            "modbus_skills.pdf_extraction.extract_pdf_table_evidence",
+            return_value={"records": [grid_row], "quarantined_records": []},
         ):
             result = extract_pdf(Path("map.pdf"), b"%PDF synthetic")
 
@@ -175,6 +184,49 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual("complete", result["source_coverage"]["status"])
         self.assertEqual({"Status", "Alarm"}, {row["name"] for row in result["records"]})
         self.assertIn("pdf-grid-recovery-used", {item["code"] for item in result["findings"]})
+
+    def test_continuation_page_without_repeated_header_prevents_complete_coverage(self) -> None:
+        text = (
+            "Address  Name  Data Type\n"
+            "40001  Temperature  uint16\f"
+            "67  Pressure  int16\n"
+        )
+
+        self.assertEqual([1, 2], discover_register_pages(text))
+
+        coverage = _source_coverage(
+            [
+                {
+                    "address": "40001",
+                    "_source": {"page": 1, "region": "p1:l2", "parser_id": "test"},
+                }
+            ],
+            [],
+            [],
+            [1, 2],
+            True,
+        )
+
+        self.assertEqual("unknown", coverage["status"])
+        self.assertEqual([1], coverage["covered_pages"])
+
+    def test_narrative_page_number_is_not_a_register_continuation(self) -> None:
+        text = (
+            "Address  Name  Data Type\n40001  Temperature  uint16\f"
+            "2026 annual service information\n"
+        )
+
+        self.assertEqual([1], discover_register_pages(text))
+
+    def test_supported_aliases_chain_sparse_continuation_pages(self) -> None:
+        text = (
+            "Address  Name  Type\n40001  First  UInt\f"
+            "67  Second  ULong\f"
+            "68  Third  Float\f"
+            "69  Fourth  R\n"
+        )
+
+        self.assertEqual([1, 2, 3, 4], discover_register_pages(text))
 
     def test_only_material_conflict_is_quarantined(self) -> None:
         layout = (

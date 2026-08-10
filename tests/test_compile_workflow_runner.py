@@ -65,6 +65,14 @@ class CompileWorkflowRunnerTests(unittest.TestCase):
             self.assertEqual(fallback["strategy"], "coordinate-fallback")
             self.assertEqual(fallback["source_point_count"], 1)
 
+            partial = cases["useful-partial"]
+            self.assertEqual(partial["state_transitions"], ["partial"])
+            self.assertEqual(partial["question_count"], 0)
+            self.assertEqual(partial["decision_packet_count"], 0)
+            self.assertTrue(partial["offline_artifacts_agree"])
+            self.assertEqual(partial["actionable_correction_count"], 1)
+            self.assertEqual(partial["affected_count"], 1)
+
             selection = cases["selection-exception"]
             self.assertEqual(selection["decision_packet_count"], 1)
             self.assertEqual(selection["resume_exchange_count"], 1)

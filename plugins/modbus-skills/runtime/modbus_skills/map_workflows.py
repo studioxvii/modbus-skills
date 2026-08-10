@@ -1471,6 +1471,11 @@ def _normalize_one(
         "function_code": function_code,
         "normalization_status": "pending" if holds else "confirmed",
         "source_evidence": evidence,
+        "source_claims": [
+            dict(claim)
+            for claim in record.get("_claims", ())
+            if isinstance(claim, Mapping)
+        ],
         "source_location": dict(source),
         "unmapped_fields": unmapped_fields,
     }

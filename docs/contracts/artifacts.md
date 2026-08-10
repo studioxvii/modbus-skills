@@ -30,9 +30,12 @@ offline map look complete.
   content is rejected as a collision.
   PDF rows use page/table/row geometry for source identity, so two OEM tables may
   safely reuse the same register address. Its `source_coverage` records detected
-  pages and regions, accepted/rejected/quarantined counts, whether discovery
-  completed, and the evidence basis. Artifact validity alone never implies complete
-  source coverage.
+  and covered pages, detected regions, accepted/rejected/quarantined counts,
+  whether discovery completed, and the evidence basis. Each
+  `source_field_evidence` item binds a raw PDF header and value to its normalized
+  point value and source reference. Artifact validity alone never implies complete
+  source coverage. Older v1 artifacts without `covered_pages` remain readable but
+  cannot support a new PDF completion claim until regenerated.
 - `modbus-user-selection/v1` contains the requested measurements and one
   reasoned disposition per referenced OEM point: `included`, `suggested`, or
   `excluded`. Its `input_hashes.oem_map` must match the exact OEM map.
@@ -47,9 +50,10 @@ offline map look complete.
   records the immutable source and request hashes, compiler version, state,
   receipts, active packet, next action, and a case-relative artifact index.
 
-`offline-complete` requires complete source coverage when a coverage contract is
-present and no blocking hold on a selected point. The three user deliverables live in
-`output/`; control, provenance, and target files remain outside that folder.
+`offline-complete` requires no blocking hold on a selected point. A PDF-backed map
+also requires discovered pages to be covered and every populated material field to
+match confirmed source evidence. The three user deliverables live in `output/`;
+control, provenance, and target files remain outside that folder.
 
 The legacy bound identity remains:
 

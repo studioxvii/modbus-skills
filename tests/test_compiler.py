@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "plugins" / "modbus-skills" / "runtime"))
 from modbus_skills.artifacts import stable_input_hash
 from modbus_skills.compiler import CompilerError, compile_user_map
 from modbus_skills.compiler_contracts import build_device_binding, build_oem_map
+from modbus_skills.pdf_table_extraction import parse_pdf_table_evidence
 
 
 def oem_map(*, multiword: bool = False) -> dict[str, object]:
@@ -172,6 +173,175 @@ class CompilerTests(unittest.TestCase):
 
         self.assertEqual("partial", result["state"])
         self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
+
+    def test_pdf_without_independent_field_evidence_cannot_report_complete(self) -> None:
+        point = copy.deepcopy(oem_map()["points"][0])
+        source = build_oem_map(
+            [point],
+            source_hash="a" * 64,
+            source_reference={"filename": "synthetic.pdf", "format": "pdf"},
+            source_coverage={
+                "status": "complete",
+                "accepted_row_count": 1,
+                "rejected_row_count": 0,
+                "quarantined_row_count": 0,
+                "detected_pages": [2],
+                "covered_pages": [2],
+                "detected_regions": ["row-4"],
+                "basis": "bounded-discovery",
+                "discovery_complete": True,
+                "independent_parser_row_count": 1,
+                "single_parser_row_count": 0,
+            },
+        )
+        compile_request = request()
+        compile_request["oem_map"] = source
+        compile_request["selection_candidate"]["oem_map_hash"] = stable_input_hash(source)
+
+        result = compile_user_map(compile_request, self.root / "pdf-evidence-case")
+
+        self.assertEqual("partial", result["state"])
+        self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
+        self.assertEqual(
+            "artifacts/oem-map.json", result["next_action"]["evidence_artifact"]
+        )
+        evidence_issue = next(
+            issue
+            for issue in result["next_action"]["issues"]
+            if issue["code"] == "pdf-field-evidence-unconfirmed"
+        )
+        self.assertEqual("temperature", evidence_issue["point_id"])
+        self.assertEqual(
+            ["datatype", "protocol_offset", "word_span"], evidence_issue["fields"]
+        )
+
+    def test_pdf_with_confirmed_field_evidence_can_complete(self) -> None:
+        point = copy.deepcopy(oem_map()["points"][0])
+        point["source_refs"] = [{"page_index": 2, "row_index": 4}]
+        point["source_field_evidence"] = [
+            {
+                "field": "datatype",
+                "raw_header": "Type",
+                "raw_value": "uint16",
+                "normalized_value": "uint16",
+                "source_ref": "page-2-row-4",
+                "status": "confirmed",
+            },
+            {
+                "field": "protocol_offset",
+                "raw_header": "Start",
+                "raw_value": "10",
+                "normalized_value": 10,
+                "source_ref": "page-2-row-4",
+                "status": "confirmed",
+            },
+        ]
+        source = build_oem_map(
+            [point],
+            source_hash="a" * 64,
+            source_reference={"filename": "synthetic.pdf", "format": "pdf"},
+            source_coverage={
+                "status": "complete",
+                "accepted_row_count": 1,
+                "rejected_row_count": 0,
+                "quarantined_row_count": 0,
+                "detected_pages": [2],
+                "covered_pages": [2],
+                "detected_regions": ["row-4"],
+                "basis": "bounded-discovery",
+                "discovery_complete": True,
+                "independent_parser_row_count": 1,
+                "single_parser_row_count": 0,
+            },
+        )
+        compile_request = request()
+        compile_request["oem_map"] = source
+        compile_request["selection_candidate"]["oem_map_hash"] = stable_input_hash(source)
+
+        result = compile_user_map(compile_request, self.root / "confirmed-pdf-case")
+
+        self.assertEqual("offline-complete", result["state"])
+
+    def test_pdf_without_coverage_cannot_report_complete(self) -> None:
+        point = copy.deepcopy(oem_map()["points"][0])
+        point["source_field_evidence"] = [
+            {
+                "field": field,
+                "raw_header": header,
+                "raw_value": raw,
+                "normalized_value": normalized,
+                "source_ref": "row-4",
+                "status": "confirmed",
+            }
+            for field, header, raw, normalized in (
+                ("protocol_offset", "Start", "10", 10),
+                ("datatype", "Type", "uint16", "uint16"),
+            )
+        ]
+        source = build_oem_map(
+            [point],
+            source_hash="a" * 64,
+            source_reference={"filename": "synthetic.pdf", "format": "pdf"},
+        )
+        compile_request = request()
+        compile_request["oem_map"] = source
+        compile_request["selection_candidate"]["oem_map_hash"] = stable_input_hash(source)
+
+        result = compile_user_map(compile_request, self.root / "pdf-no-coverage")
+
+        self.assertEqual("partial", result["state"])
+
+    def test_stale_pdf_evidence_cannot_report_complete(self) -> None:
+        point = copy.deepcopy(oem_map()["points"][0])
+        point["source_field_evidence"] = [
+            {
+                "field": "protocol_offset",
+                "raw_header": "Start",
+                "raw_value": "10",
+                "normalized_value": 10,
+                "source_ref": "row-4",
+                "status": "confirmed",
+            },
+            {
+                "field": "datatype",
+                "raw_header": "Type",
+                "raw_value": "uint16",
+                "normalized_value": "uint16",
+                "source_ref": "row-4",
+                "status": "confirmed",
+            },
+            {
+                "field": "word_span",
+                "raw_header": "Size",
+                "raw_value": "2",
+                "normalized_value": 2,
+                "source_ref": "row-4",
+                "status": "confirmed",
+            },
+        ]
+        source = build_oem_map(
+            [point],
+            source_hash="a" * 64,
+            source_reference={"filename": "synthetic.pdf", "format": "pdf"},
+            source_coverage={
+                "status": "complete",
+                "accepted_row_count": 1,
+                "rejected_row_count": 0,
+                "quarantined_row_count": 0,
+                "detected_pages": [2],
+                "covered_pages": [2],
+                "detected_regions": ["row-4"],
+                "basis": "bounded-discovery",
+                "discovery_complete": True,
+            },
+        )
+        compile_request = request()
+        compile_request["oem_map"] = source
+        compile_request["selection_candidate"]["oem_map_hash"] = stable_input_hash(source)
+
+        result = compile_user_map(compile_request, self.root / "stale-pdf-evidence")
+
+        self.assertEqual("partial", result["state"])
 
     def test_clean_structured_source_reaches_offline_bundle_in_one_call(self) -> None:
         source = self.root / "clean.csv"
@@ -371,26 +541,14 @@ class CompilerTests(unittest.TestCase):
             subprocess.CompletedProcess([], 0, b"", b"-f -l -layout -bbox-layout -enc\n"),
             subprocess.CompletedProcess([], 0, b"Modbus Point Map\n", b""),
         ]
-        grid_rows = [
-            {
-                "source_register": "257/258",
-                "address": 257,
-                "word_count": 2,
-                "access": "R",
-                "format": "Float",
-                "units": "kWh",
-                "description": "Real Energy Consumption",
-                "_source": {
-                    "format": "pdf",
-                    "page": 1,
-                    "row": 2,
-                    "region": "p1:t0:r2",
-                    "parser_id": "pdfplumber-table/v1",
-                    "method": "coordinate-derived",
-                    "excerpt": "257/258 | R | Float | kWh | Real Energy Consumption",
-                },
-            }
-        ]
+        grid_rows = parse_pdf_table_evidence(
+            [
+                ["Start", "Size", "R/W", "Type", "Units", "Scale Factor", "Description"],
+                ["67", "1", "R", "int16", "uF", "0", "Capacitance"],
+            ],
+            page_number=1,
+            table_index=0,
+        )["records"]
         compile_request = {
             "schema_version": "modbus-compile-request/v1",
             "source": {"path": str(source), "format": "pdf"},
@@ -407,8 +565,8 @@ class CompilerTests(unittest.TestCase):
         ), mock.patch(
             "modbus_skills.pdf_extraction._call", side_effect=effects
         ), mock.patch(
-            "modbus_skills.pdf_extraction.extract_pdf_table_rows",
-            return_value=grid_rows,
+            "modbus_skills.pdf_extraction.extract_pdf_table_evidence",
+            return_value={"records": grid_rows, "quarantined_records": []},
         ):
             result = compile_user_map(compile_request, self.root / "grid-pdf-case")
 
@@ -418,7 +576,21 @@ class CompilerTests(unittest.TestCase):
             (self.root / "grid-pdf-case" / "output" / "user-map.json").read_text()
         )
         self.assertEqual(1, len(user_map["points"]))
-        self.assertEqual("257/258", user_map["points"][0]["source_register"])
+        self.assertEqual("67", user_map["points"][0]["source_register"])
+        self.assertEqual("int16", user_map["points"][0]["datatype"])
+        self.assertEqual("uF", user_map["points"][0]["engineering_unit"])
+        self.assertEqual(0.0, user_map["points"][0]["scale"])
+        oem_map = json.loads(
+            (self.root / "grid-pdf-case" / "artifacts" / "oem-map.json").read_text()
+        )
+        evidence = {
+            item["field"]: item
+            for item in oem_map["points"][0]["source_field_evidence"]
+        }
+        self.assertEqual("Type", evidence["datatype"]["raw_header"])
+        self.assertEqual("int16", evidence["datatype"]["raw_value"])
+        self.assertEqual("Units", evidence["engineering_unit"]["raw_header"])
+        self.assertEqual("uF", evidence["engineering_unit"]["raw_value"])
 
     def test_same_pdf_address_in_two_tables_becomes_two_source_rows(self) -> None:
         source = self.root / "duplicate-address.pdf"
@@ -466,7 +638,8 @@ class CompilerTests(unittest.TestCase):
         ), mock.patch(
             "modbus_skills.pdf_extraction._call", side_effect=effects
         ), mock.patch(
-            "modbus_skills.pdf_extraction.extract_pdf_table_rows", return_value=grid_rows
+            "modbus_skills.pdf_extraction.extract_pdf_table_evidence",
+            return_value={"records": grid_rows, "quarantined_records": []},
         ):
             result = compile_user_map(compile_request, self.root / "duplicate-case")
 
