@@ -57,6 +57,7 @@ class PluginVariantTests(unittest.TestCase):
         self.assertEqual([], validate_variants(self.output))
         self.assertTrue((self.output / "agent-plugin" / "plugin.json").is_file())
         self.assertTrue((self.output / "codex" / ".codex-plugin" / "plugin.json").is_file())
+        self.assertTrue((self.output / "cursor" / ".cursor-plugin" / "plugin.json").is_file())
         self.assertTrue((self.output / "claude" / ".claude-plugin" / "plugin.json").is_file())
 
     def test_portable_variant_preserves_canonical_skill_content(self) -> None:
@@ -85,7 +86,7 @@ class PluginVariantTests(unittest.TestCase):
                 output = Path(temp_dir)
                 build_variants(output)
                 self.assertEqual([], validate_variants(output))
-                for variant in ("agent-plugin", "codex", "claude"):
+                for variant in ("agent-plugin", "codex", "cursor", "claude"):
                     package = output / variant
                     self.assertEqual([], list(package.rglob("__pycache__")))
                     self.assertEqual([], list(package.rglob("*.pyc")))
@@ -122,16 +123,24 @@ class PluginVariantTests(unittest.TestCase):
                 ):
                     self.assert_validation_error(expected)
 
+    def test_validator_rejects_cursor_manifest_author_url(self) -> None:
+        manifest_path = self.output / "cursor" / ".cursor-plugin" / "plugin.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["author"]["url"] = "https://github.com/studioxvii"
+        with temporary_file(manifest_path, json.dumps(manifest).encode("utf-8")):
+            self.assert_validation_error("cursor manifest author has unsupported fields")
+
     def test_validator_detects_exact_manifest_template_drift(self) -> None:
         manifests = (
             self.output / "agent-plugin" / "plugin.json",
+            self.output / "cursor" / ".cursor-plugin" / "plugin.json",
             self.output / "claude" / ".claude-plugin" / "plugin.json",
         )
         for manifest_path in manifests:
             with self.subTest(manifest=manifest_path):
                 with temporary_file(manifest_path, manifest_path.read_bytes() + b"\n"):
                     self.assert_validation_error(
-                        f"generated manifest differs from packaging template: {manifest_path}"
+                        f"generated manifest differs from manifest template: {manifest_path}"
                     )
 
     def test_validator_detects_shared_portable_content_drift(self) -> None:

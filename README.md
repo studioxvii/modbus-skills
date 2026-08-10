@@ -39,7 +39,7 @@ This project makes those boundaries explicit:
 
 ### 1. Build the package for your client
 
-Clone the repository, then build all three distributions from the canonical source:
+Clone the repository, then build all four distributions from the canonical source:
 
 ```bash
 git clone https://github.com/studioxvii/modbus-skills.git
@@ -52,12 +52,13 @@ Use the generated directory that matches the client:
 
 | Client | Package | Discovery metadata |
 | --- | --- | --- |
-| Cursor and other Agent Plugins 1.0 clients | `dist/plugins/agent-plugin` | root `plugin.json` |
+| Cursor | `dist/plugins/cursor` | `.cursor-plugin/plugin.json` |
+| Other Agent Plugins 1.0 clients | `dist/plugins/agent-plugin` | root `plugin.json` |
 | OpenAI Codex | `dist/plugins/codex` | `.codex-plugin/plugin.json` |
 | Claude Code | `dist/plugins/claude` | `.claude-plugin/plugin.json` |
 
-The repository itself remains a Codex marketplace during development, so Codex can
-also install the canonical source directly:
+The repository includes native Codex and Cursor marketplace descriptors. Codex can
+install the canonical source directly during development:
 
 ```bash
 codex plugin marketplace add "$PWD"
@@ -100,9 +101,10 @@ Use `$modbus-help` when you do not know which skill to use. OEM-source-to-output
 route to `$compile-user-map`; focused stage requests route to the matching specialist.
 
 Codex and Claude packages require explicit invocation through their host-specific
-metadata. Portable Agent Plugins clients control invocation policy in the client.
-Keeping policy out of the canonical skill bodies prevents one host's syntax from
-leaking into the others.
+metadata. In Claude Code, use the namespaced form `/modbus-skills:<skill-name>` (for
+example, `/modbus-skills:check-map`). Portable Agent Plugins and Cursor clients
+control invocation policy through their native plugin behavior. Keeping policy out of
+the canonical skill bodies prevents one host's syntax from leaking into the others.
 
 ## Fast OEM map compiler
 
@@ -274,8 +276,9 @@ Source `include` and `reviewed` flags remain evidence. They never become reposit
 
 ```text
 .agents/plugins/marketplace.json       Development Codex marketplace entry
-plugins/modbus-skills/                 Canonical skills, runtime, and Codex adapter
-packaging/                             Portable and Claude manifest templates
+.cursor-plugin/marketplace.json        Development Cursor marketplace entry
+plugins/modbus-skills/                 Canonical skills, runtime, and host metadata
+packaging/                             Portable, Cursor, and Claude manifest templates
 dist/plugins/                          Generated packages (ignored by Git)
 plugins/modbus-skills/skills/          One outcome skill and focused specialist skills
 plugins/modbus-skills/runtime/         Deterministic Python runtime

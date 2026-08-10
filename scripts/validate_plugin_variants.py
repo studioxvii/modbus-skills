@@ -47,6 +47,30 @@ AGENT_MANIFEST_KEYS = {
     "extensions",
 }
 AUTHOR_KEYS = {"name", "email", "url"}
+CURSOR_MANIFEST_KEYS = {
+    "name",
+    "displayName",
+    "version",
+    "description",
+    "author",
+    "minClientVersions",
+    "publisher",
+    "homepage",
+    "repository",
+    "license",
+    "logo",
+    "keywords",
+    "category",
+    "tags",
+    "commands",
+    "agents",
+    "skills",
+    "rules",
+    "hooks",
+    "variables",
+    "mcpServers",
+}
+CURSOR_AUTHOR_KEYS = {"name", "email"}
 PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 HOST_TOKEN_RE = re.compile(
     r"\$[a-z][a-z0-9-]*|\b(?:Codex|Claude|OpenAI|Anthropic|Cursor)\b|bundled workspace",
@@ -170,6 +194,66 @@ def _validate_agent_manifest(manifest: dict[str, object], errors: list[str]) -> 
                     )
 
 
+def _validate_cursor_manifest(manifest: dict[str, object], errors: list[str]) -> None:
+    unexpected = sorted(set(manifest) - CURSOR_MANIFEST_KEYS)
+    if unexpected:
+        errors.append(f"cursor manifest has unsupported fields: {unexpected}")
+
+    required = {"name", "displayName", "version", "description", "author", "skills"}
+    missing = sorted(required - set(manifest))
+    if missing:
+        errors.append(f"cursor manifest missing required fields: {missing}")
+
+    name = manifest.get("name")
+    if "name" in manifest:
+        if not isinstance(name, str):
+            errors.append("cursor manifest name must be a string")
+        elif not 1 <= len(name) <= 64 or PLUGIN_NAME_RE.fullmatch(name) is None:
+            errors.append("cursor manifest name does not satisfy the Cursor format")
+
+    for field in (
+        "displayName",
+        "version",
+        "description",
+        "homepage",
+        "repository",
+        "license",
+        "category",
+    ):
+        if field in manifest and not isinstance(manifest[field], str):
+            errors.append(f"cursor manifest {field} must be a string")
+
+    if "author" in manifest:
+        author = manifest["author"]
+        if not isinstance(author, dict):
+            errors.append("cursor manifest author must be an object")
+        else:
+            unexpected_author = sorted(set(author) - CURSOR_AUTHOR_KEYS)
+            if unexpected_author:
+                errors.append(
+                    f"cursor manifest author has unsupported fields: {unexpected_author}"
+                )
+            for field, value in author.items():
+                if field in CURSOR_AUTHOR_KEYS and not isinstance(value, str):
+                    errors.append(f"cursor manifest author.{field} must be a string")
+
+    for field in ("keywords", "tags"):
+        if field not in manifest:
+            continue
+        values = manifest[field]
+        if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+            errors.append(f"cursor manifest {field} must be an array of strings")
+
+    if "skills" in manifest and not (
+        isinstance(manifest["skills"], str)
+        or (
+            isinstance(manifest["skills"], list)
+            and all(isinstance(item, str) for item in manifest["skills"])
+        )
+    ):
+        errors.append("cursor manifest skills must be a path or an array of paths")
+
+
 def _check_manifest_template(actual: Path, template: Path, errors: list[str]) -> None:
     try:
         actual_data = actual.read_bytes()
@@ -178,18 +262,28 @@ def _check_manifest_template(actual: Path, template: Path, errors: list[str]) ->
         errors.append(f"manifest template comparison failed: {exc}")
         return
     if actual_data != template_data:
-        errors.append(f"generated manifest differs from packaging template: {actual}")
+        errors.append(f"generated manifest differs from manifest template: {actual}")
 
 
 def _check_manifest_parity(output: Path, errors: list[str]) -> None:
     manifests = {
         "agent-plugin": _load_json(output / "agent-plugin" / "plugin.json", errors),
         "codex": _load_json(output / "codex" / ".codex-plugin" / "plugin.json", errors),
+        "cursor": _load_json(output / "cursor" / ".cursor-plugin" / "plugin.json", errors),
         "claude": _load_json(output / "claude" / ".claude-plugin" / "plugin.json", errors),
     }
     _validate_agent_manifest(manifests["agent-plugin"], errors)
+    _validate_cursor_manifest(manifests["cursor"], errors)
     _check_manifest_template(
         output / "agent-plugin" / "plugin.json", PACKAGING / "agent-plugin.json", errors
+    )
+    _check_manifest_template(
+        output / "cursor" / ".cursor-plugin" / "plugin.json",
+        PACKAGING / "cursor-plugin.json",
+        errors,
+    )
+    _check_manifest_template(
+        PLUGIN / ".cursor-plugin" / "plugin.json", PACKAGING / "cursor-plugin.json", errors
     )
     _check_manifest_template(
         output / "claude" / ".claude-plugin" / "plugin.json",
@@ -224,8 +318,10 @@ def _check_manifest_parity(output: Path, errors: list[str]) -> None:
     for name, manifest in manifests.items():
         author = manifest.get("author")
         url = author.get("url") if isinstance(author, dict) else None
-        if name != "claude" or url is not None:
+        if name in {"agent-plugin", "codex"}:
             author_urls.append((name, url))
+        elif url is not None:
+            errors.append(f"{name} manifest author.url is not supported")
     if not all(isinstance(value, str) and value for _, value in author_urls):
         errors.append(f"manifest author.url values must be non-empty strings: {author_urls}")
     elif len({value for _, value in author_urls}) != 1:
@@ -240,10 +336,18 @@ def _check_file_parity(output: Path, errors: list[str]) -> None:
     portable_files = {
         relative
         for relative in canonical_files
-        if relative.parts[0] != ".codex-plugin" and "agents" not in relative.parts
+        if relative.parts[0] not in {".codex-plugin", ".cursor-plugin"}
+        and "agents" not in relative.parts
     }
     expected = {
-        "codex": canonical_files,
+        "codex": {
+            relative for relative in canonical_files if relative.parts[0] != ".cursor-plugin"
+        },
+        "cursor": {
+            relative
+            for relative in canonical_files
+            if relative.parts[0] != ".codex-plugin" and "agents" not in relative.parts
+        },
         "agent-plugin": portable_files | {Path("plugin.json")},
         "claude": portable_files | {Path(".claude-plugin/plugin.json")},
     }
@@ -257,24 +361,19 @@ def _check_file_parity(output: Path, errors: list[str]) -> None:
 
     for relative in sorted(canonical_files):
         canonical_data = (PLUGIN / relative).read_bytes()
-        codex_path = output / "codex" / relative
-        if codex_path.is_file() and codex_path.read_bytes() != canonical_data:
-            errors.append(f"codex content differs: {relative}")
-        if relative not in portable_files:
-            continue
-        portable_path = output / "agent-plugin" / relative
-        if portable_path.is_file() and portable_path.read_bytes() != canonical_data:
-            errors.append(f"agent-plugin content differs: {relative}")
-        claude_path = output / "claude" / relative
-        if not claude_path.is_file():
-            continue
-        claude_data = claude_path.read_bytes()
-        if relative.name == "SKILL.md":
-            without_adapter = _without_claude_adapter(claude_data, relative, errors)
-            if without_adapter != canonical_data:
-                errors.append(f"claude skill content differs beyond its adapter: {relative}")
-        elif claude_data != canonical_data:
-            errors.append(f"claude content differs: {relative}")
+        for name, expected_files in expected.items():
+            if relative not in expected_files:
+                continue
+            package_path = output / name / relative
+            if not package_path.is_file():
+                continue
+            package_data = package_path.read_bytes()
+            if name == "claude" and relative.name == "SKILL.md":
+                package_data = _without_claude_adapter(package_data, relative, errors)
+                if package_data != canonical_data:
+                    errors.append(f"claude skill content differs beyond its adapter: {relative}")
+            elif package_data != canonical_data:
+                errors.append(f"{name} content differs: {relative}")
 
 
 def _check_host_neutral_source(errors: list[str]) -> None:
@@ -306,12 +405,38 @@ def _check_package_safety(output: Path, errors: list[str]) -> None:
 
     if (output / "agent-plugin" / ".codex-plugin").exists():
         errors.append("agent-plugin package contains Codex metadata")
+    if (output / "agent-plugin" / ".cursor-plugin").exists():
+        errors.append("agent-plugin package contains Cursor metadata")
     if list((output / "agent-plugin" / "skills").glob("*/agents")):
         errors.append("agent-plugin package contains host-specific skill agents")
     if (output / "claude" / ".codex-plugin").exists():
         errors.append("claude package contains Codex metadata")
+    if (output / "claude" / ".cursor-plugin").exists():
+        errors.append("claude package contains Cursor metadata")
     if list((output / "claude" / "skills").glob("*/agents")):
         errors.append("claude package contains Codex skill agents")
+    if (output / "cursor" / ".codex-plugin").exists():
+        errors.append("cursor package contains Codex metadata")
+    if list((output / "cursor" / "skills").glob("*/agents")):
+        errors.append("cursor package contains Codex skill agents")
+    if (output / "codex" / ".cursor-plugin").exists():
+        errors.append("codex package contains Cursor metadata")
+
+
+def _check_cursor_marketplace(errors: list[str]) -> None:
+    marketplace_path = ROOT / ".cursor-plugin" / "marketplace.json"
+    marketplace = _load_json(marketplace_path, errors)
+    if marketplace.get("name") != "modbus-skills":
+        errors.append("Cursor marketplace name must be modbus-skills")
+    entries = marketplace.get("plugins")
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+        errors.append("Cursor marketplace must contain one plugin entry")
+        return
+    entry = entries[0]
+    if entry.get("name") != "modbus-skills":
+        errors.append("Cursor marketplace plugin name must be modbus-skills")
+    if entry.get("source") != "./plugins/modbus-skills":
+        errors.append("Cursor marketplace must point at ./plugins/modbus-skills")
 
 
 def validate_variants(output: Path) -> list[str]:
@@ -320,6 +445,7 @@ def validate_variants(output: Path) -> list[str]:
     _check_file_parity(output, errors)
     _check_host_neutral_source(errors)
     _check_package_safety(output, errors)
+    _check_cursor_marketplace(errors)
     return errors
 
 

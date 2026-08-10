@@ -1,0 +1,16 @@
+{
+  "name": "modbus-skills",
+  "owner": {
+    "name": "Studio Seventeen"
+  },
+  "metadata": {
+    "description": "Read-only Modbus engineering workflows for Cursor."
+  },
+  "plugins": [
+    {
+      "name": "modbus-skills",
+      "source": "./plugins/modbus-skills",
+      "description": "Read-only Modbus map, byte-order, tool-generation, and capture-analysis workflows."
+    }
+  ]
+}

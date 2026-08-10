@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build portable, Codex, and Claude packages from the canonical plugin source."""
+"""Build portable, Codex, Cursor, and Claude packages from the canonical source."""
 
 from __future__ import annotations
 
@@ -12,9 +12,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "modbus-skills"
 PACKAGING = ROOT / "packaging"
-VARIANTS = ("agent-plugin", "codex", "claude")
+VARIANTS = ("agent-plugin", "codex", "cursor", "claude")
 PACKAGE_SOURCE_NAMES = frozenset(
-    {".codex-plugin", "LICENSE", "NOTICE", "references", "runtime", "scripts", "skills"}
+    {
+        ".codex-plugin",
+        ".cursor-plugin",
+        "LICENSE",
+        "NOTICE",
+        "references",
+        "runtime",
+        "scripts",
+        "skills",
+    }
 )
 GENERATED_SOURCE_PATTERNS = (
     ".DS_Store",
@@ -34,7 +43,13 @@ def _reject_symlinks(source: Path) -> None:
         raise ValueError(f"canonical plugin must not contain symlinks: {names}")
 
 
-def _copy_canonical(source: Path, destination: Path, *, include_codex: bool) -> None:
+def _copy_canonical(
+    source: Path,
+    destination: Path,
+    *,
+    include_codex: bool,
+    include_cursor: bool,
+) -> None:
     ignore_generated = shutil.ignore_patterns(*GENERATED_SOURCE_PATTERNS)
 
     def ignore(directory: str, names: list[str]) -> set[str]:
@@ -44,6 +59,8 @@ def _copy_canonical(source: Path, destination: Path, *, include_codex: bool) -> 
             allowed = PACKAGE_SOURCE_NAMES
             if not include_codex:
                 allowed = allowed - {".codex-plugin"}
+            if not include_cursor:
+                allowed = allowed - {".cursor-plugin"}
             ignored.update(set(names) - allowed)
         if not include_codex and relative.parent.name == "skills" and relative.name != "skills":
             ignored.add("agents")
@@ -67,14 +84,19 @@ def _add_claude_manual_invocation(skill_path: Path) -> None:
 
 def _build_into(staging: Path) -> None:
     portable = staging / "agent-plugin"
-    _copy_canonical(PLUGIN, portable, include_codex=False)
+    _copy_canonical(PLUGIN, portable, include_codex=False, include_cursor=False)
     shutil.copy2(PACKAGING / "agent-plugin.json", portable / "plugin.json")
 
     codex = staging / "codex"
-    _copy_canonical(PLUGIN, codex, include_codex=True)
+    _copy_canonical(PLUGIN, codex, include_codex=True, include_cursor=False)
+
+    cursor = staging / "cursor"
+    _copy_canonical(PLUGIN, cursor, include_codex=False, include_cursor=True)
+    cursor_manifest = cursor / ".cursor-plugin" / "plugin.json"
+    shutil.copy2(PACKAGING / "cursor-plugin.json", cursor_manifest)
 
     claude = staging / "claude"
-    _copy_canonical(PLUGIN, claude, include_codex=False)
+    _copy_canonical(PLUGIN, claude, include_codex=False, include_cursor=False)
     claude_manifest = claude / ".claude-plugin" / "plugin.json"
     claude_manifest.parent.mkdir(parents=True)
     shutil.copy2(PACKAGING / "claude-plugin.json", claude_manifest)
@@ -83,7 +105,7 @@ def _build_into(staging: Path) -> None:
 
 
 def build_variants(output: Path) -> None:
-    """Build all variants into three known child directories of ``output``."""
+    """Build all variants into four known child directories of ``output``."""
 
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -104,7 +126,7 @@ def main() -> int:
         "--output",
         type=Path,
         default=ROOT / "dist" / "plugins",
-        help="Parent directory for agent-plugin, codex, and claude packages",
+        help="Parent directory for agent-plugin, codex, cursor, and claude packages",
     )
     args = parser.parse_args()
     build_variants(args.output)
