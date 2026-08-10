@@ -1,6 +1,7 @@
 ---
 name: review-evidence
 description: Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
+license: Apache-2.0
 ---
 
 # Review Evidence
@@ -30,7 +31,7 @@ decision path. Verified items require no human response.
 
 ## Handoff
 
-- The user confirms values or exclusions: suggest `$apply-review`.
-- The uncertainty is raw-word interpretation: suggest `$check-byte-order`.
+- The user confirms values or exclusions: suggest `apply-review`.
+- The uncertainty is raw-word interpretation: suggest `check-byte-order`.
 
 Describe fuzzy evidence as fuzzy. Plausibility alone is not confirmation.

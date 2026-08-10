@@ -1,6 +1,7 @@
 ---
 name: build-tool-pack
 description: Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan.
+license: Apache-2.0
 ---
 
 # Build Tool Pack
@@ -31,7 +32,7 @@ Completion requires a checksummed pack that contains every selected target and n
 
 ## Handoff
 
-- The map is not reviewed: suggest `$review-map`.
-- A probe returns raw words: suggest `$check-byte-order`.
+- The map is not reviewed: suggest `review-map`.
+- A probe returns raw words: suggest `check-byte-order`.
 
 Final mode requires a plan bound to the exact map hash. Keep private review notes and source evidence out of the portable pack.

@@ -1,6 +1,7 @@
 ---
 name: check-map
 description: Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
+license: Apache-2.0
 ---
 
 # Check Map
@@ -25,8 +26,8 @@ Completion requires every check to have a visible pass, finding, or skipped reas
 
 ## Handoff
 
-- Findings need human evidence: suggest `$review-evidence`.
-- The map passes and is reviewed: suggest `$plan-reads`.
-- The source is still raw or mixed: suggest `$review-map`.
+- Findings need human evidence: suggest `review-evidence`.
+- The map passes and is reviewed: suggest `plan-reads`.
+- The source is still raw or mixed: suggest `review-map`.
 
 Use route, unit, area, protocol offset, and logical point identifier as identity. Permit read functions 01 through 04 only.

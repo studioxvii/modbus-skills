@@ -1,6 +1,7 @@
 ---
 name: capture-sample
 description: Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
+license: Apache-2.0
 ---
 
 # Capture Sample
@@ -30,7 +31,7 @@ Completion requires one immutable sample and no generated final decoding.
 
 ## Handoff
 
-- Unknown byte order or datatype interpretation: suggest `$check-byte-order`.
-- Time-series troubleshooting: suggest `$analyze-capture`.
+- Unknown byte order or datatype interpretation: suggest `check-byte-order`.
+- Time-series troubleshooting: suggest `analyze-capture`.
 
 Keep the probe manual, bounded, credential-free, and read-only.

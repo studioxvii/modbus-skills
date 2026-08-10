@@ -1,6 +1,7 @@
 ---
 name: build-modscan
 description: Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
+license: Apache-2.0
 ---
 
 # Build ModScan
@@ -34,7 +35,7 @@ Completion requires a generated or held status with visible native-verification 
 
 ## Handoff
 
-- No read plan exists: suggest `$plan-reads`.
-- The user needs several target formats: suggest `$build-tool-pack`.
+- No read plan exists: suggest `plan-reads`.
+- The user needs several target formats: suggest `build-tool-pack`.
 
 Preserve documented ModScan files. Never claim native verification when it was not run.

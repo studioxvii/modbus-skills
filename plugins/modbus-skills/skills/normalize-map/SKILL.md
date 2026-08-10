@@ -1,6 +1,7 @@
 ---
 name: normalize-map
 description: Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
+license: Apache-2.0
 ---
 
 # Normalize Map
@@ -25,7 +26,7 @@ evidence; clean deterministic normalization needs no human approval.
 
 ## Handoff
 
-- Normalization completes: suggest `$check-map`.
-- The user requests a known map-wide address conversion: suggest `$remap-addresses`.
+- Normalization completes: suggest `check-map`.
+- The user requests a known map-wide address conversion: suggest `remap-addresses`.
 
 Keep the raw source address separate from protocol offset. Preserve unknown datatype, access, and byte order as unresolved.

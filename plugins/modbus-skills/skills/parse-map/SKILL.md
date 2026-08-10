@@ -1,6 +1,7 @@
 ---
 name: parse-map
 description: Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds.
+license: Apache-2.0
 ---
 
 # Parse Map
@@ -25,7 +26,7 @@ Completion requires a schema-valid candidate map and parse report. Engineering f
 
 ## Handoff
 
-- Candidate rows exist: suggest `$normalize-map`.
-- The source is a PDF manual: suggest `$extract-pdf-map`.
+- Candidate rows exist: suggest `normalize-map`.
+- The source is a PDF manual: suggest `extract-pdf-map`.
 
 Parsing preserves uncertainty. It does not approve address, area, unit, datatype, access, or byte order.

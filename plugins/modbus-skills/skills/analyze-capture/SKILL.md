@@ -1,6 +1,7 @@
 ---
 name: analyze-capture
 description: Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence.
+license: Apache-2.0
 ---
 
 # Analyze Capture
@@ -26,7 +27,7 @@ Completion requires a schema-valid analysis that makes every enabled check visib
 
 ## Handoff
 
-- Raw-word ambiguity: suggest `$check-byte-order`.
-- A map revision may explain the change: suggest `$compare-maps`.
+- Raw-word ambiguity: suggest `check-byte-order`.
+- A map revision may explain the change: suggest `compare-maps`.
 
 Keep the result read-only. Treat correlation as evidence, not cause.

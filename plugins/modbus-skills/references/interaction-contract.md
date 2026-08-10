@@ -47,8 +47,11 @@ artifacts just produced:
 6. Show at most two `Other options:` and only when they represent genuine user-goal
    branches. Never print the full skill catalog or every handoff rule.
 7. End an actionable recommendation with `Reply \`proceed\` to continue.` A reply of
-   `proceed` authorizes only the named safe next skill; live-device and native-app gates
-   remain explicit.
+   `proceed` authorizes only the named safe next skill. On that reply, the active agent
+   must read the named sibling skill's current `SKILL.md` and execute it with the exact
+   artifacts named in `Uses:`. Do not rely on host-specific implicit invocation or ask
+   the user to type a host command. This continuation does not authorize any other
+   skill, live-device action, or native-app operation; those gates remain explicit.
 
 Treat each skill's Handoff section as a routing table, not text to reproduce. Render
 only the route that matches the current artifact and goal.
@@ -58,7 +61,7 @@ Use this compact shape:
 ```text
 Done: <artifact and outcome>
 
-Recommended next: $skill-name
+Recommended next: skill-name
 Why: <one sentence>
 Uses: <exact current artifact paths or case reference>
 Produces: <next artifact or resolved outcome>

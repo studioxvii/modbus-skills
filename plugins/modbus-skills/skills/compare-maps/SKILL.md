@@ -1,6 +1,7 @@
 ---
 name: compare-maps
 description: Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
+license: Apache-2.0
 ---
 
 # Compare Maps
@@ -25,7 +26,7 @@ Completion requires every point from both inputs to have a disposition.
 
 ## Handoff
 
-- The new source still needs review: suggest `$review-map`.
-- The requested change is only address notation: suggest `$remap-addresses`.
+- The new source still needs review: suggest `review-map`.
+- The requested change is only address notation: suggest `remap-addresses`.
 
 Use composite identity. Numeric address alone is not an identity.

@@ -1,6 +1,7 @@
 ---
 name: check-byte-order
 description: Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
+license: Apache-2.0
 ---
 
 # Check Byte Order
@@ -32,5 +33,5 @@ Completion requires every candidate to share one `sample_id`; the evidence selec
 
 ## Handoff
 
-- No raw sample exists: suggest `$capture-sample`.
-- The user confirms a layout: suggest `$apply-review`, then `$plan-reads`.
+- No raw sample exists: suggest `capture-sample`.
+- The user confirms a layout: suggest `apply-review`, then `plan-reads`.

@@ -1,7 +1,8 @@
 # Publication Checklist
 
-- Select and add the final open-source license.
-- Confirm publisher name and contact details.
+- [x] Select and add Apache-2.0 as the open-source license.
+- [x] Confirm the publisher name as Studio Seventeen.
+- [ ] Confirm publisher contact details.
 - Confirm repository and website URLs.
 - Review every fixture rights record.
 - Confirm that no vendor manual or complete vendor map is tracked.

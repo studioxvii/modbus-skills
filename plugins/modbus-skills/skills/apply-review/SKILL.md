@@ -1,6 +1,7 @@
 ---
 name: apply-review
 description: Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.
+license: Apache-2.0
 ---
 
 # Apply Review
@@ -28,7 +29,7 @@ Completion requires a new map whose approval state matches its remaining holds.
 
 ## Handoff
 
-- Holds remain: suggest `$review-evidence`.
-- The map changed and is ready: suggest `$plan-reads`.
+- Holds remain: suggest `review-evidence`.
+- The map changed and is ready: suggest `plan-reads`.
 
 Keep write-only points out of the read map. Rebuild every stale read plan.

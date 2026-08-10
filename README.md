@@ -1,6 +1,7 @@
 # Modbus Skills
 
-Read-only Modbus engineering workflows for the OpenAI Codex plugin architecture.
+Read-only Modbus engineering workflows for Codex, Claude Code, and clients that
+implement the Agent Plugins 1.0 standard, including Cursor.
 
 Modbus Skills turns an OEM register map and measurement intent into an organized user
 map, JSON, CSV, and optional tool outputs in one resumable run. Focused skills remain
@@ -36,13 +37,29 @@ This project makes those boundaries explicit:
 
 ## Quick start
 
-### 1. Install the local marketplace
+### 1. Build the package for your client
 
-Clone the repository, then add its marketplace and plugin:
+Clone the repository, then build all three distributions from the canonical source:
 
 ```bash
 git clone https://github.com/studioxvii/modbus-skills.git
 cd modbus-skills
+python3 scripts/build_plugin_variants.py
+python3 scripts/validate_plugin_variants.py --output dist/plugins
+```
+
+Use the generated directory that matches the client:
+
+| Client | Package | Discovery metadata |
+| --- | --- | --- |
+| Cursor and other Agent Plugins 1.0 clients | `dist/plugins/agent-plugin` | root `plugin.json` |
+| OpenAI Codex | `dist/plugins/codex` | `.codex-plugin/plugin.json` |
+| Claude Code | `dist/plugins/claude` | `.claude-plugin/plugin.json` |
+
+The repository itself remains a Codex marketplace during development, so Codex can
+also install the canonical source directly:
+
+```bash
 codex plugin marketplace add "$PWD"
 codex plugin add modbus-skills@modbus-skills
 ```
@@ -55,12 +72,13 @@ Direct runtime or CLI use requires the project dependencies:
 python3 -m pip install -e .
 ```
 
-Inside Codex, PDF skills use the bundled workspace Python when available and do not
-install dependencies in the task's critical path.
+PDF skills require Python 3.11+ with `pdfplumber`. If that dependency is unavailable,
+the skill reports it and stops; it does not install software during the workflow.
 
 ### 2. Choose a skill
 
-Try one of these prompts in Codex:
+Ask your client to use one of these skills. Invocation syntax is client-specific; the
+examples below show the Codex syntax:
 
 ```text
 $compile-user-map Turn this OEM map into an organized user map for temperatures, status, and alarms, with JSON and CSV outputs.
@@ -81,7 +99,10 @@ $compare-maps Compare these firmware maps and show moved, added, removed, and ch
 Use `$modbus-help` when you do not know which skill to use. OEM-source-to-output goals
 route to `$compile-user-map`; focused stage requests route to the matching specialist.
 
-All skills require explicit invocation. This keeps unrelated skill instructions out of the agent context.
+Codex and Claude packages require explicit invocation through their host-specific
+metadata. Portable Agent Plugins clients control invocation policy in the client.
+Keeping policy out of the canonical skill bodies prevents one host's syntax from
+leaking into the others.
 
 ## Fast OEM map compiler
 
@@ -252,8 +273,10 @@ Source `include` and `reviewed` flags remain evidence. They never become reposit
 ## Repository structure
 
 ```text
-.agents/plugins/marketplace.json       Repository marketplace entry
-plugins/modbus-skills/                 Installable OpenAI plugin
+.agents/plugins/marketplace.json       Development Codex marketplace entry
+plugins/modbus-skills/                 Canonical skills, runtime, and Codex adapter
+packaging/                             Portable and Claude manifest templates
+dist/plugins/                          Generated packages (ignored by Git)
 plugins/modbus-skills/skills/          One outcome skill and focused specialist skills
 plugins/modbus-skills/runtime/         Deterministic Python runtime
 catalog/                               Skill, workflow, and activation catalogs
@@ -312,8 +335,26 @@ See [`docs/verification-status.md`](docs/verification-status.md) and [`docs/test
 - Add deterministic tests for each behavior change.
 - Run `python3 scripts/verify_repo.py` before each handoff.
 
+Do not edit generated packages. Change the canonical source or a manifest template,
+then rebuild. The validator proves that shared skills, runtime, scripts, references,
+licenses, and notices remain identical across variants except for the documented
+Claude manual-invocation frontmatter adapter.
+
+## License
+
+Modbus Skills is licensed under the Apache License, Version 2.0. See
+[`LICENSE`](LICENSE) for the license terms and [`NOTICE`](NOTICE) for the copyright
+notice. Every distributable skill also declares the SPDX identifier `Apache-2.0` in
+its `SKILL.md` metadata.
+
+The license applies to the material distributed by this repository. It does not grant
+rights to third-party vendor manuals, register maps, customer data, product names, or
+tool binaries, none of which are distributed as part of this project.
+
 ## Release status
 
-This repository does not yet have an open-source license. Do not publish or redistribute it until the items in [`docs/publication-checklist.md`](docs/publication-checklist.md) are complete.
+The repository is licensed under Apache-2.0 but remains private and pre-release. Do not
+change its visibility or publish a release until every item in
+[`docs/publication-checklist.md`](docs/publication-checklist.md) is complete.
 
 The GitHub repository must remain private during pre-release.

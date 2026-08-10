@@ -1,6 +1,7 @@
 ---
 name: plan-reads
 description: Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
+license: Apache-2.0
 ---
 
 # Plan Reads
@@ -30,5 +31,5 @@ needed. Replan automatically after every map change.
 
 ## Handoff
 
-- One target: suggest `$build-node-red`, `$build-modpoll`, or `$build-modscan` based on the named tool.
-- Several targets: suggest `$build-tool-pack`.
+- One target: suggest `build-node-red`, `build-modpoll`, or `build-modscan` based on the named tool.
+- Several targets: suggest `build-tool-pack`.

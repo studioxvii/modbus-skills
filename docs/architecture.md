@@ -4,15 +4,33 @@
 
 Keep skills focused on one user goal. Keep fragile calculations and file generation in deterministic code.
 
-All skills use explicit user invocation. This reduces unrelated instructions in the
-agent context. `$modbus-help` is the only router. It uses the shared user-path guide,
+The Codex and Claude distributions use explicit user invocation. This reduces unrelated
+instructions in the agent context. `modbus-help` is the only router. It uses the shared user-path guide,
 recommends the largest safe next step, and reads the selected skill before it describes
 that skill. Every skill follows the shared fast interaction contract: automate safe
 deterministic work, group exceptions, and avoid serial approval loops.
 
+## Distribution adapters
+
+`plugins/modbus-skills` is the canonical source for every skill, shared reference,
+runtime module, and helper script. `scripts/build_plugin_variants.py` derives three
+packages without copying generated files back into source control:
+
+- Agent Plugins 1.0 uses a root `plugin.json` and unchanged host-neutral skills.
+- Codex preserves `.codex-plugin/plugin.json` and each skill's
+  `agents/openai.yaml`, including `allow_implicit_invocation: false`.
+- Claude uses `.claude-plugin/plugin.json`, omits Codex agent metadata, and adds
+  `disable-model-invocation: true` to generated skill frontmatter.
+
+The Claude field is a packaging transform, not canonical content. The portable package
+does not invent a cross-client invocation policy where the standard has none. Variant
+validation compares the complete file sets and bytes, removes the one documented
+Claude adapter before comparing skill content, rejects host-specific tokens in shared
+Markdown, and verifies identical Apache license and notice files.
+
 Operational skills give one to three relevant handoffs after completion. They do not repeat the complete catalog. The shared [`user-paths.md`](../plugins/modbus-skills/references/user-paths.md) file is the source for high-level routing. The workflow catalog remains the machine-readable source for detailed chains and gates.
 
-`$compile-user-map` is the primary OEM-source outcome. Its deterministic runtime accepts
+`compile-user-map` is the primary OEM-source outcome. Its deterministic runtime accepts
 a supported local source or an existing `modbus-oem-map/v1`, plus a typed selection and
 optional targets. It keeps source semantics, user selection, deployment binding, and
 legacy target projections separate. Clean offline work completes in one invocation;

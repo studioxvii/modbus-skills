@@ -30,6 +30,13 @@ class SkillCatalogTests(unittest.TestCase):
         ]
         self.assertEqual([], missing)
 
+    def test_catalog_marks_every_skill_as_apache_licensed(self) -> None:
+        catalog = json.loads((ROOT / "catalog" / "skills.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            {"Apache-2.0"},
+            {skill.get("license") for skill in catalog["skills"]},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
