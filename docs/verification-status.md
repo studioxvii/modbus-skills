@@ -42,7 +42,7 @@ The real-map workflow confirmed these behaviors:
 - Write-only points do not enter read plans.
 - Final output rejects a missing, malformed, or stale map hash in the read plan.
 - One raw sample produces all byte-order candidates without added Modbus reads.
-- Node-RED probe and final flows use manual one-shot reads. They are disabled by default and contain no scheduled or write nodes.
+- Node-RED probe flows use manual one-shot reads. Final flows use one bounded five-second live-poll trigger that keeps one request in flight. Both are disabled by default and contain no deploy-time or write nodes.
 - Node-RED, Modpoll, and ModScan can be built alone or in any combination.
 - Tool packs are deterministic, checksummed, read-only, and free of review audit data.
 - JSON and CSV capture analysis reports communication, duplicate, gap, stale, flatline, range, rate, and byte-order evidence conditions.

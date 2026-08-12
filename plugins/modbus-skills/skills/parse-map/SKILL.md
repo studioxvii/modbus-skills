@@ -1,6 +1,6 @@
 ---
 name: parse-map
-description: Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds.
+description: Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds. Use when the source is CSV, JSON, XML, XLSX, or structured text and needs traceable candidate rows.
 license: Apache-2.0
 ---
 

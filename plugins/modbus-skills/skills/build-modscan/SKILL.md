@@ -1,6 +1,6 @@
 ---
 name: build-modscan
-description: Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
+description: Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
 license: Apache-2.0
 ---
 

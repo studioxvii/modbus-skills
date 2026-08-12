@@ -1,6 +1,6 @@
 # Check Map
 
-Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
+Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems. Use when the user wants deterministic lint/validation findings on a normalized or reviewed register map.
 
 ## Common requests
 

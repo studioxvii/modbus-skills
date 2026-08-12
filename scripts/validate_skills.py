@@ -113,6 +113,12 @@ def validate(root: Path = ROOT) -> list[str]:
             errors.append(f"{skill_dir.name}: invalid or mismatched name")
         if len(description) < 40:
             errors.append(f"{skill_dir.name}: description is too short")
+        if len(description) > 1024:
+            errors.append(f"{skill_dir.name}: description exceeds 1024 characters")
+        if "Use when" not in description:
+            errors.append(
+                f"{skill_dir.name}: description must include a 'Use when' activation clause"
+            )
         if frontmatter.get("license") != EXPECTED_LICENSE:
             errors.append(f"{skill_dir.name}: license must be {EXPECTED_LICENSE}")
         skill_text = skill_md.read_text(encoding="utf-8")
@@ -124,6 +130,13 @@ def validate(root: Path = ROOT) -> list[str]:
             errors.append(
                 f"{skill_dir.name}: must reference the shared fast interaction contract"
             )
+        if "\n## Output files\n" not in skill_text:
+            errors.append(f"{skill_dir.name}: must explain output files")
+        if skill_dir.name not in {"modbus-help", "compile-user-map"}:
+            if "\n## Handoff\n" not in skill_text:
+                errors.append(f"{skill_dir.name}: must include a Handoff section")
+        elif "\n## Finish\n" not in skill_text:
+            errors.append(f"{skill_dir.name}: must include a Finish section")
         if not openai_yaml.exists():
             errors.append(f"{skill_dir.name}: missing agents/openai.yaml")
             continue

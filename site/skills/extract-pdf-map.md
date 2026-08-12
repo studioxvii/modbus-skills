@@ -1,6 +1,6 @@
 # Extract PDF Map
 
-Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.
+Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range. Use when the source is a PDF register manual and the user wants extraction evidence before normalization or compilation.
 
 ## Common requests
 

@@ -85,7 +85,7 @@ changes to a new map. A final tool adapter consumes a validated map and compiled
 
 Byte order is not guessed before tool generation. When byte order is unknown, the workflow first generates a read-only `probe` artifact for one selected target. The user runs one physical read. The evaluator then derives all supported byte and word layouts from that same raw sample. The capture must identify the point, route, unit, area, and protocol offset. Evidence does not select a layout. After a human records the layout decision, the workflow applies it, rebuilds the read plan, and regenerates the requested Node-RED, Modpoll, ModScan, or combined pack in `final` mode.
 
-Node-RED can derive all four 32-bit candidates inside the disabled probe flow. It uses one manual inject and one one-shot getter for each compiled block. The final flow uses the same manual one-shot trigger. Neither flow schedules a read at deploy time. The derived branches do not issue more protocol requests. Modpoll and ModScan return raw words for the same evaluator contract.
+Node-RED can derive all four 32-bit candidates inside the disabled probe flow. It uses one manual inject and one shared sequenced getter for each compiled block. Probe mode stays manual one-shot. Final mode uses one explicitly marked five-second live-poll trigger that still keeps one request in flight and remains disabled until the operator enables the tab. Neither flow schedules a read at deploy time. The derived branches do not issue more protocol requests. Modpoll and ModScan return raw words for the same evaluator contract.
 
 ## Runtime modes
 

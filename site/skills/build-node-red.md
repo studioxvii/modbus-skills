@@ -1,6 +1,6 @@
 # Build Node-RED
 
-Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.
+Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan. Use when the user asks for a Node-RED flow, Modbus flex-getter setup, or Node-RED probe/final capture path.
 
 ## Common requests
 

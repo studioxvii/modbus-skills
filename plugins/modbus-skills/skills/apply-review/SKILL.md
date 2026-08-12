@@ -1,6 +1,6 @@
 ---
 name: apply-review
-description: Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.
+description: Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history. Use when the user confirms layout, exclusion, or field decisions and wants them applied to a new reviewed map.
 license: Apache-2.0
 ---
 

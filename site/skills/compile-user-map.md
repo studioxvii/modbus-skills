@@ -1,6 +1,6 @@
 # Compile User Map
 
-Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run.
+Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run. Use when the user wants an organized user map or offline outputs from an OEM source rather than a specialist review chain.
 
 ## Common requests
 

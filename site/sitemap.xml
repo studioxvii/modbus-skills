@@ -42,8 +42,12 @@
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/review-evidence.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/review-map.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/compile-user-map.html</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/workflows/extract-pdf-register-map.html</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/workflows/review-source-map.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/review-register-map.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/determine-byte-order.html</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/workflows/remap-address-notation.html</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/workflows/build-custom-export.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/probe-resolve-finalize-tool-pack.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/build-tool-pack.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/workflows/analyze-read-data.html</loc></url>

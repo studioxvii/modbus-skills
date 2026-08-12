@@ -1,6 +1,6 @@
 # Modbus Help
 
-Choose the next Modbus skill or short workflow from the user's goal and current artifact.
+Choose the next Modbus skill or short workflow from the user's goal and current artifact. Use when the user is unsure which Modbus skill to run, asks what to do next, or needs a safe path from their current artifact.
 
 ## Common requests
 

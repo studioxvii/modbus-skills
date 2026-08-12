@@ -1,6 +1,6 @@
 ---
 name: extract-pdf-map
-description: Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.
+description: Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range. Use when the source is a PDF register manual and the user wants extraction evidence before normalization or compilation.
 license: Apache-2.0
 ---
 
@@ -35,7 +35,9 @@ explicit holds only for actual exceptions or one batch source-confirmation scope
 
 ## Handoff
 
-- Candidate rows exist: suggest `review-evidence`, then `normalize-map`.
-- The user supplies a structured map instead: suggest `parse-map`.
+- Candidate rows exist: suggest `normalize-map`.
+- The user wants organized user-map outputs from the OEM PDF: suggest `compile-user-map`.
+- Source confirmation or exception groups remain: suggest `review-evidence`.
 
 Keep the source manual local. Output bounded evidence, not full OCR text or page images.
+When the user supplies a structured map instead, route to `parse-map`.

@@ -1,6 +1,6 @@
 # Build Custom Export
 
-Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map.
+Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll, or ModScan adapter.
 
 ## Common requests
 

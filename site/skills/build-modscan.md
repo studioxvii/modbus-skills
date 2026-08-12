@@ -1,6 +1,6 @@
 # Build ModScan
 
-Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
+Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
 
 ## Common requests
 

@@ -23,9 +23,10 @@ You must have the right to submit the contribution.
 Each skill must have:
 
 - `license: Apache-2.0` in its `SKILL.md` frontmatter.
-- A precise activation description.
-- A short workflow.
-- Explicit inputs and outputs.
+- A precise activation description with both what it does and a `Use when` clause.
+- A short workflow that follows the shared interaction contract.
+- Explicit inputs, outputs, and one observable completion criterion.
+- A `Handoff` section for operational skills, or a `Finish` section for routers/outcomes.
 - Blocking conditions.
 - At least ten positive activation cases.
 - At least five close-negative activation cases.

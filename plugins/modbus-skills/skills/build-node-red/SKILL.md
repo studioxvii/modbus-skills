@@ -1,6 +1,6 @@
 ---
 name: build-node-red
-description: Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.
+description: Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan. Use when the user asks for a Node-RED flow, Modbus flex-getter setup, or Node-RED probe/final capture path.
 license: Apache-2.0
 ---
 
@@ -48,10 +48,10 @@ request in flight.
 
 - No read plan exists: suggest `plan-reads`.
 - A run creates `capture.json`: suggest `analyze-capture`.
-- The analysis finds a supported multi-register layout question: suggest `check-byte-order`.
 - The user needs more target formats: suggest `build-tool-pack`.
 
 Click the single start button once in probe mode. In final mode, enable the
 disabled tab intentionally; its one poll trigger runs the bounded plan every
 five seconds while the tab is enabled. Both modes run the plan in order and
-keep one request in flight. Final mode decodes confirmed layouts only.
+keep one request in flight. Final mode decodes confirmed layouts only. If analysis
+raises a multi-register layout question, continue with `check-byte-order`.

@@ -1,6 +1,6 @@
 # Analyze Capture
 
-Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence.
+Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence. Use when the user has capture data, JSON/CSV samples, or asks about stale, missing, flatline, or signal-quality problems.
 
 ## Common requests
 
