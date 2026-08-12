@@ -1,6 +1,6 @@
 ---
 name: review-evidence
-description: Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
+description: Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval. Use when source evidence needs status grouping, exception decisions, or confirmation of a bounded extraction scope.
 license: Apache-2.0
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: build-tool-pack
-description: Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan.
+description: Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
 license: Apache-2.0
 ---
 

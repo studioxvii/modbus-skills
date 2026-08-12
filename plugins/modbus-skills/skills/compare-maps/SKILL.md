@@ -1,6 +1,6 @@
 ---
 name: compare-maps
-description: Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
+description: Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points. Use when the user compares firmware/map revisions or asks what changed between two validated maps.
 license: Apache-2.0
 ---
 

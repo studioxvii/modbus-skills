@@ -1,6 +1,6 @@
 ---
 name: capture-sample
-description: Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
+description: Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool. Use when the user needs one physical read, raw words for byte-order work, or a manual probe before decoding.
 license: Apache-2.0
 ---
 

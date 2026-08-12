@@ -1,6 +1,6 @@
 ---
 name: check-map
-description: Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
+description: Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems. Use when the user wants deterministic lint/validation findings on a normalized or reviewed register map.
 license: Apache-2.0
 ---
 

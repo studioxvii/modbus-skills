@@ -1,6 +1,6 @@
 # Capture Sample
 
-Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
+Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool. Use when the user needs one physical read, raw words for byte-order work, or a manual probe before decoding.
 
 ## Common requests
 

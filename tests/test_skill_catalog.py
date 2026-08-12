@@ -34,6 +34,35 @@ class SkillCatalogTests(unittest.TestCase):
         ]
         self.assertEqual([], missing)
 
+    def test_every_skill_description_includes_use_when(self) -> None:
+        catalog = json.loads((ROOT / "catalog" / "skills.json").read_text(encoding="utf-8"))
+        missing = [
+            skill["id"]
+            for skill in catalog["skills"]
+            if "Use when" not in skill["description"]
+        ]
+        self.assertEqual([], missing)
+
+    def test_specialist_skills_appear_in_workflows_or_user_paths(self) -> None:
+        workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
+        paths = (
+            ROOT / "plugins" / "modbus-skills" / "references" / "user-paths.md"
+        ).read_text(encoding="utf-8")
+        covered = {"modbus-help"}
+        for workflow in workflows["workflows"]:
+            for step in workflow["steps"]:
+                if step.get("kind") == "skill":
+                    covered.add(step["skill"])
+        for skill_dir in (ROOT / "plugins" / "modbus-skills" / "skills").iterdir():
+            if not skill_dir.is_dir():
+                continue
+            skill_id = skill_dir.name
+            with self.subTest(skill=skill_id):
+                self.assertTrue(
+                    skill_id in covered or f"`{skill_id}`" in paths or skill_id in paths,
+                    f"{skill_id} missing from workflows and user-paths",
+                )
+
     def test_catalog_marks_every_skill_as_apache_licensed(self) -> None:
         catalog = json.loads((ROOT / "catalog" / "skills.json").read_text(encoding="utf-8"))
         self.assertEqual(

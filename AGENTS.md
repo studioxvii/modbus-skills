@@ -35,6 +35,7 @@ Build public, read-only Modbus engineering skills and deterministic workflows.
 - Use Python 3.11 or later and the standard library unless a dependency is approved.
 - Put deterministic behavior in `plugins/modbus-skills/runtime/modbus_skills/`.
 - Keep each `SKILL.md` concise. Put detailed contracts and target notes in `references/`.
+- Write each skill description with both what it does and a `Use when` activation clause.
 - Preserve canonical artifact contracts across skills.
 - Use composite point identity: route, unit identifier, register area, protocol offset, and logical point identifier.
 

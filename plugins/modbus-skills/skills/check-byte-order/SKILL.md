@@ -1,6 +1,6 @@
 ---
 name: check-byte-order
-description: Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
+description: Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner. Use when byte order, word order, or multi-register decoding is unknown and raw words or a capture already exist.
 license: Apache-2.0
 ---
 

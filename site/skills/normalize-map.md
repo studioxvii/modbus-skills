@@ -1,6 +1,6 @@
 # Normalize Map
 
-Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
+Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states. Use when candidate rows exist and need canonical engineering fields, holds, and source-preserving normalization.
 
 ## Common requests
 

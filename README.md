@@ -189,10 +189,11 @@ flowchart LR
     G --> H["Generate the final tool files"]
 ```
 
-A Node-RED probe sends one manual read per compiled block. The returned raw
-words are reused for all layout calculations; the calculations do not create
-additional Modbus traffic. Generated flows start disabled and contain no
-scheduled, deploy-time, or write nodes.
+A Node-RED probe sends one manual sequenced read plan. The returned raw words
+are reused for all layout calculations; the calculations do not create
+additional Modbus traffic. Final Node-RED exports use one bounded five-second
+live-poll trigger that keeps one request in flight. Both generated flows start
+disabled and contain no deploy-time or write nodes.
 
 Modpoll and ModScan probes collect the same raw words. The saved sample can then
 be checked separately before the selected layout is applied.
@@ -201,7 +202,7 @@ be checked separately before the selected layout is applied.
 
 | Tool or format | What you get | Note |
 | --- | --- | --- |
-| Node-RED | A disabled, importable read-only flow with manual injects, response checks, error paths, and watchdogs | Native import verification is still required |
+| Node-RED | A disabled, importable read-only flow with one sequenced trigger, response checks, error paths, and watchdogs; probe is manual one-shot and final uses a bounded 5s live poll | Native import verification is still required |
 | `gavinying/modpoll` | Documented `device`, `poll`, and `ref` CSV files | Use the pinned open-source implementation for acceptance testing |
 | Witte Modbus Poll | A readable desktop plan, bounded PowerShell automation, or disabled v12 XML | The project does not synthesize undocumented binary formats |
 | ModScan | Manual setup, read-plan, point-map, and protocol test-message files | The project does not invent undocumented configuration formats |

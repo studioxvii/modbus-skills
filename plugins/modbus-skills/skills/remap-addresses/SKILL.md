@@ -1,6 +1,6 @@
 ---
 name: remap-addresses
-description: Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation.
+description: Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation. Use when the user asks to convert 40001-style references, protocol offsets, or another known address convention across a map.
 license: Apache-2.0
 ---
 

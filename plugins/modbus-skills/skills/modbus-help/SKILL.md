@@ -1,6 +1,6 @@
 ---
 name: modbus-help
-description: Choose the next Modbus skill or short workflow from the user's goal and current artifact.
+description: Choose the next Modbus skill or short workflow from the user's goal and current artifact. Use when the user is unsure which Modbus skill to run, asks what to do next, or needs a safe path from their current artifact.
 license: Apache-2.0
 ---
 
@@ -51,3 +51,10 @@ For writes, broadcasts, discovery, or unbounded polling, explain the read-only b
 - None. This skill only names the next skill, the input it needs, and the result it will produce.
 
 Completion requires one verified route with its required input and observable output.
+
+## Finish
+
+End with the recommendation format above. Do not perform the recommended skill here.
+When the user replies `proceed`, that authorizes only the named safe next skill; live-device
+and native-app gates remain explicit.
+

@@ -1,6 +1,6 @@
 # Check Byte Order
 
-Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
+Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner. Use when byte order, word order, or multi-register decoding is unknown and raw words or a capture already exist.
 
 ## Common requests
 

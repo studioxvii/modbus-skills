@@ -1,6 +1,6 @@
 # Review Evidence
 
-Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
+Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval. Use when source evidence needs status grouping, exception decisions, or confirmation of a bounded extraction scope.
 
 ## Common requests
 
