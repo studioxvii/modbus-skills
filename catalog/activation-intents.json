@@ -1,82 +1,302 @@
 {
   "analyze-capture": {
-    "positive_stems": ["analyze this Modbus capture for stale and missing samples", "find communication and signal-quality problems in this Modbus data"],
+    "positive_stems": [
+      "analyze this Modbus capture for stale and missing samples",
+      "find communication and signal-quality problems in this Modbus data",
+      "check this JSON poll log for flatlines and gaps",
+      "report timeout and exception counts from this bounded capture",
+      "inspect these CSV samples for implausible scaled values",
+      "tell me whether this capture shows duplicate or missing planned reads",
+      "evaluate timing jitter in this read-only Modbus sample window",
+      "look for stale holding-register values in this capture file",
+      "separate communication faults from signal faults in this sample set",
+      "summarize skipped checks and missing metadata for this capture"
+    ],
     "negative": ["generate a Node-RED flow from this register map", "convert 40001 to a protocol offset", "compare two register maps", "write a coil to test the device", "summarize this unrelated network packet capture"]
   },
   "apply-review": {
-    "positive_stems": ["record my confirmed Modbus map decisions", "apply reviewed byte order and exclusion decisions to this map"],
+    "positive_stems": [
+      "record my confirmed Modbus map decisions",
+      "apply reviewed byte order and exclusion decisions to this map",
+      "write a new reviewed map from this decision batch",
+      "apply the grouped exception dispositions I just confirmed",
+      "promote these evidence-backed field choices into the canonical map",
+      "exclude the rejected rows I confirmed and keep the audit trail",
+      "apply one scoped layout confirmation to every matching point",
+      "create the reviewed map from this compact decision record",
+      "keep remaining holds visible after applying this review batch",
+      "apply these shared-scope exclusions with their evidence references"
+    ],
     "negative": ["review this map without making a decision", "silently approve every unresolved field", "generate a Modpoll configuration", "write a value to the device", "compare two map revisions"]
   },
   "modbus-help": {
-    "positive_stems": ["help me choose the right Modbus workflow", "route this unclear Modbus problem to the correct skill", "stop this unsafe request to write a Modbus coil", "reject this Modbus network discovery scan"],
+    "positive_stems": [
+      "help me choose the right Modbus workflow",
+      "route this unclear Modbus problem to the correct skill",
+      "stop this unsafe request to write a Modbus coil",
+      "reject this Modbus network discovery scan",
+      "I have a vendor spreadsheet and just want a safe read-only setup",
+      "what should I run first with this OEM PDF and the temperatures I need",
+      "I am not sure which Modbus skill to use next",
+      "point me to the next safe step from this capture file",
+      "which skill turns this register map into a user map",
+      "how do I get from this messy CSV to a bounded read plan"
+    ],
     "negative": ["format this Word document", "review this Python pull request", "create a calendar event", "find a restaurant", "summarize this non-industrial PDF"]
   },
   "build-tool-pack": {
-    "positive_stems": ["build Node-RED, Modpoll, and ModScan outputs from this map", "create any selected combination of Modbus tool files"],
+    "positive_stems": [
+      "build Node-RED, Modpoll, and ModScan outputs from this map",
+      "create any selected combination of Modbus tool files",
+      "make one checksummed pack for Node-RED and Modpoll",
+      "generate a probe pack for the selected targets",
+      "build the final tool pack after byte order is confirmed",
+      "export every selected polling tool from this validated map",
+      "I need both ModScan and gavinying files from one read plan",
+      "package the selected targets with manifests and hashes",
+      "create a combined read-only commissioning pack",
+      "build an undecided target set into one tool pack"
+    ],
     "negative": ["generate only a Node-RED flow", "analyze this completed capture", "compare two map revisions", "write these holding registers", "scan the subnet for Modbus devices"]
   },
   "capture-sample": {
-    "positive_stems": ["create a raw read probe so I can determine byte order", "collect bounded raw Modbus words through Modpoll"],
+    "positive_stems": [
+      "create a raw read probe so I can determine byte order",
+      "collect bounded raw Modbus words through Modpoll",
+      "build a one-read Node-RED probe for this point",
+      "make a manual probe before I decode the 32-bit value",
+      "generate a read-only sample request for this offset",
+      "I need one physical read of these two holding registers",
+      "prepare a credential-free probe for the lab unit",
+      "set up a bounded FC03 probe for byte-order work",
+      "create operator instructions for one raw-word capture",
+      "build a probe pack that will not poll forever"
+    ],
     "negative": ["decode these raw words that I already captured", "generate the final confirmed configuration", "scan all register addresses", "write a test value", "compare two register maps"]
   },
   "compare-maps": {
-    "positive_stems": ["compare these two Modbus register maps", "show map changes between these firmware revisions"],
+    "positive_stems": [
+      "compare these two Modbus register maps",
+      "show map changes between these firmware revisions",
+      "report moved added removed and changed points",
+      "diff the old and new reviewed maps",
+      "what changed between these two validated register lists",
+      "find the real move after row order changed",
+      "compare route unit area and offset identity across revisions",
+      "highlight datatype and scale changes between firmware maps",
+      "show unresolved points that exist on only one side",
+      "tell me whether this is a move or a new point"
+    ],
     "negative": ["validate one register map", "convert these addresses", "analyze time-series samples", "generate a ModScan plan", "compare two unrelated text files"]
   },
   "compile-user-map": {
-    "positive_stems": ["turn this OEM Modbus map into an organized user map for temperatures alarms and status", "compile this device manual and measurement intent into JSON CSV and requested tool outputs"],
+    "positive_stems": [
+      "turn this OEM Modbus map into an organized user map for temperatures alarms and status",
+      "compile this device manual and measurement intent into JSON CSV and requested tool outputs",
+      "make a user map from this vendor PDF for power and operating status",
+      "I have an OEM spreadsheet and need Markdown JSON and CSV for the points I named",
+      "compile this register manual into an organized map without guessing",
+      "produce offline user-map outputs from this OEM source",
+      "create the commissioning map for the measurements in this request",
+      "turn this OEM PDF plus my point list into ready user files",
+      "build the organized user map and hold anything unclear",
+      "resume this compile case after I answer the grouped questions"
+    ],
     "negative": ["only extract register rows from these PDF pages", "compare these two firmware maps", "convert these 40001 references to offsets", "analyze this completed capture", "only generate a Node-RED flow from this validated map"]
   },
   "plan-reads": {
-    "positive_stems": ["group these Modbus points into bounded reads", "compile a traceable FC03 and FC04 poll plan"],
+    "positive_stems": [
+      "group these Modbus points into bounded reads",
+      "compile a traceable FC03 and FC04 poll plan",
+      "make a read plan that does not cross unsafe gaps",
+      "pack these validated points into function-code blocks",
+      "build a hash-bound plan from this reviewed map",
+      "split reads so every point appears in exactly one request",
+      "compile FC01 through FC04 blocks for this map",
+      "create a bounded poll plan before I generate Node-RED",
+      "replan after the map hash changed",
+      "keep unused addresses out of the read blocks"
+    ],
     "negative": ["parse this vendor CSV", "decode these raw words", "generate writes for these points", "analyze a completed capture", "find devices on the network"]
   },
   "review-map": {
-    "positive_stems": ["clean and validate this complete Modbus register map", "run the full parse normalize lint and review workflow"],
+    "positive_stems": [
+      "clean and validate this complete Modbus register map",
+      "run the full parse normalize lint and review workflow",
+      "review this raw PDF register map end to end",
+      "turn this messy source map into a draft and exception queue",
+      "check this vendor spreadsheet as a source-map review",
+      "produce a reviewed draft without guessing unclear fields",
+      "I want source review not a compiled user map",
+      "lint and group exceptions for this entire register list",
+      "review this mixed-convention map and keep holds visible",
+      "run end-to-end map review on this OEM file"
+    ],
     "negative": ["only convert these addresses", "only compare byte orders", "generate a Node-RED flow from a confirmed map", "analyze live samples", "edit a non-Modbus spreadsheet"]
   },
   "check-byte-order": {
-    "positive_stems": ["evaluate ABCD BADC CDAB and DCBA from these words", "compare integer and float interpretations of one Modbus sample"],
+    "positive_stems": [
+      "evaluate ABCD BADC CDAB and DCBA from these words",
+      "compare integer and float interpretations of one Modbus sample",
+      "show every supported 32-bit layout for this capture",
+      "decode these two raw registers without choosing a winner",
+      "the float looks wrong so compare every word order",
+      "evaluate byte and word order from this immutable sample",
+      "report which layouts are eliminated by the known range",
+      "I already have raw words and need the candidate table",
+      "check whether word order applies to this 16-bit sample",
+      "keep all layout candidates with the same sample identity"
+    ],
     "negative": ["capture raw words from the device", "convert 40001 to offset zero", "generate a Modpoll file", "select the correct layout without evidence", "analyze an Ethernet packet capture"]
   },
   "extract-pdf-map": {
-    "positive_stems": ["extract register tables with page evidence from this PDF", "find candidate Modbus rows in this device manual"],
+    "positive_stems": [
+      "extract register tables with page evidence from this PDF",
+      "find candidate Modbus rows in this device manual",
+      "pull traceable register candidates from pages 12 through 18",
+      "extract the register map table without copying the whole manual",
+      "recover PDF table rows with source coverage",
+      "I only want extraction evidence from this OEM PDF",
+      "list rejected PDF rows and grouped extraction exceptions",
+      "capture page and row identity for these register tables",
+      "extract candidates from this bounded page range",
+      "keep OCR text out and return structured register rows"
+    ],
     "negative": ["parse this CSV register list", "summarize the whole manual", "publish this vendor PDF", "generate a Node-RED flow", "compare two JSON maps"]
   },
   "build-modpoll": {
-    "positive_stems": ["generate a Witte Modbus Poll setup from this map", "create a gavinying modpoll CSV configuration"],
+    "positive_stems": [
+      "generate a Witte Modbus Poll setup from this map",
+      "create a gavinying modpoll CSV configuration",
+      "build read-only Modpoll artifacts for this profile",
+      "make the Witte desktop poll plan from this read plan",
+      "export gavinying device poll and ref CSV files",
+      "generate a Witte v12 XML setup that stays documented",
+      "create a Modpoll probe for one bounded read",
+      "build the final Modpoll files after layout confirmation",
+      "I need gavinying-cli files from this validated map",
+      "produce Modpoll artifacts without inventing an MBP binary"
+    ],
     "negative": ["generate a Node-RED flow", "generate a ModScan plan", "invent an undocumented MBP binary", "analyze capture data", "write device registers"]
   },
   "build-modscan": {
-    "positive_stems": ["generate a documented ModScan read plan", "create a ModScan raw probe from this map"],
+    "positive_stems": [
+      "generate a documented ModScan read plan",
+      "create a ModScan raw probe from this map",
+      "build ModScan setup poll-plan and point-map files",
+      "export a version-neutral ModScan commissioning pack",
+      "make ModScan test-message files for this read plan",
+      "I need ModScan32 instructions for this bounded poll",
+      "create a ModScan probe that collects raw words",
+      "generate the final ModScan files from the confirmed map",
+      "produce ModScan CSV files without inventing a TST binary",
+      "build an auditable ModScan read-only setup"
+    ],
     "negative": ["generate a Modpoll CSV", "generate a Node-RED flow", "invent a binary TST file", "compare firmware maps", "write a holding register"]
   },
   "build-node-red": {
-    "positive_stems": ["generate a read-only Node-RED Modbus flow", "create a disabled Node-RED raw probe with bounded block reads"],
+    "positive_stems": [
+      "generate a read-only Node-RED Modbus flow",
+      "create a disabled Node-RED raw probe with bounded block reads",
+      "build a Node-RED flex-getter flow from this map",
+      "make a disabled final Node-RED poll that keeps one request in flight",
+      "export a Node-RED flow that writes capture.json",
+      "I need a Node-RED probe with one start button",
+      "generate the dashboard-ready read-only flow",
+      "create Node-RED artifacts without deploy-time triggers",
+      "build a sequenced FC03 flow from this read plan",
+      "produce a Node-RED pack that starts disabled"
+    ],
     "negative": ["generate a ModScan plan", "generate a Witte Modbus Poll setup", "add Modbus write nodes", "parse a PDF manual", "analyze a CSV capture"]
   },
   "build-custom-export": {
-    "positive_stems": ["define a declarative Modbus CSV format from this example", "create a safe reusable text exporter for this documented format"],
+    "positive_stems": [
+      "define a declarative Modbus CSV format from this example",
+      "create a safe reusable text exporter for this documented format",
+      "reproduce this header and row layout from the reviewed map",
+      "infer a CSV template without executing the example as code",
+      "build a deterministic text export for this documented shape",
+      "match this delimiter quoting and footer from the sample file",
+      "generate the custom CSV from the canonical map",
+      "keep a format-config so I can regenerate this export",
+      "render this documented text format from the reviewed points",
+      "create a reusable exporter that is not Node-RED or Modpoll"
+    ],
     "negative": ["generate a Node-RED graph", "invent a proprietary binary file", "execute this custom template code", "analyze live values", "parse a register-map PDF"]
   },
   "check-map": {
-    "positive_stems": ["find duplicates overlaps and invalid widths in this Modbus map", "check this normalized map for unresolved and unsafe fields"],
+    "positive_stems": [
+      "find duplicates overlaps and invalid widths in this Modbus map",
+      "check this normalized map for unresolved and unsafe fields",
+      "lint identity range overlap and access problems",
+      "validate this reviewed register map before planning reads",
+      "report grouped errors warnings and holds for this map",
+      "flag unit ID zero and write-only points",
+      "check whether packed-bit numbering is still unresolved",
+      "run deterministic map checks without changing the file",
+      "hold final generation if byte order is still unconfirmed",
+      "verify function codes stay in FC01 through FC04"
+    ],
     "negative": ["parse this raw PDF", "convert all addresses", "generate a tool pack", "analyze time-series values", "write a coil"]
   },
   "normalize-map": {
-    "positive_stems": ["normalize this mixed-convention Modbus map without guessing", "resolve explicit register metadata into protocol offsets"],
+    "positive_stems": [
+      "normalize this mixed-convention Modbus map without guessing",
+      "resolve explicit register metadata into protocol offsets",
+      "make area unit datatype and width explicit",
+      "turn these candidate rows into a canonical map with holds",
+      "keep unknown byte order visible while normalizing",
+      "convert 40001-style tokens only when the source proves them",
+      "standardize this candidate map and group remaining assumptions",
+      "produce normalized.json from these parsed rows",
+      "do not assume uint16 for blank data types",
+      "normalize this CSV-derived candidate list into engineering fields"
+    ],
     "negative": ["extract tables from a PDF", "generate a final Node-RED flow", "compare two normalized maps", "analyze a capture", "silently assume every unknown is uint16"]
   },
   "parse-map": {
-    "positive_stems": ["parse this CSV Modbus register map with rejected-row evidence", "turn this JSON XML or XLSX register list into candidates"],
+    "positive_stems": [
+      "parse this CSV Modbus register map with rejected-row evidence",
+      "turn this JSON XML or XLSX register list into candidates",
+      "read this structured text map into traceable rows",
+      "parse the vendor spreadsheet without approving addresses",
+      "keep source values while producing candidate rows",
+      "report parse warnings and rejected rows by cause",
+      "ingest this delimited register list as candidates",
+      "parse the JSON register export into a candidate map",
+      "turn this XLSX sheet into source-preserving candidates",
+      "I need candidate rows from this structured map file"
+    ],
     "negative": ["extract this PDF manual", "confirm unresolved engineering choices", "generate a Modpoll configuration", "analyze live data", "parse an unrelated contact spreadsheet"]
   },
   "remap-addresses": {
-    "positive_stems": ["convert these 40001 references to protocol offsets", "preview a one-based to zero-based Modbus address conversion"],
+    "positive_stems": [
+      "convert these 40001 references to protocol offsets",
+      "preview a one-based to zero-based Modbus address conversion",
+      "change this map from Modicon notation to PDU offsets",
+      "apply a known map-wide address convention conversion",
+      "show collisions before converting these references",
+      "remap holding-register 4xxxx tokens to zero-based offsets",
+      "preview the address-basis change across the whole map",
+      "convert protocol offsets back to 40001-style references",
+      "I need a hash-bound preview of this notation change",
+      "apply the collision-free offset conversion"
+    ],
     "negative": ["parse a complete manual", "guess the register area", "evaluate byte order", "generate a Node-RED flow", "write to address 40001"]
   },
   "review-evidence": {
-    "positive_stems": ["show which parsed Modbus fields are confirmed or inferred", "review rejected rows assumptions and holds before promotion"],
+    "positive_stems": [
+      "show which parsed Modbus fields are confirmed or inferred",
+      "review rejected rows assumptions and holds before promotion",
+      "group these extraction exceptions into one decision batch",
+      "separate verified evidence from unresolved items",
+      "make a compact exception queue for this source map",
+      "confirm this bounded PDF extraction as one scope",
+      "do not ask me about every row individually",
+      "review fuzzy matches without treating them as confirmed",
+      "present every independent blocking group together",
+      "status the source evidence and list remaining decisions"
+    ],
     "negative": ["parse a new CSV", "automatically approve all candidate rows", "generate a ModScan plan", "analyze capture timing", "convert addresses"]
   }
 }

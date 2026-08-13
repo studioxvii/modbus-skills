@@ -24,9 +24,16 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires a schema-valid candidate map and parse report. Engineering fields can remain unresolved.
 
+## Stop
+
+- Stop if the source is a PDF manual; that is `extract-pdf-map` or `compile-user-map`.
+- Stop for writes, broadcasts, discovery, or unbounded polling.
+- Do not approve address, area, unit, datatype, access, or byte order.
+
 ## Handoff
 
-- Candidate rows exist: suggest `normalize-map`.
+- The user wants an organized user map, JSON, CSV, or tool outputs from this OEM source: suggest `compile-user-map`.
+- Candidate rows exist and the user asked only for this stage: suggest `normalize-map`.
 - The source is a PDF manual: suggest `extract-pdf-map`.
 
 Parsing preserves uncertainty. It does not approve address, area, unit, datatype, access, or byte order.

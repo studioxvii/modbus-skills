@@ -29,6 +29,12 @@ Follow `../../references/interaction-contract.md`.
 Completion requires every item to have a status and every exception group to have a
 decision path. Verified items require no human response.
 
+## Stop
+
+- Never ask page by page, row by row, or point by point.
+- Do not turn plausibility into confirmation.
+- Stop for writes, broadcasts, discovery, or unbounded polling.
+
 ## Handoff
 
 - The user confirms values or exclusions: suggest `apply-review`.

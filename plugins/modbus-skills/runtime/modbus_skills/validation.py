@@ -213,10 +213,32 @@ def _validate_point(point: CanonicalPoint) -> list[Finding]:
             expected=expected_span,
         )
 
+    bit_area = point.area in {RegisterArea.COIL, RegisterArea.DISCRETE_INPUT}
+    packed_bitfield = point.datatype is DataType.BOOL and (
+        point.area in {RegisterArea.HOLDING_REGISTER, RegisterArea.INPUT_REGISTER}
+        or (point.word_span is not None and point.word_span > 1)
+    )
+    if bit_area and point.byte_order and len(point.byte_order) >= 4:
+        add(
+            "point.byte-order-inapplicable",
+            FindingSeverity.ERROR,
+            "Coil and discrete points do not use multi-register byte layouts.",
+            "byte_order",
+            value=point.byte_order,
+        )
+    if packed_bitfield and not point.bit_order:
+        add(
+            "point.bit-order-unresolved",
+            FindingSeverity.HOLD,
+            "Declare the packed-bit or coil bit numbering convention.",
+            "bit_order",
+        )
+
     if (
         span_is_valid
         and span > 1
         and point.datatype is not DataType.STRING
+        and not bit_area
         and not point.byte_order
     ):
         add(

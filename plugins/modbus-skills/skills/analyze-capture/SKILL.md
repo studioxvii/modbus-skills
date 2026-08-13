@@ -25,6 +25,12 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires a schema-valid analysis that makes every enabled check visible.
 
+## Stop
+
+- Stop for unbounded captures, writes, broadcasts, or discovery.
+- Stop when sample identity is missing or a timestamp lacks a timezone.
+- Treat correlation as evidence, not cause.
+
 ## Handoff
 
 - Raw-word ambiguity: suggest `check-byte-order`.

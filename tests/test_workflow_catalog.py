@@ -34,20 +34,34 @@ class WorkflowCatalogTests(unittest.TestCase):
         self.assertIn("`compile-user-map`", router)
         self.assertIn("explicitly requested stage", router)
 
-    def test_router_defaults_to_complete_safe_chain_but_keeps_direct_stage_routes(self) -> None:
+    def test_router_defaults_to_compile_user_map_but_keeps_direct_stage_routes(self) -> None:
         router = (
             ROOT / "plugins" / "modbus-skills" / "skills" / "modbus-help" / "SKILL.md"
         ).read_text(encoding="utf-8")
         paths = (
             ROOT / "plugins" / "modbus-skills" / "references" / "user-paths.md"
         ).read_text(encoding="utf-8")
-        complete_chain = (
+        stale_chain = (
             "normalize-map -> check-map -> plan-reads -> build-node-red -> "
             "capture-sample -> analyze-capture -> check-byte-order"
         )
-        self.assertIn(complete_chain, router)
-        self.assertIn(complete_chain, paths)
+        self.assertNotIn(stale_chain, router)
+        self.assertNotIn(stale_chain, paths)
+        self.assertIn("recommend `compile-user-map`", router)
         self.assertIn("Route an explicitly requested stage directly", router)
+        self.assertIn("Choose `compile-user-map` for OEM-source-to-user-output requests", paths)
+
+    def test_catalog_has_one_source_review_workflow(self) -> None:
+        workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
+        by_id = {item["id"]: item for item in workflows["workflows"]}
+        self.assertNotIn("review-register-map", by_id)
+        self.assertIn("review-source-map", by_id)
+        extract = by_id["extract-pdf-register-map"]
+        extract_skills = {step.get("skill") for step in extract["steps"] if step["kind"] == "skill"}
+        self.assertEqual({"extract-pdf-map", "review-evidence"}, extract_skills)
+        compare = by_id["compare-map-revisions"]
+        nested = [step.get("workflow") for step in compare["steps"] if step["kind"] == "workflow"]
+        self.assertEqual(["review-source-map", "review-source-map"], nested)
 
     def test_shared_completion_contract_recommends_one_actionable_next_step(self) -> None:
         contract = (
@@ -131,6 +145,12 @@ class WorkflowCatalogTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('run_cli("compile-user-map"', wrapper)
 
+    def test_remap_workflow_lints_the_converted_map(self) -> None:
+        workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
+        workflow = next(item for item in workflows["workflows"] if item["id"] == "remap-address-notation")
+        self.assertEqual(workflow["steps"][0]["output"], "modbus-address-remap/v1")
+        self.assertEqual(workflow["steps"][1]["inputs"], ["modbus-address-remap/v1"])
+
     def test_byte_order_workflow_probes_before_final_generation(self) -> None:
         workflows = json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))
         workflow = next(
@@ -138,22 +158,29 @@ class WorkflowCatalogTests(unittest.TestCase):
             for item in workflows["workflows"]
             if item["id"] == "probe-resolve-finalize-tool-pack"
         )
-        steps = [step.get("skill", step["kind"]) for step in workflow["steps"]]
+        steps = [step.get("skill") or step.get("workflow") or step["kind"] for step in workflow["steps"]]
         self.assertEqual(
             steps,
             [
                 "plan-reads",
                 "build-tool-pack",
                 "external-gate",
-                "check-byte-order",
-                "human-gate",
-                "apply-review",
+                "confirm-byte-order",
                 "plan-reads",
                 "build-tool-pack",
             ],
         )
         self.assertEqual(workflow["steps"][1]["output"], "modbus-tool-pack/v1")
         self.assertIn("final-tool-pack-request/v1", workflow["steps"][-1]["inputs"])
+        confirm = next(
+            item
+            for item in json.loads((ROOT / "catalog" / "workflows.json").read_text(encoding="utf-8"))["workflows"]
+            if item["id"] == "confirm-byte-order"
+        )
+        self.assertEqual(
+            [step.get("skill", step["kind"]) for step in confirm["steps"]],
+            ["check-byte-order", "human-gate", "apply-review"],
+        )
 
 
 if __name__ == "__main__":

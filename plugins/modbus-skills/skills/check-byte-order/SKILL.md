@@ -24,6 +24,8 @@ Follow `../../references/interaction-contract.md`.
 8. Eliminate candidates contradicted by explicit engineering constraints. If exactly
    one remains, present the proof and one scoped confirmation; otherwise ask once with
    the complete shortlist and distinguishing evidence needed.
+9. If the question is coil or packed-bit numbering, stop. That is a map hold for
+   `check-map`, not a byte-order candidate table.
 
 ## Output files
 
@@ -31,7 +33,15 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires every candidate to share one `sample_id`; the evidence selects no winner.
 
+## Stop
+
+- Stop when no raw words or complete sample identity exist.
+- Stop for coil or packed-bit numbering; do not treat it as ABCD/BADC/CDAB/DCBA.
+- Do not select a winning layout.
+- Stop for writes, broadcasts, discovery, or unbounded polling.
+
 ## Handoff
 
 - No raw sample exists: suggest `capture-sample`.
+- The uncertainty is coil or packed-bit numbering: suggest `check-map`.
 - The user confirms a layout: suggest `apply-review`, then `plan-reads`.

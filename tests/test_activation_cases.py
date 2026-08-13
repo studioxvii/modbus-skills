@@ -26,6 +26,16 @@ class ActivationCaseTests(unittest.TestCase):
                 self.assertEqual(len(case["positive"]), len(set(case["positive"])))
                 self.assertEqual(len(case["negative"]), len(set(case["negative"])))
 
+    def test_positive_stems_are_distinct_requests_not_prefix_padding(self) -> None:
+        intents = json.loads(
+            (ROOT / "catalog" / "activation-intents.json").read_text(encoding="utf-8")
+        )
+        for skill_id, intent in intents.items():
+            with self.subTest(skill=skill_id):
+                stems = intent["positive_stems"]
+                self.assertGreaterEqual(len(stems), 10)
+                self.assertEqual(len(stems), len(set(stems)))
+
     def test_oem_outcome_is_distinct_from_specialist_intents(self) -> None:
         intents = json.loads(
             (ROOT / "catalog" / "activation-intents.json").read_text(encoding="utf-8")

@@ -157,6 +157,51 @@ class PointValidationTests(unittest.TestCase):
             "point.unit-id-broadcast-forbidden", {item.code for item in findings}
         )
 
+    def test_coil_with_multi_register_byte_layout_is_an_error(self):
+        findings = validate_points(
+            (
+                point(
+                    area=RegisterArea.COIL,
+                    datatype=DataType.BOOL,
+                    function_code=1,
+                    byte_order="ABCD",
+                ),
+            )
+        )
+        self.assertIn("point.byte-order-inapplicable", {item.code for item in findings})
+
+    def test_packed_bitfield_without_convention_is_a_hold(self):
+        findings = validate_points(
+            (
+                point(
+                    area=RegisterArea.HOLDING_REGISTER,
+                    datatype=DataType.BOOL,
+                    function_code=3,
+                ),
+            )
+        )
+        self.assertIn("point.bit-order-unresolved", {item.code for item in findings})
+
+    def test_float_byte_order_hold_is_unchanged(self):
+        findings = validate_points((point(datatype=DataType.FLOAT32),))
+        codes = {item.code for item in findings}
+        self.assertIn("point.byte-order-unresolved", codes)
+        self.assertNotIn("point.bit-order-unresolved", codes)
+
+    def test_packed_bitfield_with_convention_is_not_held(self):
+        candidate = CanonicalPoint.from_mapping(
+            {
+                **point(
+                    area=RegisterArea.HOLDING_REGISTER,
+                    datatype=DataType.BOOL,
+                    function_code=3,
+                ).to_dict(),
+                "bit_order": "lsb0",
+            }
+        )
+        findings = validate_points((candidate,))
+        self.assertNotIn("point.bit-order-unresolved", {item.code for item in findings})
+
     def test_point_range_cannot_extend_above_65535(self):
         findings = validate_points(
             (

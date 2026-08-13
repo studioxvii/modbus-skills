@@ -44,6 +44,12 @@ Completion requires a generated or held flow with no unbounded polling,
 deploy-time trigger, or write node. Final-flow polling must preserve one
 request in flight.
 
+## Stop
+
+- Stop if the flow would add unbounded polling, a deploy-time trigger, or a write node.
+- Keep both probe and final flows disabled by default.
+- Do not mark native verification complete without the pinned Node-RED import.
+
 ## Handoff
 
 - No read plan exists: suggest `plan-reads`.

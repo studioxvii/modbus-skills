@@ -24,6 +24,12 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires every point from both inputs to have a disposition.
 
+## Stop
+
+- Stop on schema mismatch or unresolved composite identity.
+- Do not treat numeric address alone as identity.
+- Do not collapse points from different routes, areas, or unit identifiers.
+
 ## Handoff
 
 - The new source still needs review: suggest `review-map`.

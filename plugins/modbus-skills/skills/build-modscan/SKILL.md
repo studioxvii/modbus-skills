@@ -33,6 +33,12 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires a generated or held status with visible native-verification state.
 
+## Stop
+
+- Stop without a canonical map, read plan, and probe or final mode.
+- Never claim native verification when it was not run.
+- Do not invent undocumented ModScan configuration formats.
+
 ## Handoff
 
 - No read plan exists: suggest `plan-reads`.

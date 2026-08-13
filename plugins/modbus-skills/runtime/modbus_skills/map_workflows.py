@@ -8,12 +8,14 @@ import math
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from .address import format_modicon_reference, resolve_address
 from .byte_order import datatype_width_compatible
 from .models import AddressConvention, DataType, RegisterArea
 from .parsers import parse_source
+from .pdf_extraction import PdfExtractionError, extract_pdf
 from .validation import READ_FUNCTION_BY_AREA, validate_points
 
 
@@ -1971,6 +1973,27 @@ def _review_decision_groups(
     return result
 
 
+def _pdf_source(
+    source: Any,
+    *,
+    source_format: str | None,
+    filename: str | None,
+) -> tuple[Path, bytes] | None:
+    fmt = (source_format or "").lower().lstrip(".")
+    name = str(filename or "")
+    if isinstance(source, Path):
+        data = source.read_bytes()
+        if fmt == "pdf" or source.suffix.lower() == ".pdf" or data[:5] == b"%PDF-":
+            return source, data
+        return None
+    if isinstance(source, (bytes, bytearray)):
+        data = bytes(source)
+        if fmt == "pdf" or name.lower().endswith(".pdf") or data[:5] == b"%PDF-":
+            return Path(name or "source.pdf"), data
+        return None
+    return None
+
+
 def diagnose_map(
     source: Any,
     *,
@@ -1981,12 +2004,20 @@ def diagnose_map(
 ) -> dict[str, Any]:
     """Parse, normalize, lint, and prepare evidence in one deterministic chain."""
 
-    parsed = parse_source(
-        source,
-        source_format=source_format,
-        filename=filename,
-        delimiter=delimiter,
-    )
+    pdf = _pdf_source(source, source_format=source_format, filename=filename)
+    if pdf is not None:
+        path, data = pdf
+        try:
+            parsed = extract_pdf(path, data)
+        except PdfExtractionError as exc:
+            raise MapWorkflowError(str(exc)) from exc
+    else:
+        parsed = parse_source(
+            source,
+            source_format=source_format,
+            filename=filename,
+            delimiter=delimiter,
+        )
     canonical = normalize_map(parsed, defaults=defaults)
     lint = lint_map(canonical)
     review = review_parse_evidence(canonical, lint_result=lint)

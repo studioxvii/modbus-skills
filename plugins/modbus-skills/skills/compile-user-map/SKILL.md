@@ -48,6 +48,13 @@ Completion requires `compile-result.json` plus the complete offline user-map bun
 Requested targets may remain independently held without invalidating completed outputs.
 A `partial` result still contains useful map files. Report those files and the one correction needed. Ask for input only when the state is `awaiting-source-decision`, `awaiting-selection-decision`, `awaiting-binding`, `awaiting-physical-read`, or `awaiting-byte-order-decision`. A corrected source starts a new case; do not describe it as a resume.
 
+## Stop
+
+- Never perform a live device read.
+- Stop for unsupported writes, broadcasts, scans, credentials, and polling.
+- Do not invent fields or bypass case, source, packet, or artifact hashes.
+- Do not expose internal specialist-stage choreography.
+
 ## Finish
 
 - The requested offline bundle is usable: say `Done`, name its human, JSON, and CSV

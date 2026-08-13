@@ -4,6 +4,7 @@ import sys
 import unittest
 import math
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -749,6 +750,44 @@ class LintAndReviewTests(unittest.TestCase):
         self.assertEqual(0, result["canonical_map"]["points"][0]["protocol_offset"])
         self.assertEqual(0, result["lint"]["summary"]["blocking"])
         self.assertEqual("ready", result["review"]["review_status"])
+
+    def test_diagnose_map_reviews_a_pdf_source_in_one_invocation(self) -> None:
+        extraction = {
+            "schema_version": "modbus-pdf-extraction/v1",
+            "artifact_type": "modbus-pdf-extraction",
+            "status": "extracted",
+            "records": [
+                {
+                    "address": "40001",
+                    "name": "Tank Level",
+                    "datatype": "uint16",
+                    "_source": {"format": "pdf", "page": 2, "line": 1, "method": "layout"},
+                }
+            ],
+            "rejected_rows": [],
+            "warnings": [],
+            "holds": [],
+            "findings": [],
+        }
+        with mock.patch(
+            "modbus_skills.map_workflows.extract_pdf",
+            return_value=extraction,
+        ) as extract:
+            result = diagnose_map(
+                b"%PDF-1.4 synthetic register map",
+                filename="manual.pdf",
+                defaults={
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "address_convention": "modicon-reference",
+                },
+            )
+        extract.assert_called_once()
+        self.assertEqual("Tank Level", result["canonical_map"]["points"][0]["name"])
+        self.assertIn("lint", result)
+        self.assertIn("review", result)
+        self.assertEqual(extraction, result["parsed"])
 
     def test_global_source_confirmation_is_one_batch_not_one_decision_per_page(self) -> None:
         source = {

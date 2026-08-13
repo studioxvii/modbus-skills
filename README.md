@@ -230,9 +230,9 @@ Read plans are tied to the SHA-256 hash of the exact validated map. If an
 approved map changes, a new read plan is required. Write-only and source-
 excluded points cannot enter a final read plan.
 
-## Complete workflow list
+## Skills
 
-| Goal | Workflow |
+| Goal | Skill |
 | --- | --- |
 | Route an unclear request | `modbus-help` |
 | Compile an OEM map into organized user outputs | `compile-user-map` |
@@ -254,6 +254,24 @@ excluded points cannot enter a final read plan.
 | Build any selected tool combination | `build-tool-pack` |
 | Analyze communication and signal behavior | `analyze-capture` |
 | Build a custom text or CSV export | `build-custom-export` |
+
+## Workflows
+
+Machine-readable chains live in [`catalog/workflows.json`](catalog/workflows.json).
+
+| Goal | Workflow |
+| --- | --- |
+| Compile an OEM map into user outputs | `compile-user-map` |
+| Extract PDF register evidence | `extract-pdf-register-map` |
+| Review a raw source map | `review-source-map` |
+| Confirm byte order from one sample | `confirm-byte-order` |
+| Probe raw words then confirm layout | `determine-byte-order` |
+| Remap address notation | `remap-address-notation` |
+| Build a declarative custom export | `build-custom-export` |
+| Probe, confirm layout, and finalize a tool pack | `probe-resolve-finalize-tool-pack` |
+| Build a multi-target tool pack | `build-tool-pack` |
+| Analyze bounded read data | `analyze-read-data` |
+| Compare map revisions | `compare-map-revisions` |
 
 ## Repository layout
 
@@ -287,7 +305,8 @@ python3 scripts/verify_repo.py
 ```
 
 The checks cover workflow structure, generated outputs, read-only behavior,
-workflow tests, and synthetic map fixtures.
+workflow tests, synthetic map fixtures, and the deterministic skill-usability
+campaign contracts.
 
 See [`docs/verification-status.md`](docs/verification-status.md) and
 [`docs/testing.md`](docs/testing.md) for current results and the test method.

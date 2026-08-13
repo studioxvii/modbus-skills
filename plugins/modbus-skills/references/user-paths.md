@@ -3,18 +3,10 @@
 Choose the path from the user's outcome and current artifact. Prefer one outcome skill;
 use a specialist only when the user explicitly requests that stage.
 
-## Complete safe path
+## Broad setup or an OEM source
 
-For broad setup, validation, or troubleshooting help, show this path automatically:
-
-```text
-normalize-map -> check-map -> plan-reads -> build-node-red -> capture-sample -> analyze-capture -> check-byte-order
-```
-
-Add `parse-map` or `extract-pdf-map` before it for raw sources. Each live step is
-bounded and read-only. Route an explicit stage request directly to that stage.
-
-## I need an organized user map or outputs from an OEM source
+For an OEM PDF, spreadsheet, JSON, XML, XLSX, or text file, or for broad setup help
+when the user does not name a specialist stage, recommend `compile-user-map`:
 
 ```text
 OEM PDF, CSV, JSON, XML, XLSX, or text + measurement intent + optional targets
@@ -24,20 +16,20 @@ OEM PDF, CSV, JSON, XML, XLSX, or text + measurement intent + optional targets
 This is the primary route. It completes safe offline work in one run, resumes one
 case only when a material exception blocks progress, and leaves live reads separate.
 Do not replace it with a parse-review-normalize-plan-builder invocation chain.
+Node-RED is one optional target, not the default finish.
 
 ## I have a register map
 
+When the requested outcome is source-map review rather than organized user outputs:
+
 ```text
-PDF manual -> extract-pdf-map
-CSV, JSON, XML, XLSX, or text -> parse-map
-candidate map -> normalize-map
+PDF or structured source -> review-map
 normalized map -> check-map
-clean validated map -> plan-reads
-blocking exception groups -> review-evidence -> apply-review -> plan-reads
+blocking exception groups -> review-evidence -> apply-review
 ```
 
-Use `review-map` only when the user explicitly wants source-map review rather than an
-organized user map or output bundle.
+Use `extract-pdf-map` only when extraction evidence itself is the requested outcome.
+Use `parse-map` only when candidate rows themselves are the requested outcome.
 
 ## I need a polling-tool output
 
@@ -62,6 +54,7 @@ human layout decision -> apply-review -> plan-reads -> selected builder
 ```
 
 One physical read supplies every candidate. Evidence never chooses the layout.
+Coil and packed-bit numbering is not a byte-order question; keep it as a map hold.
 
 ## The values or communications look wrong
 
@@ -91,10 +84,24 @@ Node-RED, Modpoll, or ModScan -> use the dedicated builder
 opaque or undocumented native format -> stop at a documented interchange plan
 ```
 
+## Specialist stages
+
+These stages exist for explicit requests or for work that starts from an already
+normalized map or capture. They are not the default path from an OEM source:
+
+```text
+parse-map | extract-pdf-map | normalize-map | check-map | plan-reads |
+build-node-red | build-modpoll | build-modscan | capture-sample |
+analyze-capture | check-byte-order
+```
+
+Route an explicitly requested stage directly to that skill.
+
 ## Routing rule
 
 Recommend the skill that completes the user's outcome with its available inputs.
-Choose `compile-user-map` for OEM-source-to-user-output requests. Choose a specialist
-for explicit extraction, parsing, review, comparison, remapping, capture analysis,
-byte-order, planning, or target-only requests. Show the complete safe path for broad
-help. Offer one alternate only when the current goal is genuinely ambiguous.
+Choose `compile-user-map` for OEM-source-to-user-output requests and for broad setup
+help. Choose `review-map` when source-map review itself is the outcome. Choose a
+specialist for explicit extraction, parsing, review, comparison, remapping, capture
+analysis, byte-order, planning, or target-only requests. Offer one alternate only
+when the current goal is genuinely ambiguous.

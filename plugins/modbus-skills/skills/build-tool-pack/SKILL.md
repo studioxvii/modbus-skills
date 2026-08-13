@@ -30,6 +30,12 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires a checksummed pack that contains every selected target and no unselected target.
 
+## Stop
+
+- Stop when no target is selected or the map fails validation.
+- Hold final generation while required decoding fields are unresolved.
+- Keep private review notes and source evidence out of the portable pack.
+
 ## Handoff
 
 - The map is not reviewed: suggest `review-map`.

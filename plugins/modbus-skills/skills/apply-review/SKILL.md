@@ -27,6 +27,13 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires a new map whose approval state matches its remaining holds.
 
+## Stop
+
+- Stop without a reason and evidence reference for each distinct decision.
+- Do not modify the original draft; write a new map.
+- Keep write-only points out of the read map.
+- Rebuild every stale read plan.
+
 ## Handoff
 
 - Holds remain: suggest `review-evidence`.

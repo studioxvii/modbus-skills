@@ -25,8 +25,8 @@
     },
     {
       "id": "extract-pdf-register-map",
-      "name": "Extract a PDF register map",
-      "goal": "Turn a PDF manual or bounded page range into traceable candidates, then normalize and lint them without serial page approval.",
+      "name": "Extract PDF register evidence",
+      "goal": "Turn a PDF manual or bounded page range into traceable candidates and grouped extraction exceptions without performing source-map review.",
       "steps": [
         {
           "id": "extract",
@@ -38,30 +38,11 @@
           "output": "candidate-map/v1"
         },
         {
-          "id": "normalize",
-          "kind": "skill",
-          "skill": "normalize-map",
-          "inputs": [
-            "candidate-map/v1"
-          ],
-          "output": "modbus-map/v1"
-        },
-        {
-          "id": "lint",
-          "kind": "skill",
-          "skill": "check-map",
-          "inputs": [
-            "modbus-map/v1"
-          ],
-          "output": "modbus-map-lint/v1"
-        },
-        {
           "id": "review",
           "kind": "skill",
           "skill": "review-evidence",
           "inputs": [
-            "modbus-map/v1",
-            "modbus-map-lint/v1"
+            "candidate-map/v1"
           ],
           "output": "modbus-map-evidence-review/v1"
         },
@@ -70,27 +51,16 @@
           "kind": "human-gate",
           "condition": "decision_groups is non-empty",
           "inputs": [
-            "modbus-map/v1",
+            "candidate-map/v1",
             "modbus-map-evidence-review/v1"
           ],
           "output": "modbus-review-decisions/v1",
-          "instruction": "Resolve all independent extraction or field exception groups in one batch. Never ask page by page."
-        },
-        {
-          "id": "apply-decisions",
-          "kind": "skill",
-          "skill": "apply-review",
-          "inputs": [
-            "modbus-map/v1",
-            "modbus-review-decisions/v1"
-          ],
-          "output": "modbus-map/v1"
+          "instruction": "Resolve all independent extraction exception groups in one batch. Never ask page by page."
         }
       ],
       "stop_conditions": [
         "unreadable or rights-restricted PDF",
         "incomplete source coverage on selected points",
-        "unresolved address convention or register area",
         "write, broadcast, scan, or OCR of an entire unbound manual requested"
       ]
     },
@@ -138,102 +108,10 @@
       ]
     },
     {
-      "id": "review-register-map",
-      "name": "Review a register map",
-      "goal": "Produce a validated Modbus map quickly without silent engineering guesses or serial approval loops.",
+      "id": "confirm-byte-order",
+      "name": "Confirm byte order from one sample",
+      "goal": "Evaluate every supported layout from one immutable sample, record one human confirmation, and apply it.",
       "steps": [
-        {
-          "id": "parse",
-          "kind": "skill",
-          "skill": "parse-map",
-          "inputs": [
-            "source-bundle/v1"
-          ],
-          "output": "candidate-map/v1"
-        },
-        {
-          "id": "normalize",
-          "kind": "skill",
-          "skill": "normalize-map",
-          "inputs": [
-            "candidate-map/v1"
-          ],
-          "output": "modbus-map/v1"
-        },
-        {
-          "id": "lint",
-          "kind": "skill",
-          "skill": "check-map",
-          "inputs": [
-            "modbus-map/v1"
-          ],
-          "output": "modbus-map-lint/v1"
-        },
-        {
-          "id": "review",
-          "kind": "skill",
-          "skill": "review-evidence",
-          "inputs": [
-            "modbus-map/v1",
-            "modbus-map-lint/v1"
-          ],
-          "output": "modbus-map-evidence-review/v1"
-        },
-        {
-          "id": "confirm-map",
-          "kind": "human-gate",
-          "condition": "decision_groups is non-empty",
-          "inputs": [
-            "modbus-map/v1",
-            "modbus-map-evidence-review/v1"
-          ],
-          "output": "modbus-review-decisions/v1",
-          "instruction": "Skip this gate when the review status is ready. Otherwise resolve all independent exception groups in one batch with reasons and shared-scope evidence references; never ask page by page or row by row."
-        },
-        {
-          "id": "apply-decisions",
-          "kind": "skill",
-          "skill": "apply-review",
-          "inputs": [
-            "modbus-map/v1",
-            "modbus-review-decisions/v1"
-          ],
-          "output": "modbus-map/v1"
-        }
-      ],
-      "stop_conditions": [
-        "unresolved route or address convention",
-        "unresolved register area",
-        "unresolved unit identifier",
-        "unresolved rejected-row group",
-        "unconfirmed multi-register byte order"
-      ]
-    },
-    {
-      "id": "determine-byte-order",
-      "name": "Determine byte order from supplied raw words",
-      "goal": "Compare explicit layouts from one immutable raw sample and record human confirmation.",
-      "steps": [
-        {
-          "id": "capture",
-          "kind": "skill",
-          "skill": "capture-sample",
-          "condition": "no raw words or capture/v1 yet",
-          "inputs": [
-            "probe-request/v1"
-          ],
-          "output": "modbus-tool-pack/v1"
-        },
-        {
-          "id": "run-probe",
-          "kind": "external-gate",
-          "condition": "no raw words or capture/v1 yet",
-          "inputs": [
-            "modbus-tool-pack/v1"
-          ],
-          "output": "capture/v1",
-          "instruction": "Run one bounded read and save the returned raw 16-bit words with complete sample identity. Do not scan or write."
-        },
         {
           "id": "evaluate",
           "kind": "skill",
@@ -266,6 +144,49 @@
         }
       ],
       "stop_conditions": [
+        "no raw words",
+        "ambiguous sample identity",
+        "coil or packed-bit numbering requested",
+        "no human confirmation"
+      ]
+    },
+    {
+      "id": "determine-byte-order",
+      "name": "Determine byte order from a one-read probe",
+      "goal": "Collect one raw sample with capture-sample when words are missing, then confirm the layout.",
+      "steps": [
+        {
+          "id": "capture",
+          "kind": "skill",
+          "skill": "capture-sample",
+          "condition": "no raw words or capture/v1 yet",
+          "inputs": [
+            "probe-request/v1"
+          ],
+          "output": "modbus-tool-pack/v1"
+        },
+        {
+          "id": "run-probe",
+          "kind": "external-gate",
+          "condition": "no raw words or capture/v1 yet",
+          "inputs": [
+            "modbus-tool-pack/v1"
+          ],
+          "output": "capture/v1",
+          "instruction": "Run one bounded read and save the returned raw 16-bit words with complete sample identity. Do not scan or write."
+        },
+        {
+          "id": "confirm",
+          "kind": "workflow",
+          "workflow": "confirm-byte-order",
+          "inputs": [
+            "modbus-map/v1",
+            "capture/v1"
+          ],
+          "output": "modbus-map/v1"
+        }
+      ],
+      "stop_conditions": [
         "no probe identity when raw words are missing",
         "no raw words after the probe gate",
         "ambiguous sample identity",
@@ -275,7 +196,7 @@
     {
       "id": "remap-address-notation",
       "name": "Remap address notation",
-      "goal": "Preview and apply a known map-wide conversion between protocol offsets and Modicon-style references.",
+      "goal": "Preview and apply a known map-wide conversion between protocol offsets and Modicon-style references, then lint the converted map.",
       "steps": [
         {
           "id": "remap",
@@ -285,14 +206,14 @@
             "modbus-map/v1",
             "address-convention-request/v1"
           ],
-          "output": "modbus-address-remap-preview/v1"
+          "output": "modbus-address-remap/v1"
         },
         {
           "id": "lint",
           "kind": "skill",
           "skill": "check-map",
           "inputs": [
-            "modbus-map/v1"
+            "modbus-address-remap/v1"
           ],
           "output": "modbus-map-lint/v1"
         }
@@ -339,7 +260,7 @@
     {
       "id": "probe-resolve-finalize-tool-pack",
       "name": "Probe, resolve byte order, and finalize a tool pack",
-      "goal": "Use a selected tool target to collect one raw sample, compare byte-order candidates, then regenerate all selected targets with the confirmed layout.",
+      "goal": "Use a selected tool target to collect one raw sample, confirm byte order, then regenerate all selected targets with the confirmed layout.",
       "steps": [
         {
           "id": "plan-probe",
@@ -371,32 +292,12 @@
           "instruction": "Run one bounded read against the reviewed endpoint and save the returned raw 16-bit words. Do not scan or write."
         },
         {
-          "id": "evaluate",
-          "kind": "skill",
-          "skill": "check-byte-order",
+          "id": "confirm",
+          "kind": "workflow",
+          "workflow": "confirm-byte-order",
           "inputs": [
+            "modbus-map/v1",
             "capture/v1"
-          ],
-          "output": "modbus-byte-order-evidence/v1"
-        },
-        {
-          "id": "confirm-layout",
-          "kind": "human-gate",
-          "inputs": [
-            "modbus-map/v1",
-            "modbus-byte-order-evidence/v1"
-          ],
-          "output": "modbus-review-decisions/v1",
-          "instruction": "Confirm the explicit layout and record the sample as evidence."
-        },
-        {
-          "id": "apply-layout",
-          "kind": "skill",
-          "skill": "apply-review",
-          "inputs": [
-            "modbus-map/v1",
-            "modbus-review-decisions/v1",
-            "modbus-byte-order-evidence/v1"
           ],
           "output": "modbus-map/v1"
         },
@@ -511,7 +412,7 @@
         {
           "id": "review-before",
           "kind": "workflow",
-          "workflow": "review-register-map",
+          "workflow": "review-source-map",
           "inputs": [
             "before-source-bundle/v1"
           ],
@@ -520,7 +421,7 @@
         {
           "id": "review-after",
           "kind": "workflow",
-          "workflow": "review-register-map",
+          "workflow": "review-source-map",
           "inputs": [
             "after-source-bundle/v1"
           ],

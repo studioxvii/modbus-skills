@@ -15,12 +15,14 @@ Follow `../../references/interaction-contract.md`.
 
 ## Process
 
-1. For a PDF source, start with `extract-pdf-map`.
-2. Run `python3 <skill-dir>/scripts/run.py --input <path> --output <directory>`.
-3. Run parsing, normalization, linting, and evidence review through without pausing.
-4. Group rejected rows, assumptions, and holds by shared cause and present all
+1. Run `python3 <skill-dir>/scripts/run.py --input <path> --output <directory>`.
+   PDF manuals and structured CSV, JSON, XML, XLSX, or text are accepted in this
+   one invocation. Do not send the user to `extract-pdf-map` first.
+2. Run parsing or PDF extraction, normalization, linting, and evidence review
+   through without pausing.
+3. Group rejected rows, assumptions, and holds by shared cause and present all
    independent blocking choices together.
-5. Keep unresolved values and excluded rows visible; never ask for blanket approval
+4. Keep unresolved values and excluded rows visible; never ask for blanket approval
    when automated checks find no exception.
 
 ## Output files
@@ -34,9 +36,17 @@ Completion requires a schema-valid draft, a complete automated review report, an
 disposition path for every blocking exception. A clean draft is ready without an
 extra approval ritual.
 
+## Stop
+
+- Stop if the user actually wants organized user-map outputs; use `compile-user-map`.
+- Stop for writes, broadcasts, discovery, or unbounded polling.
+- Keep unresolved address, area, unit, and byte-order fields as holds.
+- Do not ask page by page or row by row.
+
 ## Handoff
 
 - The user confirms values or exclusions: suggest `apply-review`.
 - The user only wants deterministic checks on an existing normalized map: suggest `check-map`.
+- The user wants extraction evidence only: suggest `extract-pdf-map`.
 
 Keep stage artifacts visible. Final target generation starts only from a validated map.

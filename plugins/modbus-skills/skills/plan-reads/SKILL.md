@@ -29,6 +29,12 @@ Completion requires every active point to be planned once with explicit route, u
 Use `--max-gap 0` without asking. Ask once only when a nonzero sparse-read policy is
 needed. Replan automatically after every map change.
 
+## Stop
+
+- Stop while blocking identity, address, access, width, or final-decoding holds remain.
+- Use `--max-gap 0` unless a nonzero sparse-read policy is explicitly required.
+- Permit function codes 01 through 04 only.
+
 ## Handoff
 
 - One target: suggest `build-node-red`, `build-modpoll`, or `build-modscan` based on the named tool.
