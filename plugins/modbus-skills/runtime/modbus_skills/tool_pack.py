@@ -86,6 +86,7 @@ _PORTABLE_POINT_FIELDS = (
     "byte_order",
     "byte_order_confirmed",
     "byte_order_status",
+    "bit_order",
     "scale",
     "engineering_offset",
     "engineering_unit",

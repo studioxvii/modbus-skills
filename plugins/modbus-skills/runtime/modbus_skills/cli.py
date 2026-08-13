@@ -12,6 +12,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
@@ -600,6 +601,31 @@ def _source_raw(point: Mapping[str, Any], convention: str) -> Any:
     return point.get("address", point.get("protocol_offset"))
 
 
+def _applied_remap_points(
+    points: Sequence[Mapping[str, Any]],
+    conversions: Sequence[Mapping[str, Any]],
+    *,
+    target_convention: str,
+) -> list[dict[str, Any]]:
+    by_id = {item["logical_point_id"]: item for item in conversions}
+    applied: list[dict[str, Any]] = []
+    for index, point in enumerate(points):
+        identifier = str(
+            point.get("logical_point_id", point.get("point_id", f"point-{index + 1}"))
+        )
+        conversion = by_id[identifier]
+        updated = deepcopy(dict(point))
+        updated["protocol_offset"] = conversion["protocol_offset"]
+        updated["display_address"] = conversion["target"]["value"]
+        source = point.get("source_address")
+        source_dict = dict(source) if isinstance(source, Mapping) else {}
+        source_dict["raw"] = conversion["target"]["value"]
+        source_dict["convention"] = target_convention
+        updated["source_address"] = source_dict
+        applied.append(updated)
+    return applied
+
+
 def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
     source_map = _read_json(args.input)
     points = _map_points(source_map)
@@ -651,17 +677,22 @@ def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
         }
         for collision in collisions
     ]
-    raw_result = {
-        "contract": "modbus-address-remap-preview/v1",
+    ready = not any(item["status"] == "held" for item in conversions) and not collisions
+    raw_result: dict[str, Any] = {
+        "contract": "modbus-address-remap/v1",
         "source_convention": args.source_convention,
         "target_convention": args.target_convention,
-        "status": "held" if any(item["status"] == "held" for item in conversions) or collisions else "ready",
+        "status": "ready" if ready else "held",
         "conversions": conversions,
         "collisions": collisions,
     }
+    if ready:
+        raw_result["points"] = _applied_remap_points(
+            points, conversions, target_convention=args.target_convention
+        )
     result = artifact_envelope(
         raw_result,
-        schema_version="modbus-address-remap-preview/v1",
+        schema_version="modbus-address-remap/v1",
         inputs={
             "canonical_map": source_map,
             "remap_options": {

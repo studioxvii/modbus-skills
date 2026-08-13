@@ -12,7 +12,7 @@ from typing import Any
 from .artifacts import ArtifactContractError, assert_artifact_envelope, stable_input_hash
 from .byte_order import RawSample, evaluate_byte_orders
 from .map_workflows import lint_map
-from .models import DataType, RegisterArea
+from .models import DataType, RegisterArea, normalize_bit_order
 
 
 class ReviewDecisionError(ValueError):
@@ -28,6 +28,7 @@ _ALLOWED_FIELDS = frozenset(
         "datatype",
         "word_span",
         "byte_order",
+        "bit_order",
         "scale",
         "engineering_offset",
         "engineering_unit",
@@ -57,6 +58,7 @@ _FIELD_APPLICATION_ORDER = {
             "access",
             "function_code",
             "byte_order",
+            "bit_order",
         )
     )
 }
@@ -909,6 +911,13 @@ def _decision_value(field: str, value: Any, point: Mapping[str, Any]) -> Any:
                 f"byte_order must be an explicit permutation of {expected}"
             )
         return compact
+    if field == "bit_order":
+        convention = normalize_bit_order(value)
+        if convention is None:
+            raise ReviewDecisionError(
+                "bit_order must be an explicit packed-bit or coil numbering convention"
+            )
+        return convention
     raise ReviewDecisionError(f"field {field!r} is not supported")
 
 

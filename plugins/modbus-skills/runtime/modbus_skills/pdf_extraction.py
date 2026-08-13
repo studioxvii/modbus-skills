@@ -49,6 +49,7 @@ _HEADER_ALIASES = {
     "word count": "word_count",
     "width": "word_count",
     "byte order": "byte_order",
+    "bit order": "bit_order",
 }
 _MATERIAL_FIELDS = frozenset(
     {"address", "protocol_offset", "display_address", "name", "area", "word_count", "datatype", "access"}

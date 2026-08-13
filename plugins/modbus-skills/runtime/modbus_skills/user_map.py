@@ -36,6 +36,7 @@ _POINT_FIELDS = (
     "word_span",
     "byte_order",
     "byte_order_confirmed",
+    "bit_order",
     "scale",
     "engineering_offset",
     "engineering_unit",

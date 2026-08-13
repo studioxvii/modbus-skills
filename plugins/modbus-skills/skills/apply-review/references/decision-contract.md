@@ -11,7 +11,7 @@ Use a JSON object with these top-level fields:
 - `decisions`: An array of point decisions.
 - `hold_decisions`: An optional array that resolves global holds by exact `code`.
 
-A set decision contains `point_id`, `field`, `value`, `reason`, and at least one `evidence_refs` entry. Supported fields are route, unit, area, protocol offset, datatype, word span, byte order, scale, engineering offset, engineering unit, access, and read function code.
+A set decision contains `point_id`, `field`, `value`, `reason`, and at least one `evidence_refs` entry. Supported fields are route, unit, area, protocol offset, datatype, word span, byte order, bit order, scale, engineering offset, engineering unit, access, and read function code.
 
 An exclusion decision contains `point_id`, `action: "exclude"`, `reason`, and optional `evidence_refs`. Exclusion removes the point from the active read map and retains it under `excluded_points` with its disposition.
 
