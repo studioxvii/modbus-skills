@@ -144,6 +144,27 @@ class SourceAddress:
         return {"raw": self.raw, "convention": self.convention.value}
 
 
+_BIT_ORDER_ALIASES = {
+    "lsb0": "lsb0",
+    "lsb-0": "lsb0",
+    "lsb": "lsb0",
+    "msb0": "msb0",
+    "msb-0": "msb0",
+    "msb": "msb0",
+}
+
+
+def normalize_bit_order(value: object) -> str | None:
+    """Return an explicit bit-numbering convention, or ``None`` when absent."""
+
+    if value in (None, ""):
+        return None
+    text = str(value).strip().lower().replace("_", "-").replace(" ", "-")
+    if text in {"", "?", "unknown", "unresolved"}:
+        return None
+    return _BIT_ORDER_ALIASES.get(text, text)
+
+
 @dataclass(frozen=True, slots=True)
 class CanonicalPoint:
     """A point in the reviewed canonical map.
@@ -222,6 +243,7 @@ class CanonicalPoint:
         if confirmed_value is None and normalized_order is not None:
             confirmed_value = True
         object.__setattr__(self, "byte_order_confirmed", _optional_bool(confirmed_value))
+        object.__setattr__(self, "bit_order", normalize_bit_order(self.bit_order))
 
     @property
     def effective_span(self) -> int | None:
@@ -301,11 +323,7 @@ class CanonicalPoint:
             byte_order=(str(byte_layout) if byte_layout is not None else None),
             byte_order_confirmed=_optional_bool(byte_confirmed),
             byte_order_status=(str(byte_status) if byte_status is not None else None),
-            bit_order=(
-                str(value["bit_order"]).strip().lower().replace("_", "-")
-                if value.get("bit_order") not in (None, "")
-                else None
-            ),
+            bit_order=value.get("bit_order"),
             scale=_optional_float(value.get("scale")),
             engineering_offset=_optional_float(
                 value.get("engineering_offset", value.get("offset"))

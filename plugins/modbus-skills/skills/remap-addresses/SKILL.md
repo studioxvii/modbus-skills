@@ -22,9 +22,9 @@ Follow `../../references/interaction-contract.md`.
 
 ## Output files
 
-- `preview.json` - Review this before replacing address notation. It shows every old and new address, unresolved conversion, and collision. The input map remains unchanged.
+- `preview.json` / converted map - Review every old and new address, then use the applied map when the conversion is collision-free. The input map remains unchanged.
 
-Completion requires a collision-free, hash-bound preview before map output.
+Completion requires a collision-free, hash-bound converted map before linting.
 
 ## Stop
 

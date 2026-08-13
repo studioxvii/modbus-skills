@@ -194,6 +194,43 @@ class ReviewDecisionTests(unittest.TestCase):
         self.assertTrue(result["points"][0]["byte_order_confirmed"])
         self.assertEqual("confirmed", result["points"][0]["byte_order_status"])
 
+    def test_applies_bit_order_and_clears_packed_bit_hold(self) -> None:
+        canonical = normalize_map(
+            [
+                {
+                    "logical_point_id": "alarm-bits",
+                    "name": "Alarm bits",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "protocol_offset": 0,
+                    "datatype": "bool",
+                    "access": "read-only",
+                    "function_code": 3,
+                }
+            ]
+        )
+        result = apply_review_decisions(
+            canonical,
+            decision_record(
+                {
+                    "point_id": "alarm-bits",
+                    "field": "bit_order",
+                    "value": "lsb0",
+                    "reason": "The OEM table numbers packed bits with bit 0 as LSB.",
+                    "evidence_refs": ["manual-bit-numbering"],
+                },
+                canonical_map=canonical,
+            ),
+        )
+
+        self.assertEqual("lsb0", result["points"][0]["bit_order"])
+        self.assertEqual("approved", result["review_status"])
+        self.assertNotIn(
+            "point.bit-order-unresolved",
+            {hold["code"] for hold in result["holds"]},
+        )
+
     def test_does_not_approve_while_an_unresolved_hold_remains(self) -> None:
         result = apply_review_decisions(
             draft_map(),

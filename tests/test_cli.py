@@ -471,6 +471,15 @@ class CliIntegrationTests(unittest.TestCase):
             remap,
         )
         self.assertEqual("ready", remap_receipt["status"])
+        remapped = json.loads(remap.read_text(encoding="utf-8"))
+        self.assertEqual("modbus-address-remap/v1", remapped["schema_version"])
+        self.assertEqual(2, len(remapped["points"]))
+        self.assertEqual(0, remapped["points"][0]["protocol_offset"])
+        remap_lint = self.root / "remap-lint.json"
+        remap_lint_receipt = self.run_command(
+            "lint-map", "--input", remap, "--output", remap_lint
+        )
+        self.assertEqual(0, remap_lint_receipt["blocking"])
 
         custom = self.root / "custom"
         custom_receipt = self.run_command(
@@ -853,7 +862,7 @@ class CliIntegrationTests(unittest.TestCase):
             "--output",
             remap,
             artifact=remap,
-            schema_version="modbus-address-remap-preview/v1",
+            schema_version="modbus-address-remap/v1",
         )
         comparison = self.root / "contract-comparison.json"
         run(

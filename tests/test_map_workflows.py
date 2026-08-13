@@ -69,6 +69,47 @@ class NormalizeMapTests(unittest.TestCase):
             {hold["code"] for hold in result["holds"]},
         )
 
+    def test_source_bit_order_is_copied_onto_canonical_points(self) -> None:
+        declared = normalize_map(
+            [
+                {
+                    "logical_point_id": "alarm-bits",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "protocol_offset": 0,
+                    "datatype": "bool",
+                    "function_code": 3,
+                    "bit_order": "LSB_0",
+                }
+            ]
+        )
+        missing = normalize_map(
+            [
+                {
+                    "logical_point_id": "alarm-bits",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "area": "holding-register",
+                    "protocol_offset": 0,
+                    "datatype": "bool",
+                    "function_code": 3,
+                }
+            ]
+        )
+
+        self.assertEqual("lsb0", declared["points"][0]["bit_order"])
+        self.assertNotIn("bit_order", declared["points"][0]["unmapped_fields"])
+        self.assertIsNone(missing["points"][0]["bit_order"])
+        self.assertNotIn(
+            "point.bit-order-unresolved",
+            {item["code"] for item in lint_map(declared)["findings"]},
+        )
+        self.assertIn(
+            "point.bit-order-unresolved",
+            {item["code"] for item in lint_map(missing)["findings"]},
+        )
+
     def test_simulator_profile_and_runtime_provenance_are_validated_and_preserved(self) -> None:
         source_hash = "a" * 64
         source = {

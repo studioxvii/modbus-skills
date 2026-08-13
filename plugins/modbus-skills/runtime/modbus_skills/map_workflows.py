@@ -13,7 +13,7 @@ from typing import Any
 
 from .address import format_modicon_reference, resolve_address
 from .byte_order import datatype_width_compatible
-from .models import AddressConvention, DataType, RegisterArea
+from .models import AddressConvention, DataType, RegisterArea, normalize_bit_order
 from .parsers import parse_source
 from .pdf_extraction import PdfExtractionError, extract_pdf
 from .validation import READ_FUNCTION_BY_AREA, validate_points
@@ -175,6 +175,10 @@ _KNOWN_SOURCE_FIELDS = {
     "byte_layout_confirmed",
     "byte_order_status",
     "byte_layout_status",
+    "bit_order",
+    "bit_numbering",
+    "coil_bit_order",
+    "packed_bit_order",
     "scale",
     "offset",
     "engineering_offset",
@@ -487,6 +491,16 @@ def _byte_order_input(
     if confirmed is None:
         confirmed = nested.get("confirmed")
     return layout, source, status, confirmed
+
+
+def _packed_bitfield_point(point: Mapping[str, Any]) -> bool:
+    datatype = str(point.get("datatype") or "").strip().lower().replace("_", "-")
+    area = str(point.get("area") or "").strip().lower().replace("_", "-")
+    word_span = point.get("word_span", point.get("word_count"))
+    return datatype in {"bool", "boolean", "bit"} and (
+        area in {"holding-register", "input-register"}
+        or (isinstance(word_span, int) and not isinstance(word_span, bool) and word_span > 1)
+    )
 
 
 def _get(record: Mapping[str, Any], defaults: Mapping[str, Any], key: str, *aliases: str) -> tuple[Any, str | None]:
@@ -1042,6 +1056,28 @@ def _normalize_one(
         }
     )
 
+    bit_raw, bit_source = _get(
+        record, defaults, "bit_order", "bit_numbering", "coil_bit_order", "packed_bit_order"
+    )
+    bit_order = normalize_bit_order(bit_raw)
+    if bit_source == "workflow_default":
+        assumptions.append(
+            _assumption(
+                "workflow-default",
+                "Applied the explicit workflow default for bit_order.",
+                field="bit_order",
+                value=bit_order,
+            )
+        )
+    evidence.append(
+        {
+            "field": "bit_order",
+            "source_field": bit_source,
+            "source_value": bit_raw,
+            "value": bit_order,
+        }
+    )
+
     scale_raw, scale_source = _get(record, defaults, "scale")
     engineering_offset_raw, engineering_offset_source = _get(record, defaults, "engineering_offset", "offset")
     numeric_values: dict[str, float | None] = {}
@@ -1452,6 +1488,7 @@ def _normalize_one(
             if byte_order_confirmed is True
             else "pending"
         ),
+        "bit_order": bit_order,
         "scale": numeric_values["scale"],
         "engineering_offset": numeric_values["engineering_offset"],
         "offset": numeric_values["engineering_offset"],
@@ -1493,8 +1530,8 @@ def normalize_map(
 
     ``defaults`` are caller-supplied workflow values. Each applied default is
     recorded as an assumption. The function never selects a route, area, data
-    type, address convention, unit ID, or byte order without source or workflow
-    input.
+    type, address convention, unit ID, byte order, or bit order without source or
+    workflow input.
     """
 
     defaults = dict(defaults or {})
@@ -1819,6 +1856,8 @@ def review_parse_evidence(
                 unresolved_fields.append(field)
         if (point.get("word_span") or point.get("word_count") or 0) > 1 and not point.get("byte_order"):
             unresolved_fields.append("byte_order")
+        if _packed_bitfield_point(point) and not point.get("bit_order"):
+            unresolved_fields.append("bit_order")
         status = "blocked" if any(
             finding.get("severity") in {"hold", "error"} for finding in point_findings
         ) else "verified"
