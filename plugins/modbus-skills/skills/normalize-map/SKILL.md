@@ -24,6 +24,12 @@ Follow `../../references/interaction-contract.md`.
 Completion requires every source field to be normalized, held, or rejected with
 evidence; clean deterministic normalization needs no human approval.
 
+## Stop
+
+- Do not guess unknown datatype, access, bit order, or byte order.
+- Keep the raw source address separate from protocol offset.
+- Stop for writes, broadcasts, discovery, or unbounded polling.
+
 ## Handoff
 
 - Normalization completes: suggest `check-map`.

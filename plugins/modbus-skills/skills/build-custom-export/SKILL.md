@@ -27,6 +27,12 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires a validated declarative configuration and deterministic output.
 
+## Stop
+
+- Stop when the example format is ambiguous or an opaque native binary is requested.
+- Do not execute supplied template code.
+- Stop for map validation errors or write requests.
+
 ## Handoff
 
 - The input map is not reviewed: suggest `review-map`.

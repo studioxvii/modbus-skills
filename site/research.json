@@ -69,8 +69,8 @@
       ],
       "skills": [
         "parse-map",
-        "check-byte-order",
-        "analyze-capture"
+        "check-map",
+        "review-evidence"
       ]
     },
     {

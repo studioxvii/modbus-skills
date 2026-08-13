@@ -1062,6 +1062,20 @@ class CliIntegrationTests(unittest.TestCase):
                     self.assertRegex(digest, r"^[0-9a-f]{64}$")
                     self.assertNotIn(str(self.root), digest)
 
+    def test_skill_id_aliases_dispatch_to_canonical_handlers(self) -> None:
+        from modbus_skills.cli import COMMAND_ALIASES, resolve_command
+
+        canonical, _, _ = self.prepare_map_and_plan()
+        lint_output = self.root / "alias-lint.json"
+        alias_receipt = self.run_command("check-map", "--input", canonical, "--output", lint_output)
+        named_output = self.root / "named-lint.json"
+        named_receipt = self.run_command("lint-map", "--input", canonical, "--output", named_output)
+        self.assertEqual("lint-map", alias_receipt["command"])
+        self.assertEqual(named_receipt["blocking"], alias_receipt["blocking"])
+        self.assertEqual(json.loads(lint_output.read_text(encoding="utf-8")), json.loads(named_output.read_text(encoding="utf-8")))
+        self.assertEqual("diagnose-map", resolve_command("review-map"))
+        self.assertEqual(set(COMMAND_ALIASES.values()) <= set(COMMANDS), True)
+
     def test_pdf_page_range_is_bounded_and_ocr_is_held(self) -> None:
         source = self.root / "ocr.pdf"
         source.write_bytes(b"%PDF-1.4\n% synthetic OCR fixture\n")

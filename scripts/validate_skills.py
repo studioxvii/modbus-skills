@@ -132,6 +132,8 @@ def validate(root: Path = ROOT) -> list[str]:
             )
         if "\n## Output files\n" not in skill_text:
             errors.append(f"{skill_dir.name}: must explain output files")
+        if "\n## Stop\n" not in skill_text:
+            errors.append(f"{skill_dir.name}: must include a Stop section")
         if skill_dir.name not in {"modbus-help", "compile-user-map"}:
             if "\n## Handoff\n" not in skill_text:
                 errors.append(f"{skill_dir.name}: must include a Handoff section")

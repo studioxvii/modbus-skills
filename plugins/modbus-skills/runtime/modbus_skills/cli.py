@@ -67,6 +67,18 @@ COMMANDS = (
     "analyze-capture",
     "infer-custom-format",
 )
+COMMAND_ALIASES = {
+    "apply-review": "apply-review-decisions",
+    "build-custom-export": "infer-custom-format",
+    "build-modpoll": "generate-modpoll",
+    "build-modscan": "generate-modscan",
+    "build-node-red": "generate-node-red",
+    "check-byte-order": "evaluate-byte-order",
+    "check-map": "lint-map",
+    "extract-pdf-map": "extract-pdf",
+    "plan-reads": "compile-read-plan",
+    "review-map": "diagnose-map",
+}
 
 
 class CliError(ValueError):
@@ -112,7 +124,7 @@ def _parser(command: str) -> argparse.ArgumentParser:
     elif command == "diagnose-map":
         parser.add_argument("--input", required=True)
         parser.add_argument("--output", required=True)
-        parser.add_argument("--format", choices=("csv", "tsv", "psv", "json", "xml", "xlsx"))
+        parser.add_argument("--format", choices=("csv", "tsv", "psv", "json", "xml", "xlsx", "pdf"))
         parser.add_argument("--delimiter")
         parser.add_argument("--defaults")
     elif command == "apply-review-decisions":
@@ -171,15 +183,22 @@ def _parser(command: str) -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_command(command: str) -> str:
+    """Map a public skill id onto the canonical CLI handler name."""
+
+    return COMMAND_ALIASES.get(command, command)
+
+
 def run_cli(command: str, argv: Sequence[str] | None = None) -> int:
     """Run one fixed command. Skill wrappers call this function directly."""
 
     try:
-        if command not in COMMANDS:
+        resolved = resolve_command(command)
+        if resolved not in COMMANDS:
             raise CliError(f"unknown command: {command}")
-        args = _parser(command).parse_args(list(argv or ()))
-        receipt = _HANDLERS[command](args)
-        print(stable_json({"command": command, **receipt}), end="")
+        args = _parser(resolved).parse_args(list(argv or ()))
+        receipt = _HANDLERS[resolved](args)
+        print(stable_json({"command": resolved, **receipt}), end="")
         return 0
     except CliError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -1546,4 +1565,4 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
 }
 
 
-__all__ = ["COMMANDS", "main", "run_cli"]
+__all__ = ["COMMANDS", "COMMAND_ALIASES", "main", "resolve_command", "run_cli"]

@@ -128,16 +128,13 @@ Produce an organized user map and requested offline outputs in one resumable out
 
 1. compile-user-map: modbus-compile-request/v1 -> modbus-compile-result/v1
 
-## Workflow: Extract a PDF register map
+## Workflow: Extract PDF register evidence
 
-Turn a PDF manual or bounded page range into traceable candidates, then normalize and lint them without serial page approval.
+Turn a PDF manual or bounded page range into traceable candidates and grouped extraction exceptions without performing source-map review.
 
 1. extract-pdf-map: pdf-source/v1 -> candidate-map/v1
-2. normalize-map: candidate-map/v1 -> modbus-map/v1
-3. check-map: modbus-map/v1 -> modbus-map-lint/v1
-4. review-evidence: modbus-map/v1, modbus-map-lint/v1 -> modbus-map-evidence-review/v1
-5. human-gate: modbus-map/v1, modbus-map-evidence-review/v1 -> modbus-review-decisions/v1
-6. apply-review: modbus-map/v1, modbus-review-decisions/v1 -> modbus-map/v1
+2. review-evidence: candidate-map/v1 -> modbus-map-evidence-review/v1
+3. human-gate: candidate-map/v1, modbus-map-evidence-review/v1 -> modbus-review-decisions/v1
 
 ## Workflow: Review a raw source map end to end
 
@@ -147,33 +144,28 @@ Produce a reviewed draft and compact exception queue when source-map review itse
 2. human-gate: modbus-map/v1, modbus-map-evidence-review/v1 -> modbus-review-decisions/v1
 3. apply-review: modbus-map/v1, modbus-review-decisions/v1 -> modbus-map/v1
 
-## Workflow: Review a register map
+## Workflow: Confirm byte order from one sample
 
-Produce a validated Modbus map quickly without silent engineering guesses or serial approval loops.
+Evaluate every supported layout from one immutable sample, record one human confirmation, and apply it.
 
-1. parse-map: source-bundle/v1 -> candidate-map/v1
-2. normalize-map: candidate-map/v1 -> modbus-map/v1
-3. check-map: modbus-map/v1 -> modbus-map-lint/v1
-4. review-evidence: modbus-map/v1, modbus-map-lint/v1 -> modbus-map-evidence-review/v1
-5. human-gate: modbus-map/v1, modbus-map-evidence-review/v1 -> modbus-review-decisions/v1
-6. apply-review: modbus-map/v1, modbus-review-decisions/v1 -> modbus-map/v1
+1. check-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
+2. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-review-decisions/v1
+3. apply-review: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
 
-## Workflow: Determine byte order from supplied raw words
+## Workflow: Determine byte order from a one-read probe
 
-Compare explicit layouts from one immutable raw sample and record human confirmation.
+Collect one raw sample with capture-sample when words are missing, then confirm the layout.
 
 1. capture-sample: probe-request/v1 -> modbus-tool-pack/v1
 2. external-gate: modbus-tool-pack/v1 -> capture/v1
-3. check-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
-4. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-review-decisions/v1
-5. apply-review: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
+3. confirm-byte-order: modbus-map/v1, capture/v1 -> modbus-map/v1
 
 ## Workflow: Remap address notation
 
-Preview and apply a known map-wide conversion between protocol offsets and Modicon-style references.
+Preview and apply a known map-wide conversion between protocol offsets and Modicon-style references, then lint the converted map.
 
-1. remap-addresses: modbus-map/v1, address-convention-request/v1 -> modbus-address-remap-preview/v1
-2. check-map: modbus-map/v1 -> modbus-map-lint/v1
+1. remap-addresses: modbus-map/v1, address-convention-request/v1 -> modbus-address-remap/v1
+2. check-map: modbus-address-remap/v1 -> modbus-map-lint/v1
 
 ## Workflow: Build a declarative custom export
 
@@ -184,16 +176,14 @@ Reproduce a documented text or CSV export from a reviewed map without executing 
 
 ## Workflow: Probe, resolve byte order, and finalize a tool pack
 
-Use a selected tool target to collect one raw sample, compare byte-order candidates, then regenerate all selected targets with the confirmed layout.
+Use a selected tool target to collect one raw sample, confirm byte order, then regenerate all selected targets with the confirmed layout.
 
 1. plan-reads: modbus-map/v1 -> modbus-read-plan/v1
 2. build-tool-pack: modbus-map/v1, modbus-read-plan/v1, probe-tool-pack-request/v1 -> modbus-tool-pack/v1
 3. external-gate: modbus-tool-pack/v1 -> capture/v1
-4. check-byte-order: capture/v1 -> modbus-byte-order-evidence/v1
-5. human-gate: modbus-map/v1, modbus-byte-order-evidence/v1 -> modbus-review-decisions/v1
-6. apply-review: modbus-map/v1, modbus-review-decisions/v1, modbus-byte-order-evidence/v1 -> modbus-map/v1
-7. plan-reads: modbus-map/v1 -> modbus-read-plan/v1
-8. build-tool-pack: modbus-map/v1, modbus-read-plan/v1, final-tool-pack-request/v1 -> modbus-tool-pack/v1
+4. confirm-byte-order: modbus-map/v1, capture/v1 -> modbus-map/v1
+5. plan-reads: modbus-map/v1 -> modbus-read-plan/v1
+6. build-tool-pack: modbus-map/v1, modbus-read-plan/v1, final-tool-pack-request/v1 -> modbus-tool-pack/v1
 
 ## Workflow: Build a multi-target tool pack
 
@@ -214,8 +204,8 @@ Find communication and signal-quality problems without issuing control commands.
 
 Report stable field changes without collapsing points from different routes, areas, or unit identifiers.
 
-1. review-register-map: before-source-bundle/v1 -> before-modbus-map/v1
-2. review-register-map: after-source-bundle/v1 -> after-modbus-map/v1
+1. review-source-map: before-source-bundle/v1 -> before-modbus-map/v1
+2. review-source-map: after-source-bundle/v1 -> after-modbus-map/v1
 3. compare-maps: before-modbus-map/v1, after-modbus-map/v1 -> modbus-map-diff/v1
 4. human-gate: modbus-map-diff/v1 -> review-disposition/v1
 

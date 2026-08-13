@@ -24,9 +24,17 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires every check to have a visible pass, finding, or skipped reason.
 
+## Stop
+
+- Hold final generation while an error or hold remains, including packed-bit numbering.
+- Do not guess byte order, bit order, address convention, or register area.
+- Permit read functions 01 through 04 only.
+- Stop for writes, broadcasts, discovery, or unbounded polling.
+
 ## Handoff
 
 - Findings need human evidence: suggest `review-evidence`.
+- Packed-bit or coil numbering is unresolved: keep the hold; do not suggest `check-byte-order`.
 - The map passes and is reviewed: suggest `plan-reads`.
 - The source is still raw or mixed: suggest `review-map`.
 

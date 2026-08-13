@@ -27,8 +27,8 @@ Each skill must have:
 - A short workflow that follows the shared interaction contract.
 - Explicit inputs, outputs, and one observable completion criterion.
 - A `Handoff` section for operational skills, or a `Finish` section for routers/outcomes.
-- Blocking conditions.
-- At least ten positive activation cases.
+- A `Stop` section naming when the skill must halt.
+- At least ten distinct positive activation stems.
 - At least five close-negative activation cases.
 - Deterministic tests when the skill performs calculations or generates files.
 
@@ -38,6 +38,12 @@ Run:
 
 ```bash
 python3 scripts/verify_repo.py
+```
+
+To run only the representative human-like skill campaign:
+
+```bash
+python3 scripts/run_skill_usability_tests.py --output artifacts/skill-usability
 ```
 
 For a new target adapter, also test the artifact in the named application before you mark native verification complete.

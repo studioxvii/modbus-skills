@@ -25,13 +25,21 @@ Follow `../../references/interaction-contract.md`.
 - `README.md` and the selected tool folder - Start here. These files describe and perform one bounded manual read; they do not connect automatically.
 - `tool-pack.zip` - The portable copy of the probe files.
 - `manifest.json`, `checksums.sha256`, and `tool-pack-result.json` - Normally ignore these. They verify the probe contents and safety limits.
-- `capture.json` - Node-RED creates this automatically. Other tools create it after the operator performs the read. It stores the returned raw words and exact sample identity for later analysis.
+- `capture.json` - Created after the operator performs the read. It is not produced by this skill.
 
-Completion requires one immutable sample and no generated final decoding.
+Completion requires a generated probe pack and one presented live-read gate. This skill
+does not capture the sample itself.
+
+## Stop
+
+- Stop for writes, broadcasts, discovery scans, stored credentials, or unbounded polling.
+- Stop if probe identity is incomplete.
+- Do not run the live read. Present the probe and wait for the operator.
+- Do not generate final decoded engineering values.
 
 ## Handoff
 
-- Unknown byte order or datatype interpretation: suggest `check-byte-order`.
-- Time-series troubleshooting: suggest `analyze-capture`.
+- Unknown byte order or datatype interpretation after the operator saves raw words: suggest `check-byte-order`.
+- Time-series troubleshooting after a capture exists: suggest `analyze-capture`.
 
 Keep the probe manual, bounded, credential-free, and read-only.

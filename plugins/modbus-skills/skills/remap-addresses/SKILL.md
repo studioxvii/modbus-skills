@@ -26,6 +26,12 @@ Follow `../../references/interaction-contract.md`.
 
 Completion requires a collision-free, hash-bound preview before map output.
 
+## Stop
+
+- Stop when source or target convention is unknown.
+- Stop when register area is not proven by notation.
+- Stop on collision or lossy conversion, or when a write is requested.
+
 ## Handoff
 
 - The converted map needs validation: suggest `check-map`.

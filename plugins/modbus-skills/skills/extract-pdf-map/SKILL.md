@@ -33,11 +33,18 @@ Follow `../../references/interaction-contract.md`.
 Completion requires traceable candidate rows, a compact automated-check summary, and
 explicit holds only for actual exceptions or one batch source-confirmation scope.
 
+## Stop
+
+- Stop on an unreadable or rights-restricted PDF.
+- Stop if `pdfplumber` is missing; report the dependency and do not install it.
+- Stop for OCR of an entire unbound manual, writes, broadcasts, or scans.
+- Do not copy full page images or complete OCR text into the output.
+
 ## Handoff
 
-- Candidate rows exist: suggest `normalize-map`.
 - The user wants organized user-map outputs from the OEM PDF: suggest `compile-user-map`.
-- Source confirmation or exception groups remain: suggest `review-evidence`.
+- The user wants end-to-end source-map review: suggest `review-map`.
+- Candidate rows exist and extraction evidence is the requested outcome: suggest `review-evidence` only when exception groups remain.
+- When the user supplies a structured map instead, route to `parse-map`.
 
 Keep the source manual local. Output bounded evidence, not full OCR text or page images.
-When the user supplies a structured map instead, route to `parse-map`.

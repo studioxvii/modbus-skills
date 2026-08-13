@@ -16,5 +16,9 @@ Machine-readable source records live in `research/issues.json`. These records us
 | Stale, flat, missing, or implausible values | `analyze-capture` |
 | Register maps change between firmware revisions | `compare-maps` |
 | Manual tables lose source evidence | `parse-map` and `review-evidence` |
+| Coil and packed-bit order confused with byte order | `check-map` |
+| Unit identifier zero / broadcast risk | `check-map` |
+| Illegal address or block boundary | `plan-reads` |
+| Malformed or short Modbus response | `analyze-capture` |
 
 Before adding a new skill, add the problem, common user phrasing, source links, a rights state, a synthetic fixture, and an observable acceptance test.

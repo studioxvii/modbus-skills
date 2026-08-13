@@ -166,6 +166,7 @@ class CanonicalPoint:
     byte_order: str | None = None
     byte_order_confirmed: bool | None = None
     byte_order_status: str | None = None
+    bit_order: str | None = None
     scale: float | None = None
     engineering_offset: float | None = None
     function_code: int | None = None
@@ -300,6 +301,11 @@ class CanonicalPoint:
             byte_order=(str(byte_layout) if byte_layout is not None else None),
             byte_order_confirmed=_optional_bool(byte_confirmed),
             byte_order_status=(str(byte_status) if byte_status is not None else None),
+            bit_order=(
+                str(value["bit_order"]).strip().lower().replace("_", "-")
+                if value.get("bit_order") not in (None, "")
+                else None
+            ),
             scale=_optional_float(value.get("scale")),
             engineering_offset=_optional_float(
                 value.get("engineering_offset", value.get("offset"))
@@ -323,6 +329,7 @@ class CanonicalPoint:
             "byte_order": self.byte_order,
             "byte_order_confirmed": self.byte_order_confirmed,
             "byte_order_status": self.byte_order_status,
+            "bit_order": self.bit_order,
             "scale": self.scale,
             "engineering_offset": self.engineering_offset,
             "function_code": self.function_code,

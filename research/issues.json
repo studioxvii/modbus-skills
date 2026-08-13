@@ -38,7 +38,7 @@
       "sources": [
         {"type": "project-issue", "url": "https://github.com/pymodbus-dev/pymodbus/issues/2311"}
       ],
-      "skills": ["parse-map", "check-byte-order", "analyze-capture"]
+      "skills": ["parse-map", "check-map", "review-evidence"]
     },
     {
       "id": "serial-queue-contention",

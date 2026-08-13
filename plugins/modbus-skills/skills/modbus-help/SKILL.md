@@ -15,28 +15,28 @@ Follow `../../references/interaction-contract.md`.
 1. Read `../../references/user-paths.md`.
 2. Identify the user's goal and the artifact they already have.
 3. Route an explicitly requested stage directly to its specialist.
-4. For broad setup, validation, or troubleshooting requests, recommend this complete
-   safe path automatically:
-   `normalize-map -> check-map -> plan-reads -> build-node-red -> capture-sample -> analyze-capture -> check-byte-order`.
-   Add `parse-map` or `extract-pdf-map` first when the source is raw.
-5. Route an OEM-source-to-organized-output request to `compile-user-map` when the
-   user wants compilation rather than the live evidence path.
-6. Read that skill's current `SKILL.md` before describing it. For a broad path,
-   repeat this check for each recommended skill.
-7. Reply with the path, the immediate next skill, its input, and its output.
+4. For an OEM PDF, spreadsheet, JSON, XML, XLSX, or text file, or for broad setup
+   help that does not name a specialist, recommend `compile-user-map`. Do not
+   replace that outcome with a parse-normalize-plan-builder chain, and do not
+   treat Node-RED as the default finish.
+5. When source-map review itself is the requested outcome, recommend `review-map`.
+6. When a validated map is already in hand and the user named a target, recommend
+   that builder or `build-tool-pack`. When a capture is already in hand, recommend
+   `analyze-capture` or `check-byte-order`.
+7. Read that skill's current `SKILL.md` before describing it.
 
 Do not ask who will run the work, where files belong, or how to structure tests when
 the request or repository already answers those questions. Use the current project
 and its existing output folders.
 
-Keep broad paths complete and explicit-stage routes direct. Offer one alternate only
-when the goal is materially ambiguous.
+Keep OEM and broad-setup routes on `compile-user-map` and explicit-stage routes
+direct. Offer one alternate only when the goal is materially ambiguous.
 
 Use this format:
 
 ```text
 Recommended next: skill-name
-Safe path: full chain for broad requests; omit for an explicit stage request
+Safe path: compile-user-map for OEM or broad setup; omit for an explicit stage request
 Why: one sentence
 Uses: exact current artifact paths or missing decision
 Produces: next artifact
@@ -52,9 +52,15 @@ For writes, broadcasts, discovery, or unbounded polling, explain the read-only b
 
 Completion requires one verified route with its required input and observable output.
 
+## Stop
+
+- Stop for writes, broadcasts, discovery scans, stored credentials, or unbounded polling.
+- Do not perform the recommended skill in this invocation.
+- Do not invent a specialist chain when `compile-user-map` completes the goal.
+- Do not ask who will run the work or where files belong when the request already answers it.
+
 ## Finish
 
 End with the recommendation format above. Do not perform the recommended skill here.
 When the user replies `proceed`, that authorizes only the named safe next skill; live-device
 and native-app gates remain explicit.
-
