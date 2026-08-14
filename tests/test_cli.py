@@ -475,6 +475,7 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual("modbus-address-remap/v1", remapped["schema_version"])
         self.assertEqual(2, len(remapped["points"]))
         self.assertEqual(0, remapped["points"][0]["protocol_offset"])
+        self.assertEqual("40001", remapped["points"][0]["display_address"])
         remap_lint = self.root / "remap-lint.json"
         remap_lint_receipt = self.run_command(
             "lint-map", "--input", remap, "--output", remap_lint
@@ -493,6 +494,50 @@ class CliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual("ready", custom_receipt["status"])
         self.assertIn("tank_level", (custom / "rendered-output.txt").read_text(encoding="utf-8"))
+
+    def test_remap_to_offsets_keeps_modicon_display_address(self) -> None:
+        canonical, _, _ = self.prepare_map_and_plan()
+        before = json.loads(canonical.read_text(encoding="utf-8"))["points"][0]
+        self.assertEqual("40001", before["display_address"])
+
+        for target, expected_raw in (
+            ("protocol-offset", 0),
+            ("one-based-offset", 1),
+        ):
+            output = self.root / f"remap-{target}.json"
+            receipt = self.run_command(
+                "remap-addresses",
+                "--input",
+                canonical,
+                "--from",
+                "protocol-offset",
+                "--to",
+                target,
+                "--output",
+                output,
+            )
+            remapped = json.loads(output.read_text(encoding="utf-8"))
+            point = remapped["points"][0]
+            representations = {
+                item["source_field"]: item
+                for item in point.get("address_representations", ())
+            }
+
+            self.assertEqual("ready", receipt["status"])
+            self.assertEqual(0, point["protocol_offset"])
+            self.assertEqual("40001", point["display_address"])
+            self.assertEqual(expected_raw, point["source_address"]["raw"])
+            self.assertEqual(target, point["source_address"]["convention"])
+            if "display_address" in representations:
+                self.assertEqual("40001", representations["display_address"]["raw"])
+                self.assertEqual(
+                    "modicon-reference", representations["display_address"]["convention"]
+                )
+            if "source_address" in representations:
+                self.assertEqual(expected_raw, representations["source_address"]["raw"])
+                self.assertEqual(target, representations["source_address"]["convention"])
+            if "protocol_offset" in representations:
+                self.assertEqual(0, representations["protocol_offset"]["raw"])
 
     def test_byte_order_evidence_keeps_complete_sample_identity(self) -> None:
         capture = self.root / "identified-capture.json"

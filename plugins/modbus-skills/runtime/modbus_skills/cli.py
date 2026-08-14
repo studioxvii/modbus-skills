@@ -601,6 +601,58 @@ def _source_raw(point: Mapping[str, Any], convention: str) -> Any:
     return point.get("address", point.get("protocol_offset"))
 
 
+def _modicon_display(area: Any, protocol_offset: Any) -> str | None:
+    if protocol_offset is None:
+        return None
+    try:
+        return format_modicon_reference(area, protocol_offset)
+    except (TypeError, ValueError):
+        return None
+
+
+def _refresh_remap_representations(
+    representations: Any,
+    *,
+    protocol_offset: Any,
+    display_address: str | None,
+    source_raw: Any,
+    source_convention: str,
+    area: Any,
+) -> list[dict[str, Any]]:
+    if not isinstance(representations, Sequence) or isinstance(
+        representations, (str, bytes, bytearray)
+    ):
+        return []
+    refreshed: list[dict[str, Any]] = []
+    for item in representations:
+        if not isinstance(item, Mapping):
+            continue
+        updated = dict(item)
+        field = updated.get("source_field")
+        updated["protocol_offset"] = protocol_offset
+        if area not in (None, ""):
+            updated["area"] = area
+        if field == "display_address":
+            updated["raw"] = display_address
+            updated["convention"] = "modicon-reference"
+        elif field == "protocol_offset":
+            updated["raw"] = protocol_offset
+            updated["convention"] = "protocol-offset"
+        elif field == "source_address":
+            updated["raw"] = source_raw
+            updated["convention"] = source_convention
+        elif field == "address":
+            convention = updated.get("convention")
+            if convention == "protocol-offset":
+                updated["raw"] = protocol_offset
+            elif convention == "one-based-offset" and isinstance(protocol_offset, int):
+                updated["raw"] = protocol_offset + 1
+            elif convention == "modicon-reference":
+                updated["raw"] = display_address
+        refreshed.append(updated)
+    return refreshed
+
+
 def _applied_remap_points(
     points: Sequence[Mapping[str, Any]],
     conversions: Sequence[Mapping[str, Any]],
@@ -615,13 +667,25 @@ def _applied_remap_points(
         )
         conversion = by_id[identifier]
         updated = deepcopy(dict(point))
-        updated["protocol_offset"] = conversion["protocol_offset"]
-        updated["display_address"] = conversion["target"]["value"]
+        offset = conversion["protocol_offset"]
+        area = conversion.get("area", updated.get("area"))
+        display = _modicon_display(area, offset)
+        target = conversion["target"]["value"]
+        updated["protocol_offset"] = offset
+        updated["display_address"] = display
         source = point.get("source_address")
         source_dict = dict(source) if isinstance(source, Mapping) else {}
-        source_dict["raw"] = conversion["target"]["value"]
+        source_dict["raw"] = target
         source_dict["convention"] = target_convention
         updated["source_address"] = source_dict
+        updated["address_representations"] = _refresh_remap_representations(
+            updated.get("address_representations"),
+            protocol_offset=offset,
+            display_address=display,
+            source_raw=target,
+            source_convention=target_convention,
+            area=area,
+        )
         applied.append(updated)
     return applied
 
