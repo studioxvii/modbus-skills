@@ -4,9 +4,18 @@
 
 Security fixes apply to the latest release on the default branch.
 
+## Publisher
+
+Studio Seventeen publishes this project.
+
+- GitHub: https://github.com/studioxvii
+- Repository: https://github.com/studioxvii/modbus-skills
+- Documentation: https://studioxvii.github.io/modbus-skills
+
 ## Report a problem
 
-Use GitHub private vulnerability reporting when the repository is public. Do not open a public issue for a suspected vulnerability.
+Use GitHub private vulnerability reporting. Do not open a public issue for a
+suspected vulnerability.
 
 Include:
 

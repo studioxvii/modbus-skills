@@ -1,0 +1,39 @@
+name: Bug report
+description: Report incorrect, unsafe, or incomplete read-only behavior.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use a synthetic example. Do not attach vendor manuals, customer maps,
+        credentials, or live endpoint details.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you observe?
+    validations:
+      required: true
+  - type: input
+    id: skill
+    attributes:
+      label: Skill or command
+      placeholder: compile-user-map, check-map, python3 scripts/verify_repo.py
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Synthetic reproduction
+      description: Minimal fictional fixture, command, and output.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Wrong map, unsafe artifact, hold missed, or verification failure?
+      placeholder: Example — a write-only point entered a read plan.
+    validations:
+      required: true

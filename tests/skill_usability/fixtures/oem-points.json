@@ -1,0 +1,15 @@
+{
+  "source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "requested_measurements": ["temperature"],
+  "points": [
+    {
+      "oem_point_id": "temperature",
+      "name": "Temperature",
+      "area": "holding-register",
+      "protocol_offset": 10,
+      "datatype": "uint16",
+      "word_span": 1,
+      "source_refs": [{"page_index": 2, "row_index": 4, "region_id": "row-4"}]
+    }
+  ]
+}

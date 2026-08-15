@@ -5,10 +5,12 @@ __pycache__/
 .venv/
 venv/
 .worktrees/
+.review-studio17/
 build/
 dist/
 artifacts/
 private/
 vendor/
 *.pdf
+modbus-capture.json
 .DS_Store

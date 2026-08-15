@@ -1,0 +1,16 @@
+{
+  "schema_version": "modbus-map/v1",
+  "points": [
+    {
+      "logical_point_id": "comparison_point",
+      "name": "Comparison Point",
+      "route_id": "fixture",
+      "unit_id": 1,
+      "area": "holding-register",
+      "protocol_offset": 5,
+      "datatype": "uint16",
+      "word_span": 1,
+      "access": "read-only"
+    }
+  ]
+}

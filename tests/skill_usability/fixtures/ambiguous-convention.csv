@@ -1,0 +1,5 @@
+Address,Address Convention,Area,Unit ID,Route ID,Point ID,Name,Data Type,Word Count,Byte Order,Scale,Engineering Unit,Access
+0,,holding register,1,fixture,pressure,Pressure,UINT16,1,,0.1,bar,read-only
+2,,holding register,1,fixture,temperature,Temperature,INT16,1,,0.1,C,read-only
+4,,holding register,1,fixture,level,Level,UINT16,1,,1,%,read-only
+6,,holding register,1,fixture,flow,Flow,UINT16,1,,1,L/s,read-only

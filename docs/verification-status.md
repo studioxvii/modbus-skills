@@ -1,6 +1,6 @@
 # Verification Status
 
-Verification date: 2026-08-08.
+Verification date: 2026-08-15.
 
 ## Node-RED live campaign
 
@@ -29,7 +29,7 @@ recorded manual native evidence above.
 
 - The OpenAI plugin validator accepted the plugin manifest.
 - The skill validator accepted all 20 skills.
-- The dependency-free repository suite passed 308 tests in the current working tree.
+- The dependency-free repository suite passed 449 tests, then the deterministic skill-usability campaign passed, in `python3 scripts/verify_repo.py`.
 - The public synthetic human workflow passed 41 of 41 checks.
 - A local rights-restricted corpus of seven real register maps passed 45 of 45 workflow checks. The maps and local artifacts are not in this repository.
 - Three blind users completed the novice probe, commissioning-pack, and map-review scenarios without repository edits or live device traffic.
@@ -61,6 +61,6 @@ Generated target manifests still correctly report `verification: "not-run"` for
 those targets. The Node-RED native result above is a separate local acceptance
 record and does not replace the deterministic repository checks.
 
-Do not publish the repository until the remaining items in `publication-checklist.md`
-are complete. Publisher contact, final URLs, native target tests, and the new-task
-plugin install are still release gates.
+Do not change GitHub visibility until the remaining items in
+`publication-checklist.md` are complete. Native Modpoll, Witte Modbus Poll, and
+ModScan tests, plus a new-task plugin install, are still release gates.

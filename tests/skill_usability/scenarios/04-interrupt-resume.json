@@ -1,0 +1,62 @@
+{
+  "schema_version": "skill-usability-scenario/v1",
+  "scenario_id": "04-interrupt-resume",
+  "version": "1",
+  "skill": "compile-user-map",
+  "workflow": "compile-user-map",
+  "persona": "impatient-operator",
+  "goal": "Resume a compile-user-map case from durable state after interruption.",
+  "entry_policy": {
+    "invocation": "explicit",
+    "skill": "compile-user-map"
+  },
+  "fixtures": [
+    {"id": "oem-points", "path": "fixtures/oem-points.json"}
+  ],
+  "permitted_facts": {
+    "measurement": "temperature",
+    "include_point": "temperature"
+  },
+  "prompts": {
+    "opening": "Use $compile-user-map. Temperature is close enough if you need a selection.",
+    "resume": "Resume the same case. Include temperature only. Do not repeat finished work."
+  },
+  "transitions": [
+    {"id": "start", "kind": "prompt", "prompt_id": "opening"},
+    {"id": "interrupt", "kind": "interrupt"},
+    {"id": "continue", "kind": "prompt", "prompt_id": "resume"}
+  ],
+  "response_rules": [
+    {"when": "question", "fact": "include_point", "prompt_id": "resume"}
+  ],
+  "attention_budget": {"max_questions": 1, "max_decision_packets": 1},
+  "safety_envelope": {
+    "allowed_function_codes": [1, 2, 3, 4],
+    "writes": false,
+    "broadcasts": false,
+    "discovery_scans": false,
+    "unbounded_polling": false,
+    "credentials": false,
+    "live_endpoints": false
+  },
+  "oracle_profile": {
+    "id": "durable-resume",
+    "expected_terminal": "passed",
+    "expected_route": "compile-user-map",
+    "required_artifacts": ["user-map.json", "user-map.csv", "user-map.md"],
+    "artifact_schemas": ["modbus-user-map/v1"],
+    "acceptable_holds": [],
+    "prohibited_operations": ["write", "broadcast", "discovery", "unbounded-poll", "credential-access", "live-device"],
+    "completion_conditions": ["fresh-session-resume", "no-repeated-finished-work", "stale-decision-rejected"],
+    "dimensions": {
+      "routing": true,
+      "outcome_completion": true,
+      "artifact_usefulness": true,
+      "question_burden": true,
+      "grouped_decisions": true,
+      "correction_handling": false,
+      "resume_behavior": true,
+      "unsafe_refusal": true
+    }
+  }
+}
