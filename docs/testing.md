@@ -110,7 +110,7 @@ point-by-point confirmation fails unless each unit requires a distinct decision.
 
 Static output checks prove deterministic generation. They do not prove that every target application accepts an artifact or communicates with a device.
 
-Before release, complete these tests with pinned tool versions and a synthetic Modbus server:
+Before calling a target verified, complete these tests with pinned tool versions and a synthetic Modbus server:
 
 - Import the Node-RED flow with the supported Modbus node version.
 - Load the open-source Modpoll profile with the supported implementation.
@@ -118,4 +118,6 @@ Before release, complete these tests with pinned tool versions and a synthetic M
 - Load ModScan artifacts in the licensed application.
 - Compare each target read with the same known synthetic response.
 
-If a native application or license is unavailable, record that result as a release blocker. Do not represent static checks as native-tool proof.
+If a native application or license is unavailable, ship that target as BETA.
+Do not represent static checks as native-tool proof. Modpoll, Witte Modbus Poll,
+and ModScan are currently BETA.

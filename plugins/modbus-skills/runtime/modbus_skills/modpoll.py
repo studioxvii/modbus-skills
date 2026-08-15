@@ -1160,7 +1160,7 @@ The CSV files use the documented `device`, `poll`, and `ref` records. Each
 reference is read-only. The command reference uses `--once` so the first run is
 bounded.
 
-Native Modpoll verification was not run, so native verification is unavailable.
+This target is BETA. Native Modpoll verification was not run, so native verification is unavailable.
 If Modpoll is not available, install PyModbus and use `pymodbus-read-once.py` for
 one explicit request. It requires `--request`, `--host`, `--port`, the matching
 `--unit`, and `--confirm-read READ`.
@@ -1180,7 +1180,7 @@ This target does not contain a synthetic `.mbp` or `.mbw` file. The PowerShell
 scripts use the documented `Mbpoll.Application` and `Mbpoll.Document`
 Automation objects. Modbus Poll creates and saves each native `.mbp` document.
 
-Native Modpoll verification was not run, so native verification is unavailable.
+This target is BETA. Native Modpoll verification was not run, so native verification is unavailable.
 The cross-platform `pymodbus-read-once.py` fallback runs one selected compiled
 request and requires an explicit host, port, matching unit ID, and
 `--confirm-read READ`.
@@ -1211,7 +1211,7 @@ These files follow the human-readable XML structure that Witte publishes for
 Modbus Poll version 12. Each XML file represents one compiled read request.
 The document uses base-zero protocol offsets and is disabled by default.
 
-Native Modpoll verification was not run, so native verification is unavailable.
+This target is BETA. Native Modpoll verification was not run, so native verification is unavailable.
 The cross-platform `pymodbus-read-once.py` fallback runs one selected compiled
 request and requires an explicit host, port, matching unit ID, and
 `--confirm-read READ`.

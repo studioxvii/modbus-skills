@@ -14,6 +14,6 @@
 Leave unchecked unless you ran the named application against a synthetic server.
 
 - [ ] Node-RED
-- [ ] gavinying/modpoll
-- [ ] Witte Modbus Poll
-- [ ] ModScan
+- [ ] gavinying/modpoll (BETA until checked)
+- [ ] Witte Modbus Poll (BETA until checked)
+- [ ] ModScan (BETA until checked)

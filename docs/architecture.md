@@ -100,7 +100,7 @@ interval remains visible in the request trace.
 
 ## Target selection
 
-The tool-pack workflow accepts Node-RED, Modpoll, ModScan, or any non-empty combination. Modpoll has three explicit profiles:
+The tool-pack workflow accepts Node-RED, Modpoll (BETA), ModScan (BETA), or any non-empty combination. Modpoll has three explicit profiles:
 
 - `witte-desktop`
 - `witte-v12-xml`

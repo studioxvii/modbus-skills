@@ -43,7 +43,7 @@ The real-map workflow confirmed these behaviors:
 - Final output rejects a missing, malformed, or stale map hash in the read plan.
 - One raw sample produces all byte-order candidates without added Modbus reads.
 - Node-RED probe flows use manual one-shot reads. Final flows use one bounded five-second live-poll trigger that keeps one request in flight. Both are disabled by default and contain no deploy-time or write nodes.
-- Node-RED, Modpoll, and ModScan can be built alone or in any combination.
+- Node-RED, Modpoll (BETA), and ModScan (BETA) can be built alone or in any combination.
 - Tool packs are deterministic, checksummed, read-only, and free of review audit data.
 - JSON and CSV capture analysis reports communication, duplicate, gap, stale, flatline, range, rate, and byte-order evidence conditions.
 
@@ -54,13 +54,13 @@ the binding gate, and one evidenced read across offsets 257 through 308. Its tra
 macOS arm64 / Python 3.14.6 envelope, below the five-minute local threshold. Wall time
 is diagnostic; transcript shape is the deterministic repository gate.
 
-## Not yet verified
+## BETA targets
 
-Modpoll, Witte Modbus Poll, and ModScan were not installed and were not run.
-Generated target manifests still correctly report `verification: "not-run"` for
-those targets. The Node-RED native result above is a separate local acceptance
+Modpoll, Witte Modbus Poll, and ModScan are shipped as BETA. They were not
+installed and were not run. Generated target manifests still report
+`verification: "not-run"` for those targets. Operator files label the same
+status as BETA. The Node-RED native result above is a separate local acceptance
 record and does not replace the deterministic repository checks.
 
-Do not change GitHub visibility until the remaining items in
-`publication-checklist.md` are complete. Native Modpoll, Witte Modbus Poll, and
-ModScan tests, plus a new-task plugin install, are still release gates.
+A new-task plugin install is still recommended after publication. It is not a
+Modpoll or ModScan native-test gate.

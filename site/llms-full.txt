@@ -2,11 +2,11 @@
 
 - [Analyze Capture](skills/analyze-capture.html): Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence. Use when the user has capture data, JSON/CSV samples, or asks about stale, missing, flatline, or signal-quality problems.
 - [Apply Review](skills/apply-review.html): Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history. Use when the user confirms layout, exclusion, or field decisions and wants them applied to a new reviewed map.
-- [Build Custom Export](skills/build-custom-export.html): Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll, or ModScan adapter.
-- [Build Modpoll](skills/build-modpoll.html): Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.
-- [Build ModScan](skills/build-modscan.html): Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
+- [Build Custom Export](skills/build-custom-export.html): Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll (BETA), or ModScan (BETA) adapter.
+- [Build Modpoll (BETA)](skills/build-modpoll.html): Build deterministic read-only BETA artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.
+- [Build ModScan (BETA)](skills/build-modscan.html): Build deterministic read-only BETA ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
 - [Build Node-RED](skills/build-node-red.html): Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan. Use when the user asks for a Node-RED flow, Modbus flex-getter setup, or Node-RED probe/final capture path.
-- [Build Tool Pack](skills/build-tool-pack.html): Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
+- [Build Tool Pack](skills/build-tool-pack.html): Build any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
 - [Capture Sample](skills/capture-sample.html): Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool. Use when the user needs one physical read, raw words for byte-order work, or a manual probe before decoding.
 - [Check Byte Order](skills/check-byte-order.html): Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner. Use when byte order, word order, or multi-register decoding is unknown and raw words or a capture already exist.
 - [Check Map](skills/check-map.html): Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems. Use when the user wants deterministic lint/validation findings on a normalized or reviewed register map.
@@ -16,7 +16,7 @@
 - [Modbus Help](skills/modbus-help.html): Choose the next Modbus skill or short workflow from the user's goal and current artifact. Use when the user is unsure which Modbus skill to run, asks what to do next, or needs a safe path from their current artifact.
 - [Normalize Map](skills/normalize-map.html): Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states. Use when candidate rows exist and need canonical engineering fields, holds, and source-preserving normalization.
 - [Parse Map](skills/parse-map.html): Parse structured Modbus register maps into candidate rows with source values, rejected rows, assumptions, and holds. Use when the source is CSV, JSON, XML, XLSX, or structured text and needs traceable candidate rows.
-- [Plan Reads](skills/plan-reads.html): Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll, ModScan, or a tool pack.
+- [Plan Reads](skills/plan-reads.html): Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll (BETA), ModScan (BETA), or a tool pack.
 - [Remap Addresses](skills/remap-addresses.html): Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation. Use when the user asks to convert 40001-style references, protocol offsets, or another known address convention across a map.
 - [Review Evidence](skills/review-evidence.html): Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval. Use when source evidence needs status grouping, exception decisions, or confirmation of a bounded extraction scope.
 - [Review Map](skills/review-map.html): Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome. Use when the user wants end-to-end source-map review rather than an organized user-map compile.
@@ -33,17 +33,17 @@ Apply a batch of explicit Modbus map decisions while preserving evidence, exclus
 Example: Use $apply-review to apply this batch of confirmed map decisions.
 ## Build Custom Export
 
-Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll, or ModScan adapter.
+Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll (BETA), or ModScan (BETA) adapter.
 
 Example: Use $build-custom-export to reproduce this documented export format.
-## Build Modpoll
+## Build Modpoll (BETA)
 
-Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.
+Build deterministic read-only BETA artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.
 
 Example: Use $build-modpoll to build artifacts for this Modpoll profile.
-## Build ModScan
+## Build ModScan (BETA)
 
-Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
+Build deterministic read-only BETA ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
 
 Example: Use $build-modscan to build a read-only ModScan setup.
 ## Build Node-RED
@@ -53,7 +53,7 @@ Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and
 Example: Use $build-node-red to build a disabled read-only Node-RED flow.
 ## Build Tool Pack
 
-Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
+Build any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
 
 Example: Use $build-tool-pack to build these selected target outputs.
 ## Capture Sample
@@ -103,7 +103,7 @@ Parse structured Modbus register maps into candidate rows with source values, re
 Example: Use $parse-map to parse this register list into traceable candidates.
 ## Plan Reads
 
-Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll, ModScan, or a tool pack.
+Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll (BETA), ModScan (BETA), or a tool pack.
 
 Example: Use $plan-reads to compile safe reads for this validated map.
 ## Remap Addresses
@@ -187,7 +187,7 @@ Use a selected tool target to collect one raw sample, confirm byte order, then r
 
 ## Workflow: Build a multi-target tool pack
 
-Generate any selected combination of Node-RED, Modpoll, and ModScan from one validated map and one read plan.
+Generate any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) from one validated map and one read plan.
 
 1. check-map: modbus-map/v1 -> modbus-map-lint/v1
 2. plan-reads: modbus-map/v1 -> modbus-read-plan/v1

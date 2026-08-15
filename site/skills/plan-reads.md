@@ -1,6 +1,6 @@
 # Plan Reads
 
-Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll, ModScan, or a tool pack.
+Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll (BETA), ModScan (BETA), or a tool pack.
 
 ## Common requests
 

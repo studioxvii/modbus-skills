@@ -1,6 +1,6 @@
 interface:
-  display_name: "Build ModScan"
-  short_description: "Build a documented ModScan read plan"
+  display_name: "Build ModScan (BETA)"
+  short_description: "Build a BETA ModScan read plan"
   default_prompt: "Use $build-modscan to build a read-only ModScan setup."
 policy:
   allow_implicit_invocation: false

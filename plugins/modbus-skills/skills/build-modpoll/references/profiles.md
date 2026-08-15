@@ -1,4 +1,4 @@
-# Modpoll Profiles
+# Modpoll Profiles (BETA)
 
 ## `gavinying-cli`
 

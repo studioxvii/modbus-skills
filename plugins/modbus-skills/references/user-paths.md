@@ -80,7 +80,7 @@ Map order changes are noise. Route, unit, area, and offset changes are moves.
 
 ```text
 simple documented text or CSV example -> build-custom-export
-Node-RED, Modpoll, or ModScan -> use the dedicated builder
+Node-RED, Modpoll (BETA), or ModScan (BETA) -> use the dedicated builder
 opaque or undocumented native format -> stop at a documented interchange plan
 ```
 

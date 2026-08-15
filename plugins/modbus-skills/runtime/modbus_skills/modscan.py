@@ -347,7 +347,7 @@ does not contain a synthetic `.tst` or `.cfg` file. WinTECH does not publish a
 stable native import schema on its product page, so this exporter does not
 claim that these CSV files are native ModScan files.
 
-Native ModScan verification was not run, so native verification is unavailable.
+This target is BETA. Native ModScan verification was not run, so native verification is unavailable.
 If ModScan is not available, install PyModbus and use `pymodbus-read-once.py` for
 one explicit request. It requires `--request`, `--host`, `--port`, the matching
 `--unit`, and `--confirm-read READ`.

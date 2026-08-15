@@ -11,7 +11,7 @@ vendor manual, spreadsheet, PDF, or existing register map into:
 - a human-readable user map
 - JSON and CSV exports
 - bounded read plans
-- optional Node-RED, Modpoll, Modbus Poll, or ModScan files
+- optional Node-RED, Modpoll (BETA), Modbus Poll (BETA), or ModScan (BETA) files
 
 It can also compare firmware revisions, investigate byte order, and analyze
 captured Modbus data.
@@ -95,7 +95,7 @@ $compare-maps Compare these firmware maps and show moved, added, removed, and ch
 ```
 
 ```text
-$build-tool-pack Build a read-only Node-RED and Modpoll tool pack for this validated map.
+$build-tool-pack Build a read-only Node-RED and Modpoll (BETA) tool pack for this validated map.
 ```
 
 Each workflow is available separately, so you can choose exactly what you want
@@ -193,17 +193,17 @@ additional Modbus traffic. Final Node-RED exports use one bounded five-second
 live-poll trigger that keeps one request in flight. Both generated flows start
 disabled and contain no deploy-time or write nodes.
 
-Modpoll and ModScan probes collect the same raw words. The saved sample can then
-be checked separately before the selected layout is applied.
+Modpoll (BETA) and ModScan (BETA) probes collect the same raw words. The saved
+sample can then be checked separately before the selected layout is applied.
 
 ## Files you can create
 
 | Tool or format | What you get | Note |
 | --- | --- | --- |
 | Node-RED | A disabled, importable read-only flow with one sequenced trigger, response checks, error paths, and watchdogs; probe is manual one-shot and final uses a bounded 5s live poll | Native import verification is still required |
-| `gavinying/modpoll` | Documented `device`, `poll`, and `ref` CSV files | Use the pinned open-source implementation for acceptance testing |
-| Witte Modbus Poll | A readable desktop plan, bounded PowerShell automation, or disabled v12 XML | The project does not synthesize undocumented binary formats |
-| ModScan | Manual setup, read-plan, point-map, and protocol test-message files | The project does not invent undocumented configuration formats |
+| `gavinying/modpoll` (BETA) | Documented `device`, `poll`, and `ref` CSV files | Native application verification has not been run |
+| Witte Modbus Poll (BETA) | A readable desktop plan, bounded PowerShell automation, or disabled v12 XML | Native application verification has not been run |
+| ModScan (BETA) | Manual setup, read-plan, point-map, and protocol test-message files | Native application verification has not been run |
 | Combined tool pack | Any selected combination with manifests and SHA-256 checksums | All files use one validated map and one read plan |
 
 ## Safety
@@ -247,8 +247,8 @@ excluded points cannot enter a final read plan.
 | Evaluate byte and word layouts from one sample | `check-byte-order` |
 | Compile bounded FC01–FC04 read blocks | `plan-reads` |
 | Generate a disabled Node-RED read flow | `build-node-red` |
-| Generate `gavinying/modpoll` or Witte files | `build-modpoll` |
-| Generate an auditable ModScan read plan | `build-modscan` |
+| Generate `gavinying/modpoll` or Witte files (BETA) | `build-modpoll` |
+| Generate an auditable ModScan read plan (BETA) | `build-modscan` |
 | Build any selected tool combination | `build-tool-pack` |
 | Analyze communication and signal behavior | `analyze-capture` |
 | Build a custom text or CSV export | `build-custom-export` |
@@ -309,8 +309,9 @@ campaign contracts.
 See [`docs/verification-status.md`](docs/verification-status.md) and
 [`docs/testing.md`](docs/testing.md) for current results and the test method.
 
-No workflow test issues live device traffic. Native Node-RED, Modpoll, Witte
-Modbus Poll, and ModScan acceptance tests remain release gates.
+No workflow test issues live device traffic. Node-RED has a recorded native
+acceptance result. Modpoll, Witte Modbus Poll, and ModScan exports are BETA
+until those native applications are verified.
 
 ## For contributors
 
@@ -349,7 +350,7 @@ Studio Seventeen publishes Modbus Skills.
 
 ## Release status
 
-Modbus Skills is licensed under Apache-2.0 and versioned as `0.2.0`. Native Modpoll,
-Witte Modbus Poll, and ModScan acceptance tests are still outstanding. Keep the GitHub
-repository private until those remaining items in
-[`docs/publication-checklist.md`](docs/publication-checklist.md) pass.
+Modbus Skills is licensed under Apache-2.0 and versioned as `0.2.0`. Node-RED
+exports have a recorded native acceptance result. Modpoll, Witte Modbus Poll, and
+ModScan exports are BETA until native application verification is complete. See
+[`docs/publication-checklist.md`](docs/publication-checklist.md).

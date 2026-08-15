@@ -91,7 +91,7 @@
     {
       "id": "build-tool-pack",
       "name": "Build a multi-target tool pack",
-      "goal": "Generate any selected combination of Node-RED, Modpoll, and ModScan from one validated map and one read plan.",
+      "goal": "Generate any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) from one validated map and one read plan.",
       "steps": [
         {"id": "lint", "kind": "skill", "skill": "check-map", "inputs": ["modbus-map/v1"], "output": "modbus-map-lint/v1"},
         {"id": "plan", "kind": "skill", "skill": "plan-reads", "inputs": ["modbus-map/v1"], "output": "modbus-read-plan/v1"},

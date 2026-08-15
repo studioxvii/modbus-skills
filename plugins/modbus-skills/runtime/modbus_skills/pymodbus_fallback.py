@@ -55,8 +55,8 @@ def native_verification_not_run(product: str) -> dict[str, str]:
     return {
         "status": "not-run",
         "reason": (
-            f"Native {product} verification was not run by this exporter, so "
-            "native verification is unavailable."
+            f"{product} export is BETA. Native {product} verification was not "
+            "run by this exporter, so native verification is unavailable."
         ),
     }
 

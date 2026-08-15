@@ -22,7 +22,7 @@
     {
       "id": "build-custom-export",
       "display_name": "Build Custom Export",
-      "description": "Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll, or ModScan adapter.",
+      "description": "Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll (BETA), or ModScan (BETA) adapter.",
       "license": "Apache-2.0",
       "short_description": "Build a declarative text or CSV export",
       "default_prompt": "Use $build-custom-export to reproduce this documented export format.",
@@ -30,19 +30,19 @@
     },
     {
       "id": "build-modpoll",
-      "display_name": "Build Modpoll",
-      "description": "Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.",
+      "display_name": "Build Modpoll (BETA)",
+      "description": "Build deterministic read-only BETA artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.",
       "license": "Apache-2.0",
-      "short_description": "Build read-only Modpoll artifacts",
+      "short_description": "Build BETA Modpoll artifacts",
       "default_prompt": "Use $build-modpoll to build artifacts for this Modpoll profile.",
       "path": "plugins/modbus-skills/skills/build-modpoll"
     },
     {
       "id": "build-modscan",
-      "display_name": "Build ModScan",
-      "description": "Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.",
+      "display_name": "Build ModScan (BETA)",
+      "description": "Build deterministic read-only BETA ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.",
       "license": "Apache-2.0",
-      "short_description": "Build a documented ModScan read plan",
+      "short_description": "Build a BETA ModScan read plan",
       "default_prompt": "Use $build-modscan to build a read-only ModScan setup.",
       "path": "plugins/modbus-skills/skills/build-modscan"
     },
@@ -58,7 +58,7 @@
     {
       "id": "build-tool-pack",
       "display_name": "Build Tool Pack",
-      "description": "Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.",
+      "description": "Build any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.",
       "license": "Apache-2.0",
       "short_description": "Build several Modbus tool outputs",
       "default_prompt": "Use $build-tool-pack to build these selected target outputs.",
@@ -148,7 +148,7 @@
     {
       "id": "plan-reads",
       "display_name": "Plan Reads",
-      "description": "Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll, ModScan, or a tool pack.",
+      "description": "Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll (BETA), ModScan (BETA), or a tool pack.",
       "license": "Apache-2.0",
       "short_description": "Compile bounded Modbus read blocks",
       "default_prompt": "Use $plan-reads to compile safe reads for this validated map.",

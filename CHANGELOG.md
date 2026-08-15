@@ -17,6 +17,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Representative skill-usability campaign with fake-session CI coverage.
 - Generated documentation site, research catalog, and workflow indexes.
 
+### Changed
+
+- Label Modpoll, Witte Modbus Poll, and ModScan exports as BETA until native
+  application verification.
+
 ### Security
 
 - Read-only generation only: no writes, broadcasts, discovery scans, stored
