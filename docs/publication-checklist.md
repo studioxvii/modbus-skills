@@ -15,7 +15,7 @@
 - [x] Ship licensed ModScan as BETA until native verification.
 - [ ] Install the plugin from the repo marketplace in a new task.
 - [x] Review the generated public site.
-- [x] Remaining publication blocker is repository visibility, not Modpoll or ModScan native tests.
+- [x] GitHub repository is public. Modpoll and ModScan remain BETA.
 
 Confirmed publisher contact:
 
