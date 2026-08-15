@@ -1,12 +1,13 @@
 ---
 name: build-modpoll
-description: Build deterministic read-only artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.
+description: Build deterministic read-only BETA artifacts for gavinying/modpoll or supported Witte Modbus Poll profiles. Use when the user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/final setup.
 license: Apache-2.0
 ---
 
-# Build Modpoll
+# Build Modpoll (BETA)
 
-Generate artifacts for one explicit Modpoll product profile.
+Generate artifacts for one explicit Modpoll product profile. Native application
+verification has not been run, so this target is BETA.
 
 Follow `../../references/interaction-contract.md`.
 

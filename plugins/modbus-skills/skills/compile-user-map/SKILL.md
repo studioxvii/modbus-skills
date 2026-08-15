@@ -39,7 +39,7 @@ Open these first:
 
 Normally leave these alone:
 
-- `targets/` - Open this folder only when you requested files for Node-RED, Modpoll, or ModScan. It contains the files to import into that tool.
+- `targets/` - Open this folder only when you requested files for Node-RED, Modpoll (BETA), or ModScan (BETA). It contains the files to import into that tool.
 - `compile-result.json` - the agent reads this receipt to tell whether the run finished or needs something from you. You normally do not need to open it.
 - `case.json` - This checkpoint lets the agent continue the same job later without starting over. Keep it until the job is finished, and do not edit it.
 - `artifacts/` and `control/` - These let the agent verify and resume the job. Keep them for troubleshooting; ignore them during normal use.

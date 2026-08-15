@@ -1,12 +1,13 @@
 ---
 name: build-modscan
-description: Build deterministic read-only ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
+description: Build deterministic read-only BETA ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
 license: Apache-2.0
 ---
 
-# Build ModScan
+# Build ModScan (BETA)
 
-Generate documented, version-neutral setup files.
+Generate documented, version-neutral setup files. Native application
+verification has not been run, so this target is BETA.
 
 Follow `../../references/interaction-contract.md`.
 

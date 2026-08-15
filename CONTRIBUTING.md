@@ -47,4 +47,4 @@ To run only the representative human-like skill campaign:
 python3 scripts/run_skill_usability_tests.py --output artifacts/skill-usability
 ```
 
-For a new target adapter, also test the artifact in the named application before you mark native verification complete.
+For a new target adapter, also test the artifact in the named application before you mark native verification complete. Modpoll and ModScan remain BETA until that native check is recorded.

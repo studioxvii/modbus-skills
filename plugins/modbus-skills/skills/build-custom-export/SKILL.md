@@ -1,6 +1,6 @@
 ---
 name: build-custom-export
-description: Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll, or ModScan adapter.
+description: Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll (BETA), or ModScan (BETA) adapter.
 license: Apache-2.0
 ---
 
@@ -36,6 +36,6 @@ Completion requires a validated declarative configuration and deterministic outp
 ## Handoff
 
 - The input map is not reviewed: suggest `review-map`.
-- The target is Node-RED, Modpoll, or ModScan: suggest its dedicated builder.
+- The target is Node-RED, Modpoll (BETA), or ModScan (BETA): suggest its dedicated builder.
 
 Use this skill for one simple text or CSV shape. Use a dedicated adapter for graphs, opaque binaries, or interdependent collections.

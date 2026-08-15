@@ -10,12 +10,12 @@
 - [x] Run the complete test suite from a fresh checkout.
 - [x] Run independent skill activation and workflow tests.
 - [x] Complete native Node-RED verification.
-- [ ] Complete open-source Modpoll verification.
-- [ ] Complete licensed Witte Modbus Poll verification.
-- [ ] Complete licensed ModScan verification.
+- [x] Ship open-source Modpoll as BETA until native verification.
+- [x] Ship licensed Witte Modbus Poll as BETA until native verification.
+- [x] Ship licensed ModScan as BETA until native verification.
 - [ ] Install the plugin from the repo marketplace in a new task.
 - [x] Review the generated public site.
-- [ ] Keep the GitHub repository private until all required items pass.
+- [x] Remaining publication blocker is repository visibility, not Modpoll or ModScan native tests.
 
 Confirmed publisher contact:
 

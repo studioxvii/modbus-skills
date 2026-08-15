@@ -1,6 +1,6 @@
 # Build Tool Pack
 
-Build any selected combination of Node-RED, Modpoll, and ModScan from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
+Build any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
 
 ## Common requests
 
