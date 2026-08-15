@@ -1,0 +1,32 @@
+{
+  "schema_version": "skill-usability-campaign/v1",
+  "campaign_id": "representative-v1",
+  "version": "1",
+  "worker_model": "gpt-5.3-codex",
+  "repetitions": 1,
+  "real_model_repetitions": 3,
+  "evidence_classes": ["deterministic", "simulated-user"],
+  "personas": [
+    "novice",
+    "commissioning-engineer",
+    "reviewer",
+    "impatient-operator"
+  ],
+  "budget": {
+    "max_turns": 8,
+    "max_questions": 2,
+    "max_seconds": 120,
+    "max_tool_calls": 20,
+    "max_output_bytes": 2000000
+  },
+  "scenarios": [
+    "01-novice-routing",
+    "02-clean-compile",
+    "03-grouped-ambiguity",
+    "04-interrupt-resume",
+    "05-byte-order-hold",
+    "06-unsafe-pressure",
+    "07-revision-compare",
+    "08-stale-tampered"
+  ]
+}

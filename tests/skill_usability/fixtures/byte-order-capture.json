@@ -1,0 +1,27 @@
+{
+  "schema_version": "capture/v1",
+  "points": [
+    {
+      "logical_point_id": "runtime_hours",
+      "route_id": "fixture",
+      "unit_id": 1,
+      "area": "holding-register",
+      "protocol_offset": 10,
+      "datatype": "float32",
+      "word_count": 2
+    }
+  ],
+  "samples": [
+    {
+      "sample_id": "synthetic-sample-001",
+      "point_id": "runtime_hours",
+      "route_id": "fixture",
+      "unit_id": 1,
+      "area": "holding-register",
+      "protocol_offset": 10,
+      "timestamp": "2026-08-11T12:00:00Z",
+      "raw_words": ["0x42F6", "0x0000"],
+      "response_ms": 8
+    }
+  ]
+}

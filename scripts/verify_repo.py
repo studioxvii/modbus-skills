@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -21,18 +22,20 @@ def run(*args: str) -> int:
 
 
 def main() -> int:
-    commands = [
-        (sys.executable, "scripts/validate_skills.py"),
-        (sys.executable, "scripts/validate_plugin_variants.py"),
-        (sys.executable, "scripts/check_public_boundary.py"),
-        (sys.executable, "scripts/build_catalog.py", "--check"),
-        (sys.executable, "scripts/build_activation_cases.py", "--check"),
-        (sys.executable, "scripts/build_site.py", "--check"),
-        (sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"),
-    ]
-    for command in commands:
-        if run(*command):
-            return 1
+    with tempfile.TemporaryDirectory(prefix="modbus-skill-usability-") as tmp:
+        commands = [
+            (sys.executable, "scripts/validate_skills.py"),
+            (sys.executable, "scripts/validate_plugin_variants.py"),
+            (sys.executable, "scripts/check_public_boundary.py"),
+            (sys.executable, "scripts/build_catalog.py", "--check"),
+            (sys.executable, "scripts/build_activation_cases.py", "--check"),
+            (sys.executable, "scripts/build_site.py", "--check"),
+            (sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"),
+            (sys.executable, "scripts/run_skill_usability_tests.py", "--output", tmp),
+        ]
+        for command in commands:
+            if run(*command):
+                return 1
     print("Repository verification passed")
     return 0
 

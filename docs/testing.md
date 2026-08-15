@@ -2,6 +2,7 @@
 
 ## Fast tests
 
+- Deterministic skill-usability campaign contracts and fake-session trials.
 - Address conversion and boundary tests.
 - Composite identity tests.
 - Byte-order vectors and IEEE edge cases.

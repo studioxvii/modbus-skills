@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skill-usability-report/v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "run_id",
+    "mode",
+    "adapter",
+    "worker_model",
+    "status",
+    "evidence_class",
+    "issue_codes",
+    "trials",
+    "coverage",
+    "hashes",
+    "versions",
+    "cleanup"
+  ],
+  "properties": {
+    "schema_version": {"const": "skill-usability-report/v1"},
+    "campaign_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "mode": {"enum": ["deterministic", "real-model"]},
+    "adapter": {"enum": ["fake", "codex"]},
+    "worker_model": {"type": "string", "minLength": 1},
+    "status": {"enum": ["passed", "failed", "blocked", "not-run", "inconclusive"]},
+    "evidence_class": {"enum": ["deterministic", "simulated-user"]},
+    "issue_codes": {"type": "array", "items": {"type": "string"}},
+    "trials": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "scenario_id",
+          "status",
+          "issue_codes",
+          "dimensions",
+          "event_count",
+          "terminal_reason",
+          "repetition"
+        ],
+        "properties": {
+          "scenario_id": {"type": "string"},
+          "status": {"enum": ["passed", "failed", "blocked", "not-run", "inconclusive"]},
+          "issue_codes": {"type": "array", "items": {"type": "string"}},
+          "dimensions": {"type": "object"},
+          "event_count": {"type": "integer", "minimum": 0},
+          "terminal_reason": {"type": "string"},
+          "repetition": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "coverage": {"type": "object"},
+    "hashes": {"type": "object"},
+    "versions": {"type": "object"},
+    "cleanup": {"type": "object"}
+  },
+  "additionalProperties": true
+}

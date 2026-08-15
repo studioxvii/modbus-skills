@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused, read-only improvement.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start from a real Modbus engineering problem. Keep the change read-only
+        and fixture-safe.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What recurring Modbus task or failure should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Which skill, workflow, or runtime behavior should change?
+    validations:
+      required: true
+  - type: checkboxes
+    id: bounds
+    attributes:
+      label: Bounds
+      options:
+        - label: This stays read-only (no writes, broadcasts, discovery, or unbounded polling).
+          required: true
+        - label: Any new fixture would be synthetic or clearly redistributable.
+          required: true

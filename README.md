@@ -51,8 +51,6 @@ codex plugin marketplace add "$PWD"
 codex plugin add modbus-skills@modbus-skills
 ```
 
-Private repository access is required while the project is pre-release.
-
 ### Build for another client
 
 Build all four distributions from the canonical source:
@@ -316,6 +314,8 @@ Modbus Poll, and ModScan acceptance tests remain release gates.
 
 ## For contributors
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 - Keep all generated behavior read-only.
 - Preserve source references and rejected rows.
 - Use synthetic fixtures instead of customer data, vendor manuals, or complete vendor maps.
@@ -338,10 +338,18 @@ The license applies to the material distributed by this repository. It does not 
 rights to third-party vendor manuals, register maps, customer data, product names, or
 tool binaries, none of which are distributed as part of this project.
 
+## Publisher
+
+Studio Seventeen publishes Modbus Skills.
+
+- GitHub: [studioxvii](https://github.com/studioxvii)
+- Repository: [github.com/studioxvii/modbus-skills](https://github.com/studioxvii/modbus-skills)
+- Documentation: [studioxvii.github.io/modbus-skills](https://studioxvii.github.io/modbus-skills)
+- Security reports: see [`SECURITY.md`](SECURITY.md)
+
 ## Release status
 
-The repository is licensed under Apache-2.0 but remains private and pre-release. Do not
-change its visibility or publish a release until every item in
-[`docs/publication-checklist.md`](docs/publication-checklist.md) is complete.
-
-The GitHub repository must remain private during pre-release.
+Modbus Skills is licensed under Apache-2.0 and versioned as `0.2.0`. Native Modpoll,
+Witte Modbus Poll, and ModScan acceptance tests are still outstanding. Keep the GitHub
+repository private until those remaining items in
+[`docs/publication-checklist.md`](docs/publication-checklist.md) pass.

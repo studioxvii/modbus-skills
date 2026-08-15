@@ -1,6 +1,7 @@
 # Contributing
 
-Modbus Skills accepts focused, read-only improvements.
+Modbus Skills accepts focused, read-only improvements. By participating, you
+agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Contribution license
 
