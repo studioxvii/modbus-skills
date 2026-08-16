@@ -3,9 +3,14 @@
 This folder is a rights-safe, fictional commissioning table. Names, addresses,
 and values are made for this example.
 
-The worked example turns a mixed 40001/30001 table into protocol offsets, records
-the write-only setpoint as an exclusion, and pauses when byte order is blank so
-you can choose a layout.
+The completed run turns a mixed 40001/30001 table into protocol offsets and
+records the write-only setpoint as an exclusion. It maps 40001 to holding-register
+offset 0, 40003 to holding-register offset 2, and 30001 to input-register offset
+0. Its multi-register rows already state CDAB and ABCD, so it has no blocking
+byte-order decision.
+
+A separate unresolved run leaves byte order blank for Flow Rate and Energy
+Total. That run pauses so you can confirm the layout.
 
 ## Files
 

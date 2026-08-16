@@ -4,15 +4,18 @@
   "records": [
     {
       "id": "protocol-offset-vs-reference-number",
+      "title": "Address offset vs. reference number",
       "problem": "Users and tools can mix zero-based protocol offsets with one-based or 3xxxx/4xxxx reference notation.",
       "evidence": "The Modbus application protocol defines PDU starting addresses from zero. A Pymodbus issue also shows a user explicitly mapping 30001 to address 0.",
       "sources": [
         {
           "type": "official-specification",
+          "label": "Modbus Application Protocol",
           "url": "https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf"
         },
         {
           "type": "project-issue",
+          "label": "Pymodbus #2565",
           "url": "https://github.com/pymodbus-dev/pymodbus/issues/2565"
         }
       ],
@@ -24,11 +27,13 @@
     },
     {
       "id": "register-area-identity",
+      "title": "Register area defines address identity",
       "problem": "The same numeric offset can exist in coils, discrete inputs, input registers, and holding registers.",
       "evidence": "A Pymodbus simulator discussion documents user confusion when holding and input register blocks appear to share numeric positions.",
       "sources": [
         {
           "type": "project-discussion",
+          "label": "Pymodbus discussion #2531",
           "url": "https://github.com/pymodbus-dev/pymodbus/discussions/2531"
         }
       ],
@@ -40,15 +45,18 @@
     },
     {
       "id": "word-and-byte-order",
+      "title": "Word and byte order",
       "problem": "Values wider than 16 bits can require different word and byte layouts.",
       "evidence": "A FluentModbus issue records a request for big-endian, little-endian, and byte-swapped variants. The Witte Modbus Poll manual also documents arbitrary word and byte order for wider types.",
       "sources": [
         {
           "type": "project-issue",
+          "label": "FluentModbus #27",
           "url": "https://github.com/Apollo3zehn/FluentModbus/issues/27"
         },
         {
           "type": "official-tool-documentation",
+          "label": "Witte Modbus Poll manual",
           "url": "https://www.modbustools.com/mbpoll-user-manual.html"
         }
       ],
@@ -59,11 +67,13 @@
     },
     {
       "id": "bit-order-confusion",
+      "title": "Bit order is not byte order",
       "problem": "Coil and packed-bit order can be confused with multi-register byte order.",
       "evidence": "A Pymodbus issue reports reversed bit interpretation while explicitly distinguishing it from byte and word endian concerns.",
       "sources": [
         {
           "type": "project-issue",
+          "label": "Pymodbus #2311",
           "url": "https://github.com/pymodbus-dev/pymodbus/issues/2311"
         }
       ],
@@ -75,15 +85,18 @@
     },
     {
       "id": "serial-queue-contention",
+      "title": "Serial requests need one queue",
       "problem": "Several independent polls on one serial route can contend and fail when requests are not queued.",
       "evidence": "A node-red-contrib-modbus issue reports failures with multiple RTU unit identifiers on one serial port and requests per-route queuing.",
       "sources": [
         {
           "type": "project-issue",
+          "label": "node-red-contrib-modbus #161",
           "url": "https://github.com/BiancoRoyal/node-red-contrib-modbus/issues/161"
         },
         {
           "type": "project-documentation",
+          "label": "node-red-contrib-modbus documentation",
           "url": "https://github.com/BiancoRoyal/node-red-contrib-modbus"
         }
       ],
@@ -95,11 +108,13 @@
     },
     {
       "id": "poll-rate-control",
+      "title": "Configured and observed poll rates can differ",
       "problem": "A configured polling interval can differ from observed request frequency.",
       "evidence": "A Home Assistant issue reports Modbus sensors polling more often than the configured scan interval.",
       "sources": [
         {
           "type": "project-issue",
+          "label": "Home Assistant #146246",
           "url": "https://github.com/home-assistant/core/issues/146246"
         }
       ],
@@ -110,15 +125,18 @@
     },
     {
       "id": "unit-zero-ambiguity",
+      "title": "Unit identifier 0 is ambiguous",
       "problem": "Unit identifier zero has transport and tool-specific behavior and can represent broadcast behavior in serial contexts.",
       "evidence": "A node-red-contrib-modbus issue records inconsistent Unit ID 0 validation. Tool documentation also exposes Unit ID 0 behavior, so generated read workflows must not silently choose it.",
       "sources": [
         {
           "type": "project-issue",
+          "label": "node-red-contrib-modbus #274",
           "url": "https://github.com/BiancoRoyal/node-red-contrib-modbus/issues/274"
         },
         {
           "type": "official-tool-documentation",
+          "label": "Witte Modbus Poll documentation",
           "url": "https://www.modbustools.com/modbus_poll.html"
         }
       ],
@@ -130,15 +148,18 @@
     },
     {
       "id": "illegal-address-block-boundary",
+      "title": "Invalid read block boundaries",
       "problem": "A read block can become invalid when its start and quantity cross the server's defined data range.",
       "evidence": "The official protocol defines exception 02 for an invalid address and transfer-length combination. A Pymodbus discussion shows users working to restrict undefined register ranges.",
       "sources": [
         {
           "type": "official-specification",
+          "label": "Modbus Application Protocol",
           "url": "https://www.modbus.org/file/secure/modbusprotocolspecification.pdf"
         },
         {
           "type": "project-discussion",
+          "label": "Pymodbus discussion #2268",
           "url": "https://github.com/pymodbus-dev/pymodbus/discussions/2268"
         }
       ],
@@ -150,11 +171,13 @@
     },
     {
       "id": "malformed-or-short-response",
+      "title": "Malformed or short responses",
       "problem": "A device can return a byte count or frame length that does not match the received payload.",
       "evidence": "A Pymodbus issue documents a response whose declared length and received bytes disagree.",
       "sources": [
         {
           "type": "project-issue",
+          "label": "Pymodbus #2303",
           "url": "https://github.com/pymodbus-dev/pymodbus/issues/2303"
         }
       ],
@@ -165,11 +188,13 @@
     },
     {
       "id": "reusable-modpoll-config",
+      "title": "Reusable Modpoll configuration",
       "problem": "Site work benefits from a reusable configuration that defines poll blocks and named references.",
       "evidence": "The gavinying/modpoll project documents device, poll, and ref CSV records and describes configuration reuse for device polling.",
       "sources": [
         {
           "type": "project-documentation",
+          "label": "gavinying/modpoll documentation",
           "url": "https://github.com/gavinying/modpoll"
         }
       ],
@@ -180,11 +205,13 @@
     },
     {
       "id": "modscan-repeatable-test-script",
+      "title": "Repeatable ModScan tests",
       "problem": "Production and commissioning tests need repeatable request and expected-response sequences.",
       "evidence": "WinTECH documents ModScan test scripts as editable message sequences that can run in a loop and log results.",
       "sources": [
         {
           "type": "official-tool-documentation",
+          "label": "WinTECH ModScan documentation",
           "url": "https://www.win-tech.com/html/modscan32.htm"
         }
       ],
@@ -195,15 +222,18 @@
     },
     {
       "id": "modbus-poll-machine-readable-project",
+      "title": "Versioned Modbus Poll projects",
       "problem": "A reusable Modbus Poll setup needs a documented and versioned file contract.",
       "evidence": "Witte documents OLE automation and publishes a Modbus Poll version 12 human-readable XML example.",
       "sources": [
         {
           "type": "official-tool-documentation",
+          "label": "Witte Modbus Poll manual",
           "url": "https://www.modbustools.com/mbpoll-user-manual.html"
         },
         {
           "type": "official-tool-example",
+          "label": "Witte Modbus Poll XML example",
           "url": "https://www.modbustools.com/pollxml.html"
         }
       ],

@@ -22,6 +22,8 @@ def build() -> dict[str, object]:
         positive = []
         for stem in intent["positive_stems"]:
             for prefix in PREFIXES:
+                if prefix and stem.casefold().startswith(prefix.strip().casefold()):
+                    continue
                 text = prefix + stem
                 positive.append(text[0].upper() + text[1:] + ".")
         cases.append({"skill_id": skill_id, "positive": positive, "negative": intent["negative"]})

@@ -12,7 +12,7 @@ Use this when you need a usable map, a layout check, or a read-only polling setu
 
 Start by asking for a user map from the vendor file. If you want help choosing the next step, ask for that.
 
-## Other work
+## Out of scope
 
 - Register writes, coil forces, and broadcasts.
 - Network discovery and unbounded polling.

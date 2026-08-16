@@ -1,19 +1,23 @@
 # Build Node-RED
 
-Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan. Use when the user asks for a Node-RED flow, Modbus flex-getter setup, or Node-RED probe/final capture path.
+Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan.
 
-## Common requests
+## Use this when
 
-- Generate a read-only Node-RED Modbus flow.
-- Please generate a read-only Node-RED Modbus flow.
-- Can you generate a read-only Node-RED Modbus flow.
-- I need you to generate a read-only Node-RED Modbus flow.
-- Help me generate a read-only Node-RED Modbus flow.
+The user asks for a Node-RED flow, Modbus flex-getter setup, or Node-RED probe/final capture path.
 
-## Try it
+## What you get back
 
-```text
-Use $build-node-red to build a disabled read-only Node-RED flow.
-```
+- `node-red/flow.json` - Import this flow into Node-RED.
+- `node-red/README.md` - Start here. It explains the connection settings, the single start button, and the capture file.
+- `node-red/manifest.json` and `node-red-result.json` - Normally ignore these. They bind the flow to the exact map and read plan and record any holds.
 
-Source: `plugins/modbus-skills/skills/build-node-red/SKILL.md`
+## Example request
+
+Generate a read-only Node-RED Modbus flow.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View Build Node-RED source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/build-node-red/SKILL.md)

@@ -1,19 +1,21 @@
 # Compare Maps
 
-Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points. Use when the user compares firmware/map revisions or asks what changed between two validated maps.
+Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points.
 
-## Common requests
+## Use this when
 
-- Compare these two Modbus register maps.
-- Please compare these two Modbus register maps.
-- Can you compare these two Modbus register maps.
-- I need you to compare these two Modbus register maps.
-- Help me compare these two Modbus register maps.
+The user compares firmware/map revisions or asks what changed between two validated maps.
 
-## Try it
+## What you get back
 
-```text
-Use $compare-maps to compare these reviewed register maps.
-```
+- `diff.json` - Open this comparison. It lists added, removed, moved, changed, and unresolved points without changing either input map.
 
-Source: `plugins/modbus-skills/skills/compare-maps/SKILL.md`
+## Example request
+
+Compare these two Modbus register maps.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View Compare Maps source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/compare-maps/SKILL.md)

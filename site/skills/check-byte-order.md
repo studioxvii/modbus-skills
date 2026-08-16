@@ -1,19 +1,21 @@
 # Check Byte Order
 
-Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner. Use when byte order, word order, or multi-register decoding is unknown and raw words or a capture already exist.
+Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner.
 
-## Common requests
+## Use this when
 
-- Evaluate ABCD BADC CDAB and DCBA from these words.
-- Please evaluate ABCD BADC CDAB and DCBA from these words.
-- Can you evaluate ABCD BADC CDAB and DCBA from these words.
-- I need you to evaluate ABCD BADC CDAB and DCBA from these words.
-- Help me evaluate ABCD BADC CDAB and DCBA from these words.
+Byte order, word order, or multi-register decoding is unknown and raw words or a capture already exist.
 
-## Try it
+## What you get back
 
-```text
-Use $check-byte-order to evaluate every layout for these raw words.
-```
+- `evidence.json` - Open this candidate table. It says whether word order applies, then shows only layouts supported by the sample width. It records evidence only; it does not change the map.
 
-Source: `plugins/modbus-skills/skills/check-byte-order/SKILL.md`
+## Example request
+
+Evaluate ABCD BADC CDAB and DCBA from these words.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View Check Byte Order source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/check-byte-order/SKILL.md)

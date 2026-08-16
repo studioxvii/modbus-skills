@@ -1,19 +1,21 @@
 # Apply Review
 
-Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history. Use when the user confirms layout, exclusion, or field decisions and wants them applied to a new reviewed map.
+Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history.
 
-## Common requests
+## Use this when
 
-- Record my confirmed Modbus map decisions.
-- Please record my confirmed Modbus map decisions.
-- Can you record my confirmed Modbus map decisions.
-- I need you to record my confirmed Modbus map decisions.
-- Help me record my confirmed Modbus map decisions.
+The user confirms layout, exclusion, or field decisions and wants them applied to a new reviewed map.
 
-## Try it
+## What you get back
 
-```text
-Use $apply-review to apply this batch of confirmed map decisions.
-```
+- `reviewed.json` - Use this new reviewed map. It contains the accepted changes, exclusions, remaining holds, and the evidence trail. The original draft is unchanged.
 
-Source: `plugins/modbus-skills/skills/apply-review/SKILL.md`
+## Example request
+
+Record my confirmed Modbus map decisions.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View Apply Review source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/apply-review/SKILL.md)

@@ -18,10 +18,13 @@ class ResearchRecordTests(unittest.TestCase):
         self.assertGreaterEqual(len(research["records"]), 10)
         for record in research["records"]:
             with self.subTest(record=record["id"]):
+                self.assertTrue(record["title"])
+                self.assertLessEqual(len(record["title"].split()), 7)
                 self.assertTrue(record["problem"])
                 self.assertTrue(record["evidence"])
                 self.assertTrue(set(record["skills"]).issubset(skills))
                 for source in record["sources"]:
+                    self.assertTrue(source["label"])
                     self.assertIn(source["type"], allowed_types)
                     parsed = urlparse(source["url"])
                     self.assertEqual("https", parsed.scheme)

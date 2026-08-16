@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts.build_activation_cases import build  # noqa: E402
+from scripts.build_activation_cases import PREFIXES, build  # noqa: E402
 
 
 class ActivationCaseTests(unittest.TestCase):
@@ -35,6 +35,16 @@ class ActivationCaseTests(unittest.TestCase):
                 stems = intent["positive_stems"]
                 self.assertGreaterEqual(len(stems), 10)
                 self.assertEqual(len(stems), len(set(stems)))
+
+    def test_generated_cases_do_not_repeat_a_prefix(self) -> None:
+        activation = build()
+        for case in activation["cases"]:
+            for prompt in case["positive"]:
+                with self.subTest(skill=case["skill_id"], prompt=prompt):
+                    lowered = prompt.casefold()
+                    for prefix in PREFIXES[1:]:
+                        repeated = (prefix + prefix.strip()).casefold()
+                        self.assertFalse(lowered.startswith(repeated))
 
     def test_oem_outcome_is_distinct_from_specialist_intents(self) -> None:
         intents = json.loads(

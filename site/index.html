@@ -32,7 +32,8 @@ header.top {
 .brand { font-weight: 650; color: var(--text); text-decoration: none; }
 nav { display: flex; gap: 0.9rem; flex-wrap: wrap; }
 nav a { color: var(--muted); text-decoration: none; font-size: 0.92rem; }
-nav a:hover, a { color: var(--accent); }
+nav a:hover, nav a.is-current, a { color: var(--accent); }
+nav a.is-current { text-decoration: underline; text-underline-offset: 0.3rem; }
 h1 { font-size: 1.75rem; line-height: 1.25; margin: 1.4rem 0 0.6rem; }
 h2 { font-size: 1.15rem; margin: 1.8rem 0 0.6rem; }
 h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
@@ -57,6 +58,12 @@ p, li { color: var(--text); }
   padding: 0.9rem 1rem;
   margin: 0.8rem 0;
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .jobs { display: grid; gap: 0.8rem; }
 @media (min-width: 760px) { .jobs { grid-template-columns: repeat(3, 1fr); } }
 .jobs h3 { margin-top: 0; }
@@ -93,7 +100,23 @@ article.skill {
   margin: 0.8rem 0;
   background: var(--surface);
 }
-footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }</style></head><body><header class="top"><a class="brand" href="index.html">Modbus Skills</a><nav><a href="when-to-use.html">When to use</a><a href="examples/compile-user-map.html">Example</a><a href="index.html#install">Install</a></nav></header><main>
+.related-grid { display: grid; gap: 0.8rem; }
+@media (min-width: 640px) { .related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.related-grid .panel { margin: 0; }
+.related-grid h3 { margin-top: 0; }
+.workflow-steps { padding-left: 1.4rem; }
+.workflow-steps > li { padding-left: 0.25rem; }
+.workflow-steps h3 { margin-top: 0; }
+.machine { margin-top: 1.5rem; }
+.machine summary { color: var(--accent); cursor: pointer; }
+.machine li { margin: 0.55rem 0; }
+summary, a, code { overflow-wrap: anywhere; }
+footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }
+@media (max-width: 560px) {
+  header.top { align-items: flex-start; flex-direction: column; }
+  nav { gap: 0.55rem 0.85rem; }
+  h1 { font-size: 1.55rem; }
+}</style></head><body><header class="top"><a class="brand" href="index.html">Modbus Skills</a><nav aria-label="Primary"><a class="is-current" aria-current="page" href="index.html">Home</a><a href="when-to-use.html">When to use</a><a href="examples/compile-user-map.html">Example</a><a href="index.html#install">Install</a></nav></header><main>
 <p class="kicker">Read-only map tools for commissioning work</p>
 <h1>Turn a vendor Modbus manual into a usable map</h1>
 <p class="lede">For controls, commissioning, and integration engineers. Give it a PDF or spreadsheet. Get a readable map plus JSON and CSV. If the manual is unclear, you get a short list of questions.</p>
@@ -111,17 +134,17 @@ footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }<
 <p>You can say this in plain language:</p>
 <pre>Use this manual to make a user map for temperatures, operating status, alarms, and power. Give me a readable map plus JSON and CSV.</pre>
 <h2>What it does with a messy table</h2>
-<p class="muted">This is a fictional commissioning table. 40001 and 30001 become protocol offsets. The read map keeps the readable points. Level Setpoint is recorded as write-only.</p>
+<p class="muted">This is a fictional commissioning table. 40001 becomes holding-register offset 0. 30001 becomes input-register offset 0. The read map keeps the readable points. Level Setpoint is recorded as write-only.</p>
 <div class="panel">
   <h3>Source table</h3>
-  <table><thead><tr><th>Address</th><th>Name</th><th>Data Type</th><th>Byte Order</th><th>Access</th></tr></thead><tbody><tr><td>40001</td><td>Tank Level</td><td>UINT16</td><td></td><td>read-only</td></tr><tr><td>40003</td><td>Flow Rate</td><td>FLOAT32</td><td>CDAB</td><td>read-only</td></tr><tr><td>30001</td><td>Energy Total</td><td>UINT32</td><td>ABCD</td><td>read-only</td></tr><tr><td>40010</td><td>Level Setpoint</td><td>UINT16</td><td></td><td>write-only</td></tr></tbody></table>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Resolved source table"><table><thead><tr><th>Address</th><th>Name</th><th>Data Type</th><th>Byte Order</th><th>Access</th></tr></thead><tbody><tr><td>40001</td><td>Tank Level</td><td>UINT16</td><td></td><td>read-only</td></tr><tr><td>40003</td><td>Flow Rate</td><td>FLOAT32</td><td>CDAB</td><td>read-only</td></tr><tr><td>30001</td><td>Energy Total</td><td>UINT32</td><td>ABCD</td><td>read-only</td></tr><tr><td>40010</td><td>Level Setpoint</td><td>UINT16</td><td></td><td>write-only</td></tr></tbody></table></div>
 </div>
 <div class="panel">
   <h3>Finished user map</h3>
-  <table><thead><tr><th>Point</th><th>Name</th><th>Manual address</th><th>Area</th><th>Offset</th><th>Type</th></tr></thead><tbody><tr><td>tank_level</td><td>Tank Level</td><td>40001</td><td>holding-register</td><td>0</td><td>uint16</td></tr><tr><td>flow_rate</td><td>Flow Rate</td><td>40003</td><td>holding-register</td><td>2</td><td>float32</td></tr><tr><td>energy_total</td><td>Energy Total</td><td>30001</td><td>input-register</td><td>0</td><td>uint32</td></tr></tbody></table>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Finished user map"><table><thead><tr><th>Point</th><th>Name</th><th>Manual address</th><th>Area</th><th>Offset</th><th>Type</th></tr></thead><tbody><tr><td>tank_level</td><td>Tank Level</td><td>40001</td><td>holding-register</td><td>0</td><td>uint16</td></tr><tr><td>flow_rate</td><td>Flow Rate</td><td>40003</td><td>holding-register</td><td>2</td><td>float32</td></tr><tr><td>energy_total</td><td>Energy Total</td><td>30001</td><td>input-register</td><td>0</td><td>uint32</td></tr></tbody></table></div>
   <p><span class="badge ok">Readable</span> three points in the map &nbsp; <span class="badge hold">Write-only</span> Level Setpoint recorded as an exclusion</p>
 </div>
-<p><a href="examples/compile-user-map.html">See the full example, including the table that pauses for a byte-order choice</a></p>
+<p><a href="examples/compile-user-map.html">See the full example, including a separate table that pauses for a byte-order choice</a></p>
 <h2>Three jobs</h2>
 <div class="jobs">
   <section class="panel">
@@ -140,19 +163,24 @@ footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }<
     <p><a href="skills/build-tool-pack.html">Build a tool pack</a></p>
   </section>
 </div>
-<h2 id="install">Install</h2>
-<p>These tools run in Codex, Cursor, or Claude Code. Clone the repository and add it once:</p>
+<h2 id="install">Install in Codex</h2>
+<p>These commands install the plugin in Codex:</p>
 <pre>git clone https://github.com/studioxvii/modbus-skills.git
 cd modbus-skills
 codex plugin marketplace add "$PWD"
 codex plugin add modbus-skills@modbus-skills</pre>
-<p>For Cursor and Claude Code, see the <a href="https://github.com/studioxvii/modbus-skills#quick-start">install section in the README</a>.</p>
+<p>Other clients use a generated package:</p>
+<ul>
+  <li><strong>Cursor:</strong> use <code class="inline">dist/plugins/cursor</code> as the local marketplace package.</li>
+  <li><strong>Claude Code:</strong> use <code class="inline">dist/plugins/claude</code>, then invoke a skill as <code class="inline">/modbus-skills:check-map</code>.</li>
+</ul>
+<p><a href="https://github.com/studioxvii/modbus-skills#build-for-another-client">Build the client packages from the README</a>.</p>
 <h2>Safety</h2>
 <p>These tools produce read-only maps, bounded poll plans, and a short question list when a manual is unclear.</p>
-<h2>Longer jobs</h2>
+<h2 id="workflows">Longer jobs</h2>
 <ul><li><a href="workflows/compile-user-map.html">Compile an OEM map into user outputs</a></li><li><a href="workflows/extract-pdf-register-map.html">Extract PDF register evidence</a></li><li><a href="workflows/review-source-map.html">Review a raw source map end to end</a></li><li><a href="workflows/confirm-byte-order.html">Confirm byte order from one sample</a></li><li><a href="workflows/determine-byte-order.html">Determine byte order from a one-read probe</a></li><li><a href="workflows/remap-address-notation.html">Remap address notation</a></li><li><a href="workflows/build-custom-export.html">Build a declarative custom export</a></li><li><a href="workflows/probe-resolve-finalize-tool-pack.html">Probe, resolve byte order, and finalize a tool pack</a></li><li><a href="workflows/build-tool-pack.html">Build a multi-target tool pack</a></li><li><a href="workflows/analyze-read-data.html">Analyze bounded read data</a></li><li><a href="workflows/compare-map-revisions.html">Compare map revisions</a></li></ul>
-<h2>Problems these cover</h2>
-<ul><li><a href="problems/protocol-offset-vs-reference-number.html">Users and tools can mix zero-based protocol offsets with one-based or 3xxxx/4xxxx reference notation.</a></li><li><a href="problems/register-area-identity.html">The same numeric offset can exist in coils, discrete inputs, input registers, and holding registers.</a></li><li><a href="problems/word-and-byte-order.html">Values wider than 16 bits can require different word and byte layouts.</a></li><li><a href="problems/bit-order-confusion.html">Coil and packed-bit order can be confused with multi-register byte order.</a></li><li><a href="problems/serial-queue-contention.html">Several independent polls on one serial route can contend and fail when requests are not queued.</a></li><li><a href="problems/poll-rate-control.html">A configured polling interval can differ from observed request frequency.</a></li><li><a href="problems/unit-zero-ambiguity.html">Unit identifier zero has transport and tool-specific behavior and can represent broadcast behavior in serial contexts.</a></li><li><a href="problems/illegal-address-block-boundary.html">A read block can become invalid when its start and quantity cross the server&#x27;s defined data range.</a></li><li><a href="problems/malformed-or-short-response.html">A device can return a byte count or frame length that does not match the received payload.</a></li><li><a href="problems/reusable-modpoll-config.html">Site work benefits from a reusable configuration that defines poll blocks and named references.</a></li><li><a href="problems/modscan-repeatable-test-script.html">Production and commissioning tests need repeatable request and expected-response sequences.</a></li><li><a href="problems/modbus-poll-machine-readable-project.html">A reusable Modbus Poll setup needs a documented and versioned file contract.</a></li></ul>
-<h2>Everything it can do</h2>
-<table><thead><tr><th>Task</th><th>What you get</th></tr></thead><tbody><tr><td><a href="skills/analyze-capture.html">Analyze Capture</a></td><td>Find problems in Modbus sample data</td></tr><tr><td><a href="skills/apply-review.html">Apply Review</a></td><td>Apply batched map decisions safely</td></tr><tr><td><a href="skills/build-custom-export.html">Build Custom Export</a></td><td>Build a declarative text or CSV export</td></tr><tr><td><a href="skills/build-modpoll.html">Build Modpoll (BETA)</a></td><td>Build BETA Modpoll artifacts</td></tr><tr><td><a href="skills/build-modscan.html">Build ModScan (BETA)</a></td><td>Build a BETA ModScan read plan</td></tr><tr><td><a href="skills/build-node-red.html">Build Node-RED</a></td><td>Build a disabled Modbus read flow</td></tr><tr><td><a href="skills/build-tool-pack.html">Build Tool Pack</a></td><td>Build several Modbus tool outputs</td></tr><tr><td><a href="skills/capture-sample.html">Capture Sample</a></td><td>Build a bounded one-read probe</td></tr><tr><td><a href="skills/check-byte-order.html">Check Byte Order</a></td><td>Compare every supported byte layout</td></tr><tr><td><a href="skills/check-map.html">Check Map</a></td><td>Run deterministic register-map checks</td></tr><tr><td><a href="skills/compare-maps.html">Compare Maps</a></td><td>Compare Modbus map revisions</td></tr><tr><td><a href="skills/compile-user-map.html">Compile User Map</a></td><td>Compile an OEM map into ready user outputs</td></tr><tr><td><a href="skills/extract-pdf-map.html">Extract PDF Map</a></td><td>Extract traceable rows from a PDF</td></tr><tr><td><a href="skills/modbus-help.html">Modbus Help</a></td><td>Choose the next Modbus skill or path</td></tr><tr><td><a href="skills/normalize-map.html">Normalize Map</a></td><td>Make Modbus map fields explicit</td></tr><tr><td><a href="skills/parse-map.html">Parse Map</a></td><td>Parse a structured Modbus register map</td></tr><tr><td><a href="skills/plan-reads.html">Plan Reads</a></td><td>Compile bounded Modbus read blocks</td></tr><tr><td><a href="skills/remap-addresses.html">Remap Addresses</a></td><td>Convert known Modbus address notation</td></tr><tr><td><a href="skills/review-evidence.html">Review Evidence</a></td><td>Group map evidence into exceptions</td></tr><tr><td><a href="skills/review-map.html">Review Map</a></td><td>Review a raw Modbus map end to end</td></tr></tbody></table>
+<h2 id="problems">Problems these cover</h2>
+<ul><li><a href="problems/protocol-offset-vs-reference-number.html">Address offset vs. reference number</a></li><li><a href="problems/register-area-identity.html">Register area defines address identity</a></li><li><a href="problems/word-and-byte-order.html">Word and byte order</a></li><li><a href="problems/bit-order-confusion.html">Bit order is not byte order</a></li><li><a href="problems/serial-queue-contention.html">Serial requests need one queue</a></li><li><a href="problems/poll-rate-control.html">Configured and observed poll rates can differ</a></li><li><a href="problems/unit-zero-ambiguity.html">Unit identifier 0 is ambiguous</a></li><li><a href="problems/illegal-address-block-boundary.html">Invalid read block boundaries</a></li><li><a href="problems/malformed-or-short-response.html">Malformed or short responses</a></li><li><a href="problems/reusable-modpoll-config.html">Reusable Modpoll configuration</a></li><li><a href="problems/modscan-repeatable-test-script.html">Repeatable ModScan tests</a></li><li><a href="problems/modbus-poll-machine-readable-project.html">Versioned Modbus Poll projects</a></li></ul>
+<h2 id="skills">Everything it can do</h2>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Skill catalog"><table><thead><tr><th>Task</th><th>What you get</th></tr></thead><tbody><tr><td><a href="skills/analyze-capture.html">Analyze Capture</a></td><td>Find problems in Modbus sample data</td></tr><tr><td><a href="skills/apply-review.html">Apply Review</a></td><td>Apply batched map decisions safely</td></tr><tr><td><a href="skills/build-custom-export.html">Build Custom Export</a></td><td>Build a declarative text or CSV export</td></tr><tr><td><a href="skills/build-modpoll.html">Build Modpoll (BETA)</a></td><td>Build BETA Modpoll artifacts</td></tr><tr><td><a href="skills/build-modscan.html">Build ModScan (BETA)</a></td><td>Build a BETA ModScan read plan</td></tr><tr><td><a href="skills/build-node-red.html">Build Node-RED</a></td><td>Build a disabled Modbus read flow</td></tr><tr><td><a href="skills/build-tool-pack.html">Build Tool Pack</a></td><td>Build several Modbus tool outputs</td></tr><tr><td><a href="skills/capture-sample.html">Capture Sample</a></td><td>Build a bounded one-read probe</td></tr><tr><td><a href="skills/check-byte-order.html">Check Byte Order</a></td><td>Compare every supported byte layout</td></tr><tr><td><a href="skills/check-map.html">Check Map</a></td><td>Run deterministic register-map checks</td></tr><tr><td><a href="skills/compare-maps.html">Compare Maps</a></td><td>Compare Modbus map revisions</td></tr><tr><td><a href="skills/compile-user-map.html">Compile User Map</a></td><td>Compile an OEM map into ready user outputs</td></tr><tr><td><a href="skills/extract-pdf-map.html">Extract PDF Map</a></td><td>Extract traceable rows from a PDF</td></tr><tr><td><a href="skills/modbus-help.html">Modbus Help</a></td><td>Choose the next Modbus skill or path</td></tr><tr><td><a href="skills/normalize-map.html">Normalize Map</a></td><td>Make Modbus map fields explicit</td></tr><tr><td><a href="skills/parse-map.html">Parse Map</a></td><td>Parse a structured Modbus register map</td></tr><tr><td><a href="skills/plan-reads.html">Plan Reads</a></td><td>Compile bounded Modbus read blocks</td></tr><tr><td><a href="skills/remap-addresses.html">Remap Addresses</a></td><td>Convert known Modbus address notation</td></tr><tr><td><a href="skills/review-evidence.html">Review Evidence</a></td><td>Group map evidence into exceptions</td></tr><tr><td><a href="skills/review-map.html">Review Map</a></td><td>Review a raw Modbus map end to end</td></tr></tbody></table></div>
 </main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>

@@ -1,19 +1,21 @@
 # Check Map
 
-Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems. Use when the user wants deterministic lint/validation findings on a normalized or reviewed register map.
+Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems.
 
-## Common requests
+## Use this when
 
-- Find duplicates overlaps and invalid widths in this Modbus map.
-- Please find duplicates overlaps and invalid widths in this Modbus map.
-- Can you find duplicates overlaps and invalid widths in this Modbus map.
-- I need you to find duplicates overlaps and invalid widths in this Modbus map.
-- Help me find duplicates overlaps and invalid widths in this Modbus map.
+The user wants deterministic lint/validation findings on a normalized or reviewed register map.
 
-## Try it
+## What you get back
 
-```text
-Use $check-map to validate this normalized Modbus map.
-```
+- `validation.json` - Open this report. It lists passed checks and groups problems by root cause. It does not create or modify a map.
 
-Source: `plugins/modbus-skills/skills/check-map/SKILL.md`
+## Example request
+
+Find duplicates overlaps and invalid widths in this Modbus map.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View Check Map source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/check-map/SKILL.md)

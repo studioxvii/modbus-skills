@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Compile User Map · Modbus Skills</title><meta name="description" content="Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run. Use when the user wants an organized user map or offline outputs from an OEM source rather than a specialist review chain."><link rel="canonical" href="https://studioxvii.github.io/modbus-skills/skills/compile-user-map.html"><link rel="icon" href="../favicon.svg" type="image/svg+xml"><script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Compile User Map","description":"Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run. Use when the user wants an organized user map or offline outputs from an OEM source rather than a specialist review chain.","url":"https://studioxvii.github.io/modbus-skills/skills/compile-user-map.html","keywords":["Turn this OEM Modbus map into an organized user map for temperatures alarms and status.","Please turn this OEM Modbus map into an organized user map for temperatures alarms and status.","Can you turn this OEM Modbus map into an organized user map for temperatures alarms and status.","I need you to turn this OEM Modbus map into an organized user map for temperatures alarms and status.","Help me turn this OEM Modbus map into an organized user map for temperatures alarms and status."],"isPartOf":{"@type":"CollectionPage","name":"Modbus Skills","url":"https://studioxvii.github.io/modbus-skills/"}}</script><style>:root {
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Compile User Map · Modbus Skills</title><meta name="description" content="Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run. Use when the user wants an organized user map or offline outputs from an OEM source rather than a specialist review chain."><link rel="canonical" href="https://studioxvii.github.io/modbus-skills/skills/compile-user-map.html"><link rel="icon" href="../favicon.svg" type="image/svg+xml"><script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","headline":"Compile User Map","description":"Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run. Use when the user wants an organized user map or offline outputs from an OEM source rather than a specialist review chain.","url":"https://studioxvii.github.io/modbus-skills/skills/compile-user-map.html","keywords":["Turn this OEM Modbus map into an organized user map for temperatures alarms and status."],"isPartOf":{"@type":"CollectionPage","name":"Modbus Skills","url":"https://studioxvii.github.io/modbus-skills/"}}</script><style>:root {
   --bg: #f5f6f7;
   --surface: #ffffff;
   --text: #161a1d;
@@ -32,7 +32,8 @@ header.top {
 .brand { font-weight: 650; color: var(--text); text-decoration: none; }
 nav { display: flex; gap: 0.9rem; flex-wrap: wrap; }
 nav a { color: var(--muted); text-decoration: none; font-size: 0.92rem; }
-nav a:hover, a { color: var(--accent); }
+nav a:hover, nav a.is-current, a { color: var(--accent); }
+nav a.is-current { text-decoration: underline; text-underline-offset: 0.3rem; }
 h1 { font-size: 1.75rem; line-height: 1.25; margin: 1.4rem 0 0.6rem; }
 h2 { font-size: 1.15rem; margin: 1.8rem 0 0.6rem; }
 h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
@@ -57,6 +58,12 @@ p, li { color: var(--text); }
   padding: 0.9rem 1rem;
   margin: 0.8rem 0;
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .jobs { display: grid; gap: 0.8rem; }
 @media (min-width: 760px) { .jobs { grid-template-columns: repeat(3, 1fr); } }
 .jobs h3 { margin-top: 0; }
@@ -93,4 +100,20 @@ article.skill {
   margin: 0.8rem 0;
   background: var(--surface);
 }
-footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a href="../index.html#install">Install</a></nav></header><main><h1>Compile User Map</h1><p>Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run. Use when the user wants an organized user map or offline outputs from an OEM source rather than a specialist review chain.</p><h2>Common requests</h2><ul><li>Turn this OEM Modbus map into an organized user map for temperatures alarms and status.</li><li>Please turn this OEM Modbus map into an organized user map for temperatures alarms and status.</li><li>Can you turn this OEM Modbus map into an organized user map for temperatures alarms and status.</li><li>I need you to turn this OEM Modbus map into an organized user map for temperatures alarms and status.</li><li>Help me turn this OEM Modbus map into an organized user map for temperatures alarms and status.</li></ul><h2>Try it</h2><pre>Use $compile-user-map to turn this OEM map and measurement intent into organized user-map outputs.</pre><p>Source: <code class="inline">plugins/modbus-skills/skills/compile-user-map/SKILL.md</code></p></main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>
+.related-grid { display: grid; gap: 0.8rem; }
+@media (min-width: 640px) { .related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.related-grid .panel { margin: 0; }
+.related-grid h3 { margin-top: 0; }
+.workflow-steps { padding-left: 1.4rem; }
+.workflow-steps > li { padding-left: 0.25rem; }
+.workflow-steps h3 { margin-top: 0; }
+.machine { margin-top: 1.5rem; }
+.machine summary { color: var(--accent); cursor: pointer; }
+.machine li { margin: 0.55rem 0; }
+summary, a, code { overflow-wrap: anywhere; }
+footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }
+@media (max-width: 560px) {
+  header.top { align-items: flex-start; flex-direction: column; }
+  nav { gap: 0.55rem 0.85rem; }
+  h1 { font-size: 1.55rem; }
+}</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav aria-label="Primary"><a href="../index.html">Home</a><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a class="is-current" aria-current="page" href="../index.html#skills">Skills</a></nav></header><main><p class="kicker">Read-only skill</p><h1>Compile User Map</h1><p class="lede">Compile an OEM Modbus PDF or structured register map plus measurement intent into an organized user map, JSON, CSV, and optional target outputs in one resumable run.</p><h2>Use this when</h2><p>The user wants an organized user map or offline outputs from an OEM source rather than a specialist review chain.</p><h2>What you get back</h2><ul><li><code class="inline">output/user-map.md</code> - The short human-readable map organized by measurement group.</li><li><code class="inline">output/user-map.csv</code> - The spreadsheet-ready map for people and common tools.</li><li><code class="inline">output/user-map.json</code> - The same map in the complete machine-readable format.</li></ul><h2>Example request</h2><div class="panel"><p>Turn this OEM Modbus map into an organized user map for temperatures alarms and status.</p></div><h2>Safety boundary</h2><p>This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.</p><p><a href="https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/compile-user-map/SKILL.md">View Compile User Map source on GitHub</a></p></main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>
