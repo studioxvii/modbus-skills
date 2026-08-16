@@ -62,5 +62,19 @@ installed and were not run. Generated target manifests still report
 status as BETA. The Node-RED native result above is a separate local acceptance
 record and does not replace the deterministic repository checks.
 
-A new-task plugin install is still recommended after publication. It is not a
-Modpoll or ModScan native-test gate.
+## Public install proof
+
+Recorded 2026-08-15 from a fresh clone of the public repository.
+
+- `codex plugin marketplace upgrade modbus-skills` refreshed the Git marketplace
+  snapshot to `a32a576`.
+- `codex plugin add modbus-skills@modbus-skills` installed version `0.2.0`.
+- `python3 -m pip install -e .` in a clean virtualenv failed until package
+  discovery was pinned to `plugins/modbus-skills/runtime`. After that fix, the
+  runtime imported and `pdfplumber` 0.11.10 installed.
+- `$compile-user-map` on the local E50B1 CX PDF completed in 1.5 s with
+  `awaiting-source-decision`. Extraction found no register rows and asked for a
+  corrected source instead of guessing.
+- The same public checkout compiled
+  `tests/fixtures/maps/synthetic_registers.csv` to `offline-complete` and wrote
+  `output/user-map.md`, `output/user-map.json`, and `output/user-map.csv`.

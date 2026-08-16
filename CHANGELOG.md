@@ -21,6 +21,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - Label Modpoll, Witte Modbus Poll, and ModScan exports as BETA until native
   application verification.
+- Pin setuptools package discovery so `python3 -m pip install -e .` works from a
+  fresh checkout.
 
 ### Security
 

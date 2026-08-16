@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "modbus-skills-runtime"
 version = "0.2.0"
@@ -5,6 +9,10 @@ description = "Deterministic runtime for read-only Modbus skills"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = ["pdfplumber>=0.11,<0.12"]
+
+[tool.setuptools.packages.find]
+where = ["plugins/modbus-skills/runtime"]
+include = ["modbus_skills*"]
 
 [tool.modbus-skills]
 plugin-root = "plugins/modbus-skills"

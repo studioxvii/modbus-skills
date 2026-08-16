@@ -13,7 +13,7 @@
 - [x] Ship open-source Modpoll as BETA until native verification.
 - [x] Ship licensed Witte Modbus Poll as BETA until native verification.
 - [x] Ship licensed ModScan as BETA until native verification.
-- [ ] Install the plugin from the repo marketplace in a new task.
+- [x] Install the plugin from the repo marketplace in a new task.
 - [x] Review the generated public site.
 - [x] GitHub repository is public. Modpoll and ModScan remain BETA.
 
