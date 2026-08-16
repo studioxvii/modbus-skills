@@ -1,0 +1,4 @@
+requested_measurement,group,alias,oem_point_id,name,source_register,area,protocol_offset,datatype,word_span,engineering_unit,confidence,reason,evidence_refs
+all documented Modbus read points,all documented Modbus read points,,tank_level,Tank Level,40001,holding-register,0,uint16,1,%,,,csv:2
+all documented Modbus read points,all documented Modbus read points,,flow_rate,Flow Rate,40003,holding-register,2,float32,2,L/s,,,csv:3
+all documented Modbus read points,all documented Modbus read points,,energy_total,Energy Total,30001,input-register,0,uint32,2,kWh,,,csv:4

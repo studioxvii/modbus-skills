@@ -1,5 +1,29 @@
 # Modbus Skills
 
+Read-only Modbus engineering workflows for Codex, Claude Code, Cursor, and other Agent Plugins 1.0 clients.
+
+Turn a vendor manual, spreadsheet, or register map into a usable engineering file. The generated work is read-only.
+
+## When to use
+
+Use these skills when an engineer needs a user map, a byte-order comparison, a firmware-map diff, or a bounded read-only tool pack from vendor documentation. Register writes, network discovery, unbounded polling, and invented byte orders are other work.
+
+Details: [when-to-use.md](when-to-use.md)
+
+## Start here
+
+1. [Compile User Map](skills/compile-user-map.html): OEM PDF or structured map to Markdown, JSON, and CSV.
+2. [Check Byte Order](skills/check-byte-order.html): every supported layout from one raw sample.
+3. [Build Tool Pack](skills/build-tool-pack.html): disabled read-only Node-RED, Modpoll (BETA), or ModScan (BETA) files.
+
+If the next step is unclear, use [Modbus Help](skills/modbus-help.html).
+
+## Worked example
+
+[Compile a synthetic OEM table](examples/compile-user-map.html)
+
+## Skills
+
 - [Analyze Capture](skills/analyze-capture.html): Analyze bounded Modbus samples and report communication, timing, signal, and raw-word evidence. Use when the user has capture data, JSON/CSV samples, or asks about stale, missing, flatline, or signal-quality problems.
 - [Apply Review](skills/apply-review.html): Apply a batch of explicit Modbus map decisions while preserving evidence, exclusions, holds, and audit history. Use when the user confirms layout, exclusion, or field decisions and wants them applied to a new reviewed map.
 - [Build Custom Export](skills/build-custom-export.html): Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll (BETA), or ModScan (BETA) adapter.

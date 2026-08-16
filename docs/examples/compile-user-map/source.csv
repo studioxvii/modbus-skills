@@ -1,0 +1,5 @@
+Address,Address Convention,Area,Unit ID,Route ID,Point ID,Name,Description,Data Type,Word Count,Byte Order,Scale,Engineering Unit,Access
+40001,modicon-reference,holding-register,1,lab,tank_level,Tank Level,Synthetic level transmitter,UINT16,1,,0.1,%,read-only
+40003,modicon-reference,holding-register,1,lab,flow_rate,Flow Rate,Synthetic flow; table states word-swapped CDAB,FLOAT32,2,CDAB,1.0,L/s,read-only
+30001,modicon-reference,input-register,1,lab,energy_total,Energy Total,Synthetic energy counter; table states ABCD,UINT32,2,ABCD,1,kWh,read-only
+40010,modicon-reference,holding-register,1,lab,level_setpoint,Level Setpoint,Synthetic write-only setpoint,UINT16,1,,0.1,%,write-only

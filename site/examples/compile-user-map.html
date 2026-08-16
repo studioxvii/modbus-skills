@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Compile example · Modbus Skills</title><meta name="description" content="Synthetic before-and-after compile of a mixed 40001/30001 Modbus table."><link rel="canonical" href="https://studioxvii.github.io/modbus-skills/examples/compile-user-map.html"><link rel="icon" href="../favicon.svg" type="image/svg+xml"><style>:root {
+  --bg: #f5f6f7;
+  --surface: #ffffff;
+  --text: #161a1d;
+  --muted: #5d666d;
+  --line: #dde2e4;
+  --accent: #174ea6;
+  --ok: #1b7f4e;
+  --hold: #a15c00;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+  font: 16px/1.5 system-ui, sans-serif;
+}
+main, header.top, footer.foot {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+header.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 650; color: var(--text); text-decoration: none; }
+nav { display: flex; gap: 0.9rem; flex-wrap: wrap; }
+nav a { color: var(--muted); text-decoration: none; font-size: 0.92rem; }
+nav a:hover, a { color: var(--accent); }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 1.4rem 0 0.6rem; }
+h2 { font-size: 1.15rem; margin: 1.8rem 0 0.6rem; }
+h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
+p, li { color: var(--text); }
+.lede, .muted { color: var(--muted); }
+.kicker { margin: 1.4rem 0 0; color: var(--muted); font-size: 0.85rem; letter-spacing: 0.02em; }
+.actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin: 1rem 0 1.4rem; }
+.btn {
+  display: inline-block;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.secondary { background: var(--surface); color: var(--accent); }
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.9rem 1rem;
+  margin: 0.8rem 0;
+}
+.jobs { display: grid; gap: 0.8rem; }
+@media (min-width: 760px) { .jobs { grid-template-columns: repeat(3, 1fr); } }
+.jobs h3 { margin-top: 0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+th, td { text-align: left; vertical-align: top; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86rem;
+}
+pre, .code {
+  display: block;
+  white-space: pre-wrap;
+  background: #1e2328;
+  color: #e8edf2;
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+code.inline { background: #eef1f3; color: var(--text); padding: 0.05rem 0.3rem; border-radius: 4px; }
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+.badge.ok { color: var(--ok); border-color: #b7ddc6; background: #eef8f2; }
+.badge.hold { color: var(--hold); border-color: #ead2a8; background: #fff6e8; }
+article.skill {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.9rem 1rem;
+  margin: 0.8rem 0;
+  background: var(--surface);
+}
+footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a href="../index.html#install">Install</a></nav></header><main>
+<p class="kicker">Worked example · fictional commissioning table</p>
+<h1>A messy table becomes a user map</h1>
+<p class="lede">This is a fictional commissioning table. 40001 and 30001 become protocol offsets. The read map keeps the readable points. Missing byte order pauses the job so you can choose a layout.</p>
+<h2>Source</h2>
+<div class="panel"><table><thead><tr><th>Address</th><th>Name</th><th>Data Type</th><th>Byte Order</th><th>Access</th></tr></thead><tbody><tr><td>40001</td><td>Tank Level</td><td>UINT16</td><td></td><td>read-only</td></tr><tr><td>40003</td><td>Flow Rate</td><td>FLOAT32</td><td>CDAB</td><td>read-only</td></tr><tr><td>30001</td><td>Energy Total</td><td>UINT32</td><td>ABCD</td><td>read-only</td></tr><tr><td>40010</td><td>Level Setpoint</td><td>UINT16</td><td></td><td>write-only</td></tr></tbody></table></div>
+<h2>Finished user map</h2>
+<div class="panel"><table><thead><tr><th>Point</th><th>Name</th><th>Manual address</th><th>Area</th><th>Offset</th><th>Type</th></tr></thead><tbody><tr><td>tank_level</td><td>Tank Level</td><td>40001</td><td>holding-register</td><td>0</td><td>uint16</td></tr><tr><td>flow_rate</td><td>Flow Rate</td><td>40003</td><td>holding-register</td><td>2</td><td>float32</td></tr><tr><td>energy_total</td><td>Energy Total</td><td>30001</td><td>input-register</td><td>0</td><td>uint32</td></tr></tbody></table></div>
+<h2>Readable summary</h2>
+<pre># User map
+
+## Included
+
+### all documented Modbus read points
+- `tank_level` — Tank Level (holding-register offset 0)
+- `flow_rate` — Flow Rate (holding-register offset 2)
+- `energy_total` — Energy Total (input-register offset 0)
+
+## Suggestions
+- None
+
+## Blocking exceptions
+- None
+
+## Exclusions and evidence annex
+- point.write-only-not-readable: The source declares a write-only point. It cannot enter a read plan.
+- level_setpoint: Excluded because the OEM map marks this point write-only.
+</pre>
+<h2>What stayed explicit</h2>
+<ul>
+  <li>Level Setpoint is write-only, so it is recorded as an exclusion on the read plan.</li>
+  <li>40001 and 30001 stay on the row as the manual address, then convert to offsets 0 and 2, which are the addresses on the wire.</li>
+  <li>Blank byte order on Flow Rate or Energy Total pauses the job so you can confirm ABCD, CDAB, or another layout.</li>
+</ul>
+<p>The source files are in the repository under <code class="inline">docs/examples/compile-user-map</code>.</p>
+<p><a href="../when-to-use.html">When to use this</a> · <a href="../skills/compile-user-map.html">Compile a user map</a></p>
+</main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>
