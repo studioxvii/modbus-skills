@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://studioxvii.github.io/modbus-skills/</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/when-to-use.html</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/when-to-use.md</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/examples/compile-user-map.html</loc></url>
+  <url><loc>https://studioxvii.github.io/modbus-skills/examples/compile-user-map.md</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/analyze-capture.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/apply-review.html</loc></url>
   <url><loc>https://studioxvii.github.io/modbus-skills/skills/build-custom-export.html</loc></url>
