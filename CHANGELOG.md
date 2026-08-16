@@ -29,4 +29,4 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Read-only generation only: no writes, broadcasts, discovery scans, stored
   credentials, or unbounded polling.
 
-[0.2.0]: https://github.com/studioxvii/modbus-skills/tree/main
+[0.2.0]: https://github.com/studioxvii/modbus-skills/releases/tag/v0.2.0
