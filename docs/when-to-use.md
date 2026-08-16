@@ -17,7 +17,7 @@ setup from vendor documentation.
 Start by asking for a user map from the vendor file. If you want help choosing
 the next step, ask for that.
 
-## Other work
+## Out of scope
 
 - Register writes, coil forces, and broadcasts.
 - Network discovery and unbounded polling.
@@ -33,4 +33,4 @@ conversions, and write-only points wait for a stated value or an explicit
 exclusion.
 
 See the [worked example](examples/compile-user-map/README.md) for a table that
-finishes, and the same table that pauses for a byte-order choice.
+finishes, and a separate table that pauses for a byte-order choice.

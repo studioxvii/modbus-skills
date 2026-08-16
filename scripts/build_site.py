@@ -22,30 +22,6 @@ EXAMPLE = ROOT / "docs" / "examples" / "compile-user-map"
 SITE = ROOT / "site"
 BASE_URL = os.environ.get("MODBUS_SKILLS_SITE_URL", "https://studioxvii.github.io/modbus-skills").rstrip("/")
 
-PROBLEM_TITLES = {
-    "protocol-offset-vs-reference-number": "Address offset vs. reference number",
-    "register-area-identity": "The register area is part of the address",
-    "word-and-byte-order": "Word and byte order",
-    "bit-order-confusion": "Bit order is not byte order",
-    "serial-queue-contention": "Serial requests need one queue",
-    "poll-rate-control": "Configured and observed poll rates can differ",
-    "unit-zero-ambiguity": "Unit identifier 0 is ambiguous",
-    "illegal-address-block-boundary": "A read block can cross a valid address range",
-    "malformed-or-short-response": "A response can be shorter than it claims",
-    "reusable-modpoll-config": "Reusable Modpoll configuration",
-    "modscan-repeatable-test-script": "Repeatable ModScan tests",
-    "modbus-poll-machine-readable-project": "Versioned Modbus Poll projects",
-}
-
-SOURCE_TYPE_LABELS = {
-    "official-specification": "Modbus specification",
-    "official-tool-documentation": "Official tool documentation",
-    "official-tool-example": "Official tool example",
-    "project-discussion": "Project discussion",
-    "project-documentation": "Project documentation",
-    "project-issue": "Project issue",
-}
-
 SCHEMA_LABELS = {
     "address-convention-request/v1": "the known source and target address conventions",
     "after-modbus-map/v1": "the reviewed map after the change",
@@ -254,35 +230,6 @@ def _schema_label(schema_id: str) -> str:
     return f"a {name}"
 
 
-def _source_label(source: dict[str, str]) -> str:
-    parsed = urlparse(source["url"])
-    host = parsed.netloc.removeprefix("www.")
-    parts = [part for part in parsed.path.split("/") if part]
-    if host == "github.com" and len(parts) >= 2:
-        project_names = {
-            "FluentModbus": "FluentModbus",
-            "core": "Home Assistant",
-            "modpoll": "gavinying/modpoll",
-            "node-red-contrib-modbus": "node-red-contrib-modbus",
-            "pymodbus": "Pymodbus",
-        }
-        project = project_names.get(parts[1], parts[1])
-        suffixes = {
-            "project-discussion": "discussion",
-            "project-documentation": "documentation",
-            "project-issue": "issue",
-        }
-        if source["type"] in suffixes:
-            return f'{project} {suffixes[source["type"]]}'
-    if host.endswith("modbus.org"):
-        return "Modbus application protocol"
-    if host == "modbustools.com":
-        return "Witte Modbus Poll XML example" if "pollxml" in parsed.path else "Witte Modbus Poll manual"
-    if host == "win-tech.com":
-        return "WinTECH ModScan documentation"
-    return SOURCE_TYPE_LABELS.get(source["type"], source["type"])
-
-
 def _page(
     *,
     title: str,
@@ -414,7 +361,7 @@ def render() -> dict[Path, str]:
     )
     research_links = "".join(
         f'<li><a href="problems/{_esc(record["id"])}.html">'
-        f'{_esc(PROBLEM_TITLES[record["id"]])}</a></li>'
+        f'{_esc(record["title"])}</a></li>'
         for record in research
     )
     skill_rows = "".join(
@@ -487,7 +434,12 @@ def render() -> dict[Path, str]:
 cd modbus-skills
 codex plugin marketplace add "$PWD"
 codex plugin add modbus-skills@modbus-skills</pre>
-<p>For Cursor, Claude Code, and Agent Plugins 1.0, see <a href="https://github.com/studioxvii/modbus-skills#build-for-another-client">Build for another client in the README</a>.</p>
+<p>Other clients use a generated package:</p>
+<ul>
+  <li><strong>Cursor:</strong> use <code class="inline">dist/plugins/cursor</code> as the local marketplace package.</li>
+  <li><strong>Claude Code:</strong> use <code class="inline">dist/plugins/claude</code>, then invoke a skill as <code class="inline">/modbus-skills:check-map</code>.</li>
+</ul>
+<p><a href="https://github.com/studioxvii/modbus-skills#build-for-another-client">Build the client packages from the README</a>.</p>
 <h2>Safety</h2>
 <p>These tools produce read-only maps, bounded poll plans, and a short question list when a manual is unclear.</p>
 <h2 id="workflows">Longer jobs</h2>
@@ -639,7 +591,7 @@ codex plugin add modbus-skills@modbus-skills</pre>
             "<h2>Safety boundary</h2><p>This skill does not write registers, force coils, "
             "broadcast, scan a network, or start unbounded polling. Unresolved engineering "
             "fields stay visible.</p>"
-            f'<p><a href="{_esc(source_url)}">View the skill source on GitHub</a></p>'
+            f'<p><a href="{_esc(source_url)}">View {_esc(title)} source on GitHub</a></p>'
         )
         files[SITE / "skills" / f'{skill["id"]}.html'] = _page(
             title=f"{title} · Modbus Skills",
@@ -660,7 +612,7 @@ codex plugin add modbus-skills@modbus-skills</pre>
             "## Safety boundary\n\nThis skill does not write registers, force coils, "
             "broadcast, scan a network, or start unbounded polling. Unresolved engineering "
             "fields stay visible.\n\n"
-            f"[View the skill source on GitHub]({source_url})\n"
+            f"[View {skill['display_name']} source on GitHub]({source_url})\n"
         )
 
     llms = (
@@ -801,7 +753,7 @@ codex plugin add modbus-skills@modbus-skills</pre>
         canonical = f'{BASE_URL}/problems/{record["id"]}.html'
         sources_html = "".join(
             f'<li><a href="{_esc(source["url"])}">'
-            f'{_esc(_source_label(source))}</a> '
+            f'{_esc(source["label"])}</a> '
             f'<span class="muted">{_esc(urlparse(source["url"]).netloc.removeprefix("www."))}</span></li>'
             for source in record["sources"]
         )
@@ -811,7 +763,7 @@ codex plugin add modbus-skills@modbus-skills</pre>
             f'<p>{_esc(skills_by_id[skill_id].get("short_description") or _skill_copy(skills_by_id[skill_id])[0])}</p></article>'
             for skill_id in record["skills"]
         )
-        problem_title = PROBLEM_TITLES[record["id"]]
+        problem_title = record["title"]
         files[SITE / "problems" / f'{record["id"]}.html'] = _page(
             title=f'{problem_title} · Modbus Skills',
             description=record["evidence"],
@@ -837,7 +789,7 @@ codex plugin add modbus-skills@modbus-skills</pre>
             '<p class="lede">That address does not match a page in this site.</p>'
             f'<p class="actions"><a class="btn primary" href="{BASE_URL}/">Go home</a>'
             f'<a class="btn secondary" href="{BASE_URL}/when-to-use.html">When to use</a>'
-            f'<a class="btn secondary" href="{BASE_URL}/#skills">Browse skills</a></p>'
+            f'<a class="btn secondary" href="{BASE_URL}/examples/compile-user-map.html">Example</a></p>'
         ),
         noindex=True,
         absolute_navigation=True,

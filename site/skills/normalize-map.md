@@ -18,4 +18,4 @@ Normalize this mixed-convention Modbus map without guessing.
 
 This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
 
-[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/normalize-map/SKILL.md)
+[View Normalize Map source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/normalize-map/SKILL.md)

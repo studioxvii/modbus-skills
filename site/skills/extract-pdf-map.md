@@ -18,4 +18,4 @@ Extract register tables with page evidence from this PDF.
 
 This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
 
-[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/extract-pdf-map/SKILL.md)
+[View Extract PDF Map source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/extract-pdf-map/SKILL.md)

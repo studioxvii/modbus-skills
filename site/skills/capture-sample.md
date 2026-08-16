@@ -20,4 +20,4 @@ Create a raw read probe so I can determine byte order.
 
 This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
 
-[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/capture-sample/SKILL.md)
+[View Capture Sample source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/capture-sample/SKILL.md)

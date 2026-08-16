@@ -18,4 +18,4 @@ Help me choose the right Modbus workflow.
 
 This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
 
-[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/modbus-help/SKILL.md)
+[View Modbus Help source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/modbus-help/SKILL.md)

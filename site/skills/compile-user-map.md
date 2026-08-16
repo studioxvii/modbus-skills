@@ -20,4 +20,4 @@ Turn this OEM Modbus map into an organized user map for temperatures alarms and 
 
 This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
 
-[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/compile-user-map/SKILL.md)
+[View Compile User Map source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/compile-user-map/SKILL.md)

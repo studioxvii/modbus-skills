@@ -18,4 +18,4 @@ Parse this CSV Modbus register map with rejected-row evidence.
 
 This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
 
-[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/parse-map/SKILL.md)
+[View Parse Map source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/parse-map/SKILL.md)

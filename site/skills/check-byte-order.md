@@ -18,4 +18,4 @@ Evaluate ABCD BADC CDAB and DCBA from these words.
 
 This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
 
-[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/check-byte-order/SKILL.md)
+[View Check Byte Order source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/check-byte-order/SKILL.md)

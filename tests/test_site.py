@@ -45,9 +45,9 @@ class SiteTests(unittest.TestCase):
                 self.assertIn("Use this when", html_text)
                 self.assertIn("What you get back", html_text)
                 self.assertEqual(1, html_text.count("Example request"))
-                self.assertIn("View the skill source on GitHub", html_text)
+                self.assertIn(f'View {skill["display_name"]} source on GitHub', html_text)
                 self.assertIn("## What you get back", markdown_text)
-                self.assertIn("View the skill source on GitHub", markdown_text)
+                self.assertIn(f'View {skill["display_name"]} source on GitHub', markdown_text)
                 self.assertNotIn("Common requests", html_text)
                 self.assertNotIn(skill["default_prompt"], html_text)
 
@@ -63,7 +63,10 @@ class SiteTests(unittest.TestCase):
         self.assertNotIn("$compile-user-map", page)
         self.assertIn("examples/compile-user-map.html", page)
         self.assertIn("Install in Codex", page)
-        self.assertIn("Build for another client in the README", page)
+        self.assertIn("dist/plugins/cursor", page)
+        self.assertIn("dist/plugins/claude", page)
+        self.assertIn("/modbus-skills:check-map", page)
+        self.assertIn("Build the client packages from the README", page)
         self.assertIn('aria-current="page"', page)
 
     def test_when_to_use_and_example_pages_exist(self) -> None:
@@ -80,6 +83,19 @@ class SiteTests(unittest.TestCase):
         self.assertIn("40003 becomes holding-register offset 2", example)
         self.assertIn("30001 becomes input-register offset 0", example)
         self.assertNotIn("awaiting-source-decision", example)
+
+    def test_source_docs_match_the_public_example(self) -> None:
+        when_to_use = (ROOT / "docs" / "when-to-use.md").read_text(encoding="utf-8")
+        example_readme = (
+            ROOT / "docs" / "examples" / "compile-user-map" / "README.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("## Out of scope", when_to_use)
+        self.assertNotIn("## Other work", when_to_use)
+        self.assertIn("a separate table that pauses", when_to_use)
+        self.assertIn("40001 to holding-register", example_readme)
+        self.assertIn("40003 to holding-register offset 2", example_readme)
+        self.assertIn("30001 to input-register offset", example_readme)
+        self.assertIn("A separate unresolved run", example_readme)
 
     def test_tables_scroll_inside_the_page_on_small_screens(self) -> None:
         home = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
@@ -106,8 +122,8 @@ class SiteTests(unittest.TestCase):
     def test_problem_pages_use_human_titles_labels_and_skill_names(self) -> None:
         page = (ROOT / "site" / "problems" / "protocol-offset-vs-reference-number.html").read_text(encoding="utf-8")
         self.assertIn("<h1>Address offset vs. reference number</h1>", page)
-        self.assertIn("Modbus application protocol", page)
-        self.assertIn("Pymodbus issue", page)
+        self.assertIn("Modbus Application Protocol", page)
+        self.assertIn("Pymodbus #2565", page)
         self.assertIn(">Normalize Map</a>", page)
         self.assertNotIn("official-specification", page)
         self.assertNotIn(">normalize-map</a>", page)
@@ -142,6 +158,7 @@ class SiteTests(unittest.TestCase):
         self.assertIn("Page not found", page)
         self.assertIn('name="robots" content="noindex"', page)
         self.assertIn("https://studioxvii.github.io/modbus-skills/", page)
+        self.assertIn("examples/compile-user-map.html", page)
         self.assertNotIn("404.html", sitemap)
 
     def test_internal_page_links_resolve(self) -> None:
