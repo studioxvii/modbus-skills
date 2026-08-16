@@ -1,19 +1,23 @@
 # Build Custom Export
 
-Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map. Use when the user needs a reusable text or CSV exporter and not a Node-RED, Modpoll (BETA), or ModScan (BETA) adapter.
+Build a deterministic declarative text or CSV export from a documented example and canonical Modbus map.
 
-## Common requests
+## Use this when
 
-- Define a declarative Modbus CSV format from this example.
-- Please define a declarative Modbus CSV format from this example.
-- Can you define a declarative Modbus CSV format from this example.
-- I need you to define a declarative Modbus CSV format from this example.
-- Help me define a declarative Modbus CSV format from this example.
+The user needs a reusable text or CSV exporter and not a Node-RED, Modpoll (BETA), or ModScan (BETA) adapter.
 
-## Try it
+## What you get back
 
-```text
-Use $build-custom-export to reproduce this documented export format.
-```
+- `rendered-output.txt` - Open or import this generated data file.
+- `format-config.json` - Keep this small recipe so the same format can be generated again.
+- `evidence.json` - Normally ignore this. It records which example and map produced the output.
 
-Source: `plugins/modbus-skills/skills/build-custom-export/SKILL.md`
+## Example request
+
+Define a declarative Modbus CSV format from this example.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/build-custom-export/SKILL.md)

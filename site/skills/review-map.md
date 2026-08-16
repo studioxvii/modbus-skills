@@ -1,19 +1,23 @@
 # Review Map
 
-Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome. Use when the user wants end-to-end source-map review rather than an organized user-map compile.
+Review a raw or messy Modbus register map through parsing, normalization, linting, and grouped evidence exceptions when source review itself is the requested outcome.
 
-## Common requests
+## Use this when
 
-- Clean and validate this complete Modbus register map.
-- Please clean and validate this complete Modbus register map.
-- Can you clean and validate this complete Modbus register map.
-- I need you to clean and validate this complete Modbus register map.
-- Help me clean and validate this complete Modbus register map.
+The user wants end-to-end source-map review rather than an organized user-map compile.
 
-## Try it
+## What you get back
 
-```text
-Use $review-map to review this raw register map without guessing.
-```
+- `map-draft.json` - Start here if you need the normalized draft map.
+- `review.json` - Open this for the compact evidence status and grouped exceptions.
+- `lint.json` - Detailed deterministic validation findings; normally use it only to investigate a problem.
 
-Source: `plugins/modbus-skills/skills/review-map/SKILL.md`
+## Example request
+
+Clean and validate this complete Modbus register map.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/review-map/SKILL.md)

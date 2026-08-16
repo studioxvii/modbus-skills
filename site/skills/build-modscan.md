@@ -1,19 +1,23 @@
 # Build ModScan (BETA)
 
-Build deterministic read-only BETA ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
+Build deterministic read-only BETA ModScan setup, poll-plan, point-map, and protocol test-message artifacts.
 
-## Common requests
+## Use this when
 
-- Generate a documented ModScan read plan.
-- Please generate a documented ModScan read plan.
-- Can you generate a documented ModScan read plan.
-- I need you to generate a documented ModScan read plan.
-- Help me generate a documented ModScan read plan.
+The user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
 
-## Try it
+## What you get back
 
-```text
-Use $build-modscan to build a read-only ModScan setup.
-```
+- `modscan/read-plan.csv` - The bounded read blocks to enter in ModScan.
+- `modscan/point-map.csv` - The names and meanings of the returned registers.
+- `modscan/test-message-plan.csv` - Optional protocol test messages for verification.
 
-Source: `plugins/modbus-skills/skills/build-modscan/SKILL.md`
+## Example request
+
+Generate a documented ModScan read plan.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/build-modscan/SKILL.md)

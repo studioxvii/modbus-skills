@@ -32,7 +32,8 @@ header.top {
 .brand { font-weight: 650; color: var(--text); text-decoration: none; }
 nav { display: flex; gap: 0.9rem; flex-wrap: wrap; }
 nav a { color: var(--muted); text-decoration: none; font-size: 0.92rem; }
-nav a:hover, a { color: var(--accent); }
+nav a:hover, nav a.is-current, a { color: var(--accent); }
+nav a.is-current { text-decoration: underline; text-underline-offset: 0.3rem; }
 h1 { font-size: 1.75rem; line-height: 1.25; margin: 1.4rem 0 0.6rem; }
 h2 { font-size: 1.15rem; margin: 1.8rem 0 0.6rem; }
 h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
@@ -57,6 +58,12 @@ p, li { color: var(--text); }
   padding: 0.9rem 1rem;
   margin: 0.8rem 0;
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .jobs { display: grid; gap: 0.8rem; }
 @media (min-width: 760px) { .jobs { grid-template-columns: repeat(3, 1fr); } }
 .jobs h3 { margin-top: 0; }
@@ -93,14 +100,30 @@ article.skill {
   margin: 0.8rem 0;
   background: var(--surface);
 }
-footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a href="../index.html#install">Install</a></nav></header><main>
+.related-grid { display: grid; gap: 0.8rem; }
+@media (min-width: 640px) { .related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.related-grid .panel { margin: 0; }
+.related-grid h3 { margin-top: 0; }
+.workflow-steps { padding-left: 1.4rem; }
+.workflow-steps > li { padding-left: 0.25rem; }
+.workflow-steps h3 { margin-top: 0; }
+.machine { margin-top: 1.5rem; }
+.machine summary { color: var(--accent); cursor: pointer; }
+.machine li { margin: 0.55rem 0; }
+summary, a, code { overflow-wrap: anywhere; }
+footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }
+@media (max-width: 560px) {
+  header.top { align-items: flex-start; flex-direction: column; }
+  nav { gap: 0.55rem 0.85rem; }
+  h1 { font-size: 1.55rem; }
+}</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav aria-label="Primary"><a href="../index.html">Home</a><a href="../when-to-use.html">When to use</a><a class="is-current" aria-current="page" href="../examples/compile-user-map.html">Example</a><a href="../index.html#install">Install</a></nav></header><main>
 <p class="kicker">Worked example · fictional commissioning table</p>
 <h1>A messy table becomes a user map</h1>
-<p class="lede">This is a fictional commissioning table. 40001 and 30001 become protocol offsets. The read map keeps the readable points. Missing byte order pauses the job so you can choose a layout.</p>
-<h2>Source</h2>
-<div class="panel"><table><thead><tr><th>Address</th><th>Name</th><th>Data Type</th><th>Byte Order</th><th>Access</th></tr></thead><tbody><tr><td>40001</td><td>Tank Level</td><td>UINT16</td><td></td><td>read-only</td></tr><tr><td>40003</td><td>Flow Rate</td><td>FLOAT32</td><td>CDAB</td><td>read-only</td></tr><tr><td>30001</td><td>Energy Total</td><td>UINT32</td><td>ABCD</td><td>read-only</td></tr><tr><td>40010</td><td>Level Setpoint</td><td>UINT16</td><td></td><td>write-only</td></tr></tbody></table></div>
+<p class="lede">The first table has the information needed to finish. The result keeps the readable points, preserves the manual addresses, and records the write-only point as an exclusion.</p>
+<h2>Resolved source</h2>
+<div class="panel"><div class="table-scroll" tabindex="0" role="region" aria-label="Resolved source table"><table><thead><tr><th>Address</th><th>Name</th><th>Data Type</th><th>Byte Order</th><th>Access</th></tr></thead><tbody><tr><td>40001</td><td>Tank Level</td><td>UINT16</td><td></td><td>read-only</td></tr><tr><td>40003</td><td>Flow Rate</td><td>FLOAT32</td><td>CDAB</td><td>read-only</td></tr><tr><td>30001</td><td>Energy Total</td><td>UINT32</td><td>ABCD</td><td>read-only</td></tr><tr><td>40010</td><td>Level Setpoint</td><td>UINT16</td><td></td><td>write-only</td></tr></tbody></table></div></div>
 <h2>Finished user map</h2>
-<div class="panel"><table><thead><tr><th>Point</th><th>Name</th><th>Manual address</th><th>Area</th><th>Offset</th><th>Type</th></tr></thead><tbody><tr><td>tank_level</td><td>Tank Level</td><td>40001</td><td>holding-register</td><td>0</td><td>uint16</td></tr><tr><td>flow_rate</td><td>Flow Rate</td><td>40003</td><td>holding-register</td><td>2</td><td>float32</td></tr><tr><td>energy_total</td><td>Energy Total</td><td>30001</td><td>input-register</td><td>0</td><td>uint32</td></tr></tbody></table></div>
+<div class="panel"><div class="table-scroll" tabindex="0" role="region" aria-label="Finished user map"><table><thead><tr><th>Point</th><th>Name</th><th>Manual address</th><th>Area</th><th>Offset</th><th>Type</th></tr></thead><tbody><tr><td>tank_level</td><td>Tank Level</td><td>40001</td><td>holding-register</td><td>0</td><td>uint16</td></tr><tr><td>flow_rate</td><td>Flow Rate</td><td>40003</td><td>holding-register</td><td>2</td><td>float32</td></tr><tr><td>energy_total</td><td>Energy Total</td><td>30001</td><td>input-register</td><td>0</td><td>uint32</td></tr></tbody></table></div></div>
 <h2>Readable summary</h2>
 <pre># User map
 
@@ -124,9 +147,15 @@ footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }<
 <h2>What stayed explicit</h2>
 <ul>
   <li>Level Setpoint is write-only, so it is recorded as an exclusion on the read plan.</li>
-  <li>40001 and 30001 stay on the row as the manual address, then convert to offsets 0 and 2, which are the addresses on the wire.</li>
-  <li>Blank byte order on Flow Rate or Energy Total pauses the job so you can confirm ABCD, CDAB, or another layout.</li>
+  <li>40001 becomes holding-register offset 0. 40003 becomes holding-register offset 2. 30001 becomes input-register offset 0.</li>
+  <li>Flow Rate uses CDAB. Energy Total uses ABCD. No blocking exception remains in this completed result.</li>
 </ul>
+<h2>What a pause looks like</h2>
+<p>This separate source leaves byte order blank for the two multi-register values. The skill does not choose a layout. It holds those rows and asks you to confirm the documented or tested order.</p>
+<div class="panel">
+  <p><span class="badge hold">Needs a decision</span> Flow Rate and Energy Total have no byte order.</p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Source table with unresolved byte order"><table><thead><tr><th>Address</th><th>Name</th><th>Data Type</th><th>Byte Order</th><th>Access</th></tr></thead><tbody><tr><td>40001</td><td>Tank Level</td><td>UINT16</td><td></td><td>read-only</td></tr><tr><td>40003</td><td>Flow Rate</td><td>FLOAT32</td><td></td><td>read-only</td></tr><tr><td>30001</td><td>Energy Total</td><td>UINT32</td><td></td><td>read-only</td></tr><tr><td>40010</td><td>Level Setpoint</td><td>UINT16</td><td></td><td>write-only</td></tr></tbody></table></div>
+</div>
 <p>The source files are in the repository under <code class="inline">docs/examples/compile-user-map</code>.</p>
 <p><a href="../when-to-use.html">When to use this</a> · <a href="../skills/compile-user-map.html">Compile a user map</a></p>
 </main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>

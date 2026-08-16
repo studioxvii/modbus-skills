@@ -1,19 +1,21 @@
 # Remap Addresses
 
-Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation. Use when the user asks to convert 40001-style references, protocol offsets, or another known address convention across a map.
+Preview and apply a known map-wide conversion between Modbus offsets and Modicon reference notation.
 
-## Common requests
+## Use this when
 
-- Convert these 40001 references to protocol offsets.
-- Please convert these 40001 references to protocol offsets.
-- Can you convert these 40001 references to protocol offsets.
-- I need you to convert these 40001 references to protocol offsets.
-- Help me convert these 40001 references to protocol offsets.
+The user asks to convert 40001-style references, protocol offsets, or another known address convention across a map.
 
-## Try it
+## What you get back
 
-```text
-Use $remap-addresses to preview this address-convention change.
-```
+- `preview.json` / converted map - Review every old and new address, then use the applied map when the conversion is collision-free. The input map remains unchanged.
 
-Source: `plugins/modbus-skills/skills/remap-addresses/SKILL.md`
+## Example request
+
+Convert these 40001 references to protocol offsets.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/remap-addresses/SKILL.md)

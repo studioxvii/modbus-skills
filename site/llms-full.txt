@@ -6,7 +6,7 @@ Turn a vendor manual, spreadsheet, or register map into a usable engineering fil
 
 ## When to use
 
-Use these skills when an engineer needs a user map, a byte-order comparison, a firmware-map diff, or a bounded read-only tool pack from vendor documentation. Register writes, network discovery, unbounded polling, and invented byte orders are other work.
+Use these skills when an engineer needs a user map, a byte-order comparison, a firmware-map diff, or a bounded read-only tool pack from vendor documentation. Register writes, network discovery, unbounded polling, and invented byte orders are out of scope.
 
 Details: [when-to-use.md](when-to-use.md)
 

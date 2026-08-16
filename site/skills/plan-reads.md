@@ -1,19 +1,21 @@
 # Plan Reads
 
-Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04. Use when a validated map is ready and the user needs a read plan before building Node-RED, Modpoll (BETA), ModScan (BETA), or a tool pack.
+Compile validated Modbus points into deterministic, bounded read blocks for function codes 01 through 04.
 
-## Common requests
+## Use this when
 
-- Group these Modbus points into bounded reads.
-- Please group these Modbus points into bounded reads.
-- Can you group these Modbus points into bounded reads.
-- I need you to group these Modbus points into bounded reads.
-- Help me group these Modbus points into bounded reads.
+A validated map is ready and the user needs a read plan before building Node-RED, Modpoll (BETA), ModScan (BETA), or a tool pack.
 
-## Try it
+## What you get back
 
-```text
-Use $plan-reads to compile safe reads for this validated map.
-```
+- `read-plan.json` - Use this machine-readable list of bounded Modbus requests when building a target tool. It also records which points each request returns and why blocks were split.
 
-Source: `plugins/modbus-skills/skills/plan-reads/SKILL.md`
+## Example request
+
+Group these Modbus points into bounded reads.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/plan-reads/SKILL.md)

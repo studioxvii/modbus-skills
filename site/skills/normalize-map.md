@@ -1,19 +1,21 @@
 # Normalize Map
 
-Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states. Use when candidate rows exist and need canonical engineering fields, holds, and source-preserving normalization.
+Normalize Modbus candidates into explicit offsets, areas, units, datatypes, widths, access, and byte-order states.
 
-## Common requests
+## Use this when
 
-- Normalize this mixed-convention Modbus map without guessing.
-- Please normalize this mixed-convention Modbus map without guessing.
-- Can you normalize this mixed-convention Modbus map without guessing.
-- I need you to normalize this mixed-convention Modbus map without guessing.
-- Help me normalize this mixed-convention Modbus map without guessing.
+Candidate rows exist and need canonical engineering fields, holds, and source-preserving normalization.
 
-## Try it
+## What you get back
 
-```text
-Use $normalize-map to normalize these candidate register rows.
-```
+- `normalized.json` - Use this canonical map for validation and later steps. It keeps source values, resolved engineering fields, warnings, and grouped unresolved holds together.
 
-Source: `plugins/modbus-skills/skills/normalize-map/SKILL.md`
+## Example request
+
+Normalize this mixed-convention Modbus map without guessing.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/normalize-map/SKILL.md)

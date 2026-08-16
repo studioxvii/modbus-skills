@@ -32,7 +32,8 @@ header.top {
 .brand { font-weight: 650; color: var(--text); text-decoration: none; }
 nav { display: flex; gap: 0.9rem; flex-wrap: wrap; }
 nav a { color: var(--muted); text-decoration: none; font-size: 0.92rem; }
-nav a:hover, a { color: var(--accent); }
+nav a:hover, nav a.is-current, a { color: var(--accent); }
+nav a.is-current { text-decoration: underline; text-underline-offset: 0.3rem; }
 h1 { font-size: 1.75rem; line-height: 1.25; margin: 1.4rem 0 0.6rem; }
 h2 { font-size: 1.15rem; margin: 1.8rem 0 0.6rem; }
 h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
@@ -57,6 +58,12 @@ p, li { color: var(--text); }
   padding: 0.9rem 1rem;
   margin: 0.8rem 0;
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .jobs { display: grid; gap: 0.8rem; }
 @media (min-width: 760px) { .jobs { grid-template-columns: repeat(3, 1fr); } }
 .jobs h3 { margin-top: 0; }
@@ -93,4 +100,20 @@ article.skill {
   margin: 0.8rem 0;
   background: var(--surface);
 }
-footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a href="../index.html#install">Install</a></nav></header><main><h1>Compare map revisions</h1><p>Report stable field changes without collapsing points from different routes, areas, or unit identifiers.</p><h2>Steps</h2><ol><li><a href="review-source-map.html">workflow: review-source-map</a>: <code class="inline">before-source-bundle/v1</code> → <code class="inline">before-modbus-map/v1</code></li><li><a href="review-source-map.html">workflow: review-source-map</a>: <code class="inline">after-source-bundle/v1</code> → <code class="inline">after-modbus-map/v1</code></li><li><a href="../skills/compare-maps.html">compare-maps</a>: <code class="inline">before-modbus-map/v1, after-modbus-map/v1</code> → <code class="inline">modbus-map-diff/v1</code></li><li>human-gate: <code class="inline">modbus-map-diff/v1</code> → <code class="inline">review-disposition/v1</code><br>Group moved, added, removed, and changed points by cause and request one acceptance decision only when acceptance or deployment is in scope.</li></ol><h2>Stop conditions</h2><ul><li>map schema mismatch</li><li>unresolved composite identity</li><li>unreviewed source-map holds</li></ul></main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>
+.related-grid { display: grid; gap: 0.8rem; }
+@media (min-width: 640px) { .related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.related-grid .panel { margin: 0; }
+.related-grid h3 { margin-top: 0; }
+.workflow-steps { padding-left: 1.4rem; }
+.workflow-steps > li { padding-left: 0.25rem; }
+.workflow-steps h3 { margin-top: 0; }
+.machine { margin-top: 1.5rem; }
+.machine summary { color: var(--accent); cursor: pointer; }
+.machine li { margin: 0.55rem 0; }
+summary, a, code { overflow-wrap: anywhere; }
+footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }
+@media (max-width: 560px) {
+  header.top { align-items: flex-start; flex-direction: column; }
+  nav { gap: 0.55rem 0.85rem; }
+  h1 { font-size: 1.55rem; }
+}</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav aria-label="Primary"><a href="../index.html">Home</a><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a class="is-current" aria-current="page" href="../index.html#workflows">Workflows</a></nav></header><main><p class="kicker">Workflow · 4 steps</p><h1>Compare map revisions</h1><p class="lede">Report stable field changes without collapsing points from different routes, areas, or unit identifiers.</p><div class="related-grid"><section class="panel"><h2>You start with</h2><ul><li>the older source map</li></ul></section><section class="panel"><h2>You receive</h2><p>your recorded review decision.</p></section></div><h2>How it works</h2><ol class="workflow-steps"><li class="panel"><h3><a href="review-source-map.html">Review a raw source map end to end</a></h3><p>Produce a reviewed draft and compact exception queue when source-map review itself is the requested outcome.</p><p class="muted">Starts with the older source map. Produces the reviewed map before the change.</p></li><li class="panel"><h3><a href="review-source-map.html">Review a raw source map end to end</a></h3><p>Produce a reviewed draft and compact exception queue when source-map review itself is the requested outcome.</p><p class="muted">Starts with the newer source map. Produces the reviewed map after the change.</p></li><li class="panel"><h3><a href="../skills/compare-maps.html">Compare Maps</a></h3><p>Compare Modbus map revisions</p><p class="muted">Starts with the reviewed map before the change, the reviewed map after the change. Produces added, removed, moved, and changed points.</p></li><li class="panel"><h3>Your decision</h3><p>Group moved, added, removed, and changed points by cause and request one acceptance decision only when acceptance or deployment is in scope.</p><p class="muted">Starts with added, removed, moved, and changed points. Produces your recorded review decision.</p></li></ol><h2>When it stops</h2><ul><li>Map schema mismatch.</li><li>Unresolved composite identity.</li><li>Unreviewed source-map holds.</li></ul><details class="machine"><summary>Show machine-readable contracts</summary><ol><li><code class="inline">before-source-bundle/v1</code> → <code class="inline">before-modbus-map/v1</code></li><li><code class="inline">after-source-bundle/v1</code> → <code class="inline">after-modbus-map/v1</code></li><li><code class="inline">before-modbus-map/v1</code>, <code class="inline">after-modbus-map/v1</code> → <code class="inline">modbus-map-diff/v1</code></li><li><code class="inline">modbus-map-diff/v1</code> → <code class="inline">review-disposition/v1</code></li></ol><p><a href="../workflows.json">View all workflow data</a></p></details></main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>

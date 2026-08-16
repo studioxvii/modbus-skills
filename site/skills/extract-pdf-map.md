@@ -1,19 +1,21 @@
 # Extract PDF Map
 
-Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range. Use when the source is a PDF register manual and the user wants extraction evidence before normalization or compilation.
+Extract traceable Modbus register candidates, source coverage, and page evidence from a PDF manual or bounded page range.
 
-## Common requests
+## Use this when
 
-- Extract register tables with page evidence from this PDF.
-- Please extract register tables with page evidence from this PDF.
-- Can you extract register tables with page evidence from this PDF.
-- I need you to extract register tables with page evidence from this PDF.
-- Help me extract register tables with page evidence from this PDF.
+The source is a PDF register manual and the user wants extraction evidence before normalization or compilation.
 
-## Try it
+## What you get back
 
-```text
-Use $extract-pdf-map to extract register rows from these PDF pages.
-```
+- `pdf-extraction.json` - Open this only when reviewing extraction. It contains the candidate rows, source locations, automated checks, rejected rows, and grouped exceptions. It does not contain page images or full OCR text.
 
-Source: `plugins/modbus-skills/skills/extract-pdf-map/SKILL.md`
+## Example request
+
+Extract register tables with page evidence from this PDF.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/extract-pdf-map/SKILL.md)

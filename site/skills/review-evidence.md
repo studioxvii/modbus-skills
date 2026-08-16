@@ -1,19 +1,21 @@
 # Review Evidence
 
-Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval. Use when source evidence needs status grouping, exception decisions, or confirmation of a bounded extraction scope.
+Review Modbus source evidence with automated checks and a grouped exception queue, avoiding page-by-page or row-by-row approval.
 
-## Common requests
+## Use this when
 
-- Show which parsed Modbus fields are confirmed or inferred.
-- Please show which parsed Modbus fields are confirmed or inferred.
-- Can you show which parsed Modbus fields are confirmed or inferred.
-- I need you to show which parsed Modbus fields are confirmed or inferred.
-- Help me show which parsed Modbus fields are confirmed or inferred.
+Source evidence needs status grouping, exception decisions, or confirmation of a bounded extraction scope.
 
-## Try it
+## What you get back
 
-```text
-Use $review-evidence to automate checks and group these source exceptions.
-```
+- `report.json` - Open this exception report. It separates verified evidence from the small set of grouped decisions that still need attention. It does not change the source artifact.
 
-Source: `plugins/modbus-skills/skills/review-evidence/SKILL.md`
+## Example request
+
+Show which parsed Modbus fields are confirmed or inferred.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/review-evidence/SKILL.md)

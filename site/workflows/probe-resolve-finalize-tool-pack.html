@@ -32,7 +32,8 @@ header.top {
 .brand { font-weight: 650; color: var(--text); text-decoration: none; }
 nav { display: flex; gap: 0.9rem; flex-wrap: wrap; }
 nav a { color: var(--muted); text-decoration: none; font-size: 0.92rem; }
-nav a:hover, a { color: var(--accent); }
+nav a:hover, nav a.is-current, a { color: var(--accent); }
+nav a.is-current { text-decoration: underline; text-underline-offset: 0.3rem; }
 h1 { font-size: 1.75rem; line-height: 1.25; margin: 1.4rem 0 0.6rem; }
 h2 { font-size: 1.15rem; margin: 1.8rem 0 0.6rem; }
 h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
@@ -57,6 +58,12 @@ p, li { color: var(--text); }
   padding: 0.9rem 1rem;
   margin: 0.8rem 0;
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 .jobs { display: grid; gap: 0.8rem; }
 @media (min-width: 760px) { .jobs { grid-template-columns: repeat(3, 1fr); } }
 .jobs h3 { margin-top: 0; }
@@ -93,4 +100,20 @@ article.skill {
   margin: 0.8rem 0;
   background: var(--surface);
 }
-footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a href="../index.html#install">Install</a></nav></header><main><h1>Probe, resolve byte order, and finalize a tool pack</h1><p>Use a selected tool target to collect one raw sample, confirm byte order, then regenerate all selected targets with the confirmed layout.</p><h2>Steps</h2><ol><li><a href="../skills/plan-reads.html">plan-reads</a>: <code class="inline">modbus-map/v1</code> → <code class="inline">modbus-read-plan/v1</code></li><li><a href="../skills/build-tool-pack.html">build-tool-pack</a>: <code class="inline">modbus-map/v1, modbus-read-plan/v1, probe-tool-pack-request/v1</code> → <code class="inline">modbus-tool-pack/v1</code></li><li>external-gate: <code class="inline">modbus-tool-pack/v1</code> → <code class="inline">capture/v1</code><br>Run one bounded read against the reviewed endpoint and save the returned raw 16-bit words. Do not scan or write.</li><li><a href="confirm-byte-order.html">workflow: confirm-byte-order</a>: <code class="inline">modbus-map/v1, capture/v1</code> → <code class="inline">modbus-map/v1</code></li><li><a href="../skills/plan-reads.html">plan-reads</a>: <code class="inline">modbus-map/v1</code> → <code class="inline">modbus-read-plan/v1</code></li><li><a href="../skills/build-tool-pack.html">build-tool-pack</a>: <code class="inline">modbus-map/v1, modbus-read-plan/v1, final-tool-pack-request/v1</code> → <code class="inline">modbus-tool-pack/v1</code></li></ol><h2>Stop conditions</h2><ul><li>no selected target</li><li>unresolved route or unit identifier</li><li>no raw words</li><li>no human byte-order confirmation</li><li>write request detected</li></ul></main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>
+.related-grid { display: grid; gap: 0.8rem; }
+@media (min-width: 640px) { .related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.related-grid .panel { margin: 0; }
+.related-grid h3 { margin-top: 0; }
+.workflow-steps { padding-left: 1.4rem; }
+.workflow-steps > li { padding-left: 0.25rem; }
+.workflow-steps h3 { margin-top: 0; }
+.machine { margin-top: 1.5rem; }
+.machine summary { color: var(--accent); cursor: pointer; }
+.machine li { margin: 0.55rem 0; }
+summary, a, code { overflow-wrap: anywhere; }
+footer.foot { color: var(--muted); font-size: 0.85rem; padding: 2rem 1.25rem; }
+@media (max-width: 560px) {
+  header.top { align-items: flex-start; flex-direction: column; }
+  nav { gap: 0.55rem 0.85rem; }
+  h1 { font-size: 1.55rem; }
+}</style></head><body><header class="top"><a class="brand" href="../index.html">Modbus Skills</a><nav aria-label="Primary"><a href="../index.html">Home</a><a href="../when-to-use.html">When to use</a><a href="../examples/compile-user-map.html">Example</a><a class="is-current" aria-current="page" href="../index.html#workflows">Workflows</a></nav></header><main><p class="kicker">Workflow · 6 steps</p><h1>Probe, resolve byte order, and finalize a tool pack</h1><p class="lede">Use a selected tool target to collect one raw sample, confirm byte order, then regenerate all selected targets with the confirmed layout.</p><div class="related-grid"><section class="panel"><h2>You start with</h2><ul><li>a reviewed Modbus map</li></ul></section><section class="panel"><h2>You receive</h2><p>the selected read-only tool files.</p></section></div><h2>How it works</h2><ol class="workflow-steps"><li class="panel"><h3><a href="../skills/plan-reads.html">Plan Reads</a></h3><p>Compile bounded Modbus read blocks</p><p class="muted">Starts with a reviewed Modbus map. Produces a bounded Modbus read plan.</p></li><li class="panel"><h3><a href="../skills/build-tool-pack.html">Build Tool Pack</a></h3><p>Build several Modbus tool outputs</p><p class="muted">Starts with a reviewed Modbus map, a bounded Modbus read plan, one reviewed request for a bounded probe. Produces the selected read-only tool files.</p></li><li class="panel"><h3>One bounded device read</h3><p>Run one bounded read against the reviewed endpoint and save the returned raw 16-bit words. Do not scan or write.</p><p class="muted">Starts with the selected read-only tool files. Produces a bounded raw-word sample.</p></li><li class="panel"><h3><a href="confirm-byte-order.html">Confirm byte order from one sample</a></h3><p>Evaluate every supported layout from one immutable sample, record one human confirmation, and apply it.</p><p class="muted">Starts with a reviewed Modbus map, a bounded raw-word sample. Produces a reviewed Modbus map.</p></li><li class="panel"><h3><a href="../skills/plan-reads.html">Plan Reads</a></h3><p>Compile bounded Modbus read blocks</p><p class="muted">Starts with a reviewed Modbus map. Produces a bounded Modbus read plan.</p></li><li class="panel"><h3><a href="../skills/build-tool-pack.html">Build Tool Pack</a></h3><p>Build several Modbus tool outputs</p><p class="muted">Starts with a reviewed Modbus map, a bounded Modbus read plan, the reviewed endpoint and selected final tools. Produces the selected read-only tool files.</p></li></ol><h2>When it stops</h2><ul><li>No selected target.</li><li>Unresolved route or unit identifier.</li><li>No raw words.</li><li>No human byte-order confirmation.</li><li>Write request detected.</li></ul><details class="machine"><summary>Show machine-readable contracts</summary><ol><li><code class="inline">modbus-map/v1</code> → <code class="inline">modbus-read-plan/v1</code></li><li><code class="inline">modbus-map/v1</code>, <code class="inline">modbus-read-plan/v1</code>, <code class="inline">probe-tool-pack-request/v1</code> → <code class="inline">modbus-tool-pack/v1</code></li><li><code class="inline">modbus-tool-pack/v1</code> → <code class="inline">capture/v1</code></li><li><code class="inline">modbus-map/v1</code>, <code class="inline">capture/v1</code> → <code class="inline">modbus-map/v1</code></li><li><code class="inline">modbus-map/v1</code> → <code class="inline">modbus-read-plan/v1</code></li><li><code class="inline">modbus-map/v1</code>, <code class="inline">modbus-read-plan/v1</code>, <code class="inline">final-tool-pack-request/v1</code> → <code class="inline">modbus-tool-pack/v1</code></li></ol><p><a href="../workflows.json">View all workflow data</a></p></details></main><footer class="foot">Read-only by design. Apache-2.0. <a href="https://github.com/studioxvii/modbus-skills">GitHub</a></footer></body></html>

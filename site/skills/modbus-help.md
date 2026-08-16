@@ -1,19 +1,21 @@
 # Modbus Help
 
-Choose the next Modbus skill or short workflow from the user's goal and current artifact. Use when the user is unsure which Modbus skill to run, asks what to do next, or needs a safe path from their current artifact.
+Choose the next Modbus skill or short workflow from the user's goal and current artifact.
 
-## Common requests
+## Use this when
 
-- Help me choose the right Modbus workflow.
-- Please help me choose the right Modbus workflow.
-- Can you help me choose the right Modbus workflow.
-- I need you to help me choose the right Modbus workflow.
-- Help me help me choose the right Modbus workflow.
+The user is unsure which Modbus skill to run, asks what to do next, or needs a safe path from their current artifact.
 
-## Try it
+## What you get back
 
-```text
-Use $modbus-help to choose the next skill for my goal.
-```
+- None. This skill only names the next skill, the input it needs, and the result it will produce.
 
-Source: `plugins/modbus-skills/skills/modbus-help/SKILL.md`
+## Example request
+
+Help me choose the right Modbus workflow.
+
+## Safety boundary
+
+This skill does not write registers, force coils, broadcast, scan a network, or start unbounded polling. Unresolved engineering fields stay visible.
+
+[View the skill source on GitHub](https://github.com/studioxvii/modbus-skills/blob/main/plugins/modbus-skills/skills/modbus-help/SKILL.md)
