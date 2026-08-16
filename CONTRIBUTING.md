@@ -33,6 +33,11 @@ Each skill must have:
 - At least five close-negative activation cases.
 - Deterministic tests when the skill performs calculations or generates files.
 
+## Pull requests
+
+Open a pull request against `main`. The `verify` check must pass. Do not force-push
+`main`. Use the `beta` label for Modpoll, Witte Modbus Poll, or ModScan work.
+
 ## Verify
 
 Run:
