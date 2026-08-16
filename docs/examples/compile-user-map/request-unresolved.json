@@ -1,0 +1,11 @@
+{
+  "schema_version": "modbus-compile-request/v1",
+  "source": {"path": "docs/examples/compile-user-map/source-unresolved.csv", "format": "csv"},
+  "selection_template": {
+    "schema_version": "modbus-user-selection-template/v1",
+    "requested_measurements": ["all documented Modbus read points"],
+    "mode": "all-readable"
+  },
+  "targets": [],
+  "target_options": {}
+}

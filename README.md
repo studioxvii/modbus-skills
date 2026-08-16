@@ -16,9 +16,29 @@ vendor manual, spreadsheet, PDF, or existing register map into:
 It can also compare firmware revisions, investigate byte order, and analyze
 captured Modbus data.
 
-The tools are read-only by design. They never generate write commands,
-discovery scans, or unlimited polling. When the documentation is unclear, they
-show you what needs a decision instead of guessing.
+The tools are read-only by design. They produce user maps, bounded read plans,
+and a short question list when the documentation is unclear.
+
+See [when to use this](docs/when-to-use.md) and the
+[worked example](docs/examples/compile-user-map/README.md).
+
+## First 10 minutes
+
+1. Add the project once. The install steps are below.
+2. Ask for a user map from your local manual or spreadsheet, and name the
+   measurements you actually need.
+3. Open the three files it writes: the readable map, the JSON, and the CSV.
+
+You can say this in plain language:
+
+```text
+Use this manual to make a user map for temperatures, operating status,
+alarms, and power. Give me a readable map plus JSON and CSV.
+```
+
+If you want to see the result before using a real manual, open the
+[worked example](docs/examples/compile-user-map/README.md). If you want help
+choosing the next step, ask for that.
 
 ## Who this is for
 
@@ -282,6 +302,8 @@ dist/plugins/                          Generated packages (ignored by Git)
 plugins/modbus-skills/skills/          Workflow definitions and instructions
 plugins/modbus-skills/runtime/         Deterministic Python runtime
 catalog/                               Skill and workflow catalogs
+docs/when-to-use.md                    When the skills apply, and when they stop
+docs/examples/compile-user-map/        Synthetic before/after compile
 docs/contracts/                        Output and workflow contracts
 docs/research/                         Research notes and problem catalog
 research/issues.json                   Modbus problems mapped to workflows

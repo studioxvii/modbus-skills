@@ -1,0 +1,131 @@
+{
+  "artifact_type": "modbus-user-map",
+  "assumptions": [],
+  "exception_annex": [
+    {
+      "blocking": true,
+      "code": "point.write-only-not-readable",
+      "field": "access",
+      "kind": "unselected-hold",
+      "message": "The source declares a write-only point. It cannot enter a read plan.",
+      "point_ids": [
+        "level_setpoint"
+      ],
+      "severity": "hold",
+      "source": {
+        "format": "csv",
+        "row": 5
+      }
+    },
+    {
+      "evidence_refs": [
+        "csv:5"
+      ],
+      "kind": "excluded",
+      "oem_point_id": "level_setpoint",
+      "reason": "Excluded because the OEM map marks this point write-only."
+    }
+  ],
+  "findings": [],
+  "holds": [],
+  "input_hashes": {
+    "oem_map": "5a987aa5f15a500deac88e78fa0405fd9b438c68f47862e0bf56a4db9fad3e30",
+    "selection": "ae2b8956368f5932548786b5596b726a440694fb20ea2acbef7a7e51c38944b2"
+  },
+  "points": [
+    {
+      "access": "read-only",
+      "alias": null,
+      "area": "holding-register",
+      "bit_order": null,
+      "byte_order": null,
+      "byte_order_confirmed": null,
+      "confidence": null,
+      "datatype": "uint16",
+      "display_name": "Tank Level",
+      "engineering_offset": null,
+      "engineering_unit": "%",
+      "evidence_refs": [
+        "csv:2"
+      ],
+      "function_code": 3,
+      "group": "all documented Modbus read points",
+      "name": "Tank Level",
+      "oem_point_id": "tank_level",
+      "protocol_offset": 0,
+      "requested_measurement": "all documented Modbus read points",
+      "scale": 0.1,
+      "selection_reason": "Included by the explicit all-readable selection mode.",
+      "source_refs": [
+        {
+          "record_id": "csv:2"
+        }
+      ],
+      "source_register": "40001",
+      "word_span": 1
+    },
+    {
+      "access": "read-only",
+      "alias": null,
+      "area": "holding-register",
+      "bit_order": null,
+      "byte_order": "CDAB",
+      "byte_order_confirmed": true,
+      "confidence": null,
+      "datatype": "float32",
+      "display_name": "Flow Rate",
+      "engineering_offset": null,
+      "engineering_unit": "L/s",
+      "evidence_refs": [
+        "csv:3"
+      ],
+      "function_code": 3,
+      "group": "all documented Modbus read points",
+      "name": "Flow Rate",
+      "oem_point_id": "flow_rate",
+      "protocol_offset": 2,
+      "requested_measurement": "all documented Modbus read points",
+      "scale": 1.0,
+      "selection_reason": "Included by the explicit all-readable selection mode.",
+      "source_refs": [
+        {
+          "record_id": "csv:3"
+        }
+      ],
+      "source_register": "40003",
+      "word_span": 2
+    },
+    {
+      "access": "read-only",
+      "alias": null,
+      "area": "input-register",
+      "bit_order": null,
+      "byte_order": "ABCD",
+      "byte_order_confirmed": true,
+      "confidence": null,
+      "datatype": "uint32",
+      "display_name": "Energy Total",
+      "engineering_offset": null,
+      "engineering_unit": "kWh",
+      "evidence_refs": [
+        "csv:4"
+      ],
+      "function_code": 4,
+      "group": "all documented Modbus read points",
+      "name": "Energy Total",
+      "oem_point_id": "energy_total",
+      "protocol_offset": 0,
+      "requested_measurement": "all documented Modbus read points",
+      "scale": 1.0,
+      "selection_reason": "Included by the explicit all-readable selection mode.",
+      "source_refs": [
+        {
+          "record_id": "csv:4"
+        }
+      ],
+      "source_register": "30001",
+      "word_span": 2
+    }
+  ],
+  "schema_version": "modbus-user-map/v1"
+}
