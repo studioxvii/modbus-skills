@@ -39,6 +39,12 @@ Build public, read-only Modbus engineering skills and deterministic workflows.
 - Preserve canonical artifact contracts across skills.
 - Use composite point identity: route, unit identifier, register area, protocol offset, and logical point identifier.
 
+## Cloud Agent environment
+
+- Repo-managed config lives in `.cursor/environment.json`.
+- Install is `python3 -m pip install -e .` (Python 3.11+; no secrets or long-running server).
+- There is no `start` command. Prove the environment with `python3 scripts/verify_repo.py`.
+
 ## Verification
 
 - Run `python3 scripts/verify_repo.py` before handoff.
