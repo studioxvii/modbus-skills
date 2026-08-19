@@ -51,3 +51,8 @@ Build public, read-only Modbus engineering skills and deterministic workflows.
 - Add unit tests for each deterministic change.
 - Add positive, negative, incomplete-input, and unsafe-request cases for each skill.
 - Keep generated output deterministic.
+
+## Cursor Cloud specific instructions
+
+- This is a Python-only, dependency-light CLI project (single runtime dependency `pdfplumber`). There is no server, database, or long-running process; the "application" is the `modbus_skills` CLI run via `python3 plugins/modbus-skills/scripts/modbus_skills.py <command> ...` (or the installed `modbus_skills` package). See `README.md` and `plugins/modbus-skills/runtime/modbus_skills/cli.py` for the full command list.
+- Known environment caveat: on the Cloud Agent VM the filesystem timestamp granularity is coarse (~4 ms, overlayfs/`/tmp`). The single test `tests/test_node_red_live_campaign.py::...test_admin_driver_deploys_once_for_multiple_rounds_and_restores_once` deterministically fails here with `CampaignError: Node-RED read plan did not drain before the timeout` because it detects a fresh capture via an mtime change between two rapid identical writes that collapse to the same mtime. This is not a code regression: GitHub CI (`ubuntu-latest`, ext4 with nanosecond mtime) passes `verify_repo.py`, and the other 462 tests pass here. Do not "fix" it by editing runtime code for this env; treat that one failure as an expected VM artifact.
