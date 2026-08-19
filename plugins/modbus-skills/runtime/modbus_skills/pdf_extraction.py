@@ -20,7 +20,15 @@ from .artifacts import (
     assert_artifact_envelope,
     stable_input_hash,
 )
-from .pdf_table_extraction import PdfTableExtractionError, extract_pdf_table_evidence
+from .pdf_table_extraction import (
+    PDF_HEADER_ALIASES,
+    PdfTableExtractionError,
+    _address_record_fields,
+    _address_with_area,
+    _parse_pdf_address,
+    _parse_register_area,
+    extract_pdf_table_evidence,
+)
 
 
 class PdfExtractionError(ValueError):
@@ -28,29 +36,13 @@ class PdfExtractionError(ValueError):
 
 
 _CONTINUATION_ROW = re.compile(
-    r"(?im)^\s*(?:\d+|0x[0-9a-f]+)\b.*\b(?:bool(?:ean)?|bit|u?int(?:16|32|64)?|sint|word|dword|ulong|float(?:32|64)?|real|double|string|ascii|r/w|ro|rw|r)\b"
+    r"(?im)^\s*(?:\d+|0x[0-9a-f]+|[34]x\d+)\b"
+    r"(?=.*\b[A-Za-z][A-Za-z0-9_ /()-]*\b)"
+    r".*(?:\b(?:bool(?:ean)?|bit|u?int(?:16|32|64)?|sint|word|dword|ulong|float(?:32|64)?|real|double|string|ascii|r/w|ro|rw|r)\b|\b0\s*[—–-]\s*No\b.*\b1\s*[—–-]\s*Yes\b)"
 )
 
 
-_HEADER_ALIASES = {
-    "address": "address",
-    "register": "address",
-    "register address": "address",
-    "protocol offset": "protocol_offset",
-    "display address": "display_address",
-    "name": "name",
-    "tag": "name",
-    "description": "description",
-    "data type": "datatype",
-    "datatype": "datatype",
-    "area": "area",
-    "access": "access",
-    "unit id": "unit_id",
-    "word count": "word_count",
-    "width": "word_count",
-    "byte order": "byte_order",
-    "bit order": "bit_order",
-}
+_HEADER_ALIASES = PDF_HEADER_ALIASES
 _MATERIAL_FIELDS = frozenset(
     {"address", "protocol_offset", "display_address", "name", "area", "word_count", "datatype", "access"}
 )
@@ -69,6 +61,16 @@ _GRID_RECOVERY_FINDING = {
     "severity": "info",
     "blocking": False,
     "message": "Grid-aware table extraction supplied register-table structure alongside text parsing.",
+}
+_QUARANTINE_HOLD_MESSAGES = {
+    "pdf-grid-column-ambiguous": "Resolve conflicting grid columns before these rows become map points.",
+    "pdf-grid-type-unresolved": "Declare the datatype or access meaning for this address-and-name table.",
+    "pdf-grid-register-area-ambiguous": "Declare one Modbus register area for these rows.",
+    "pdf-grid-address-area-conflict": "Resolve the conflict between the address prefix and register-type column.",
+    "pdf-grid-address-ambiguous": "Resolve the mixed or ambiguous display-address form.",
+    "pdf-grid-address-range-unresolved": "Split or define the register range before it becomes a single map point.",
+    "pdf-grid-address-pair-unresolved": "Confirm how the nonconsecutive or mixed address pair maps to one point.",
+    "pdf-grid-bit-list-vs-register-unresolved": "Confirm whether this row is a register point or a bit-value list.",
 }
 
 
@@ -108,10 +110,112 @@ def _header(line: str) -> list[str] | None:
     raw = re.split(r"\s{2,}", line.strip())
     if len(raw) < 2:
         return None
-    names = [_HEADER_ALIASES.get(re.sub(r"\s+", " ", item.strip().lower())) for item in raw]
-    if None in names or not ({"address", "protocol_offset", "display_address"} & set(names)):
+    names = [_layout_field(item, index) for index, item in enumerate(raw)]
+    semantic = {name for name in names if not name.startswith("_extra:")}
+    if not ({"address", "protocol_offset", "display_address"} & semantic) or not (
+        {"name", "description"} & semantic
+    ):
         return None
-    return [str(name) for name in names]
+    return names
+
+
+def _layout_field(value: str, index: int) -> str:
+    normalized = re.sub(r"\s+", " ", value.strip().casefold()).rstrip(":")
+    name = _HEADER_ALIASES.get(normalized)
+    if name == "format":
+        return "datatype"
+    if name == "units":
+        return "engineering_unit"
+    if name is not None:
+        return name
+    slug = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+    return f"_extra:{slug or f'column_{index + 1}'}"
+
+
+def _layout_segments(line: str) -> list[tuple[int, str]]:
+    segments: list[tuple[int, str]] = []
+    cursor = 0
+    for separator in re.finditer(r"\s{2,}", line.rstrip()):
+        raw = line[cursor : separator.start()]
+        value = raw.strip()
+        if value:
+            segments.append((cursor + len(raw) - len(raw.lstrip()), value))
+        cursor = separator.end()
+    raw = line[cursor:]
+    value = raw.strip()
+    if value:
+        segments.append((cursor + len(raw) - len(raw.lstrip()), value))
+    return segments
+
+
+def _layout_header_at(
+    lines: Sequence[str], start: int
+) -> tuple[int, list[tuple[int, str, str]]] | None:
+    best: tuple[tuple[int, int], int, list[tuple[int, str, str]]] | None = None
+    token_columns = _tokenized_header(lines[start])
+    token_semantic = {
+        field for _x, field, _raw in token_columns if not field.startswith("_extra:")
+    }
+    if ({"address", "protocol_offset", "display_address"} & token_semantic) and (
+        {"name", "description"} & token_semantic
+    ):
+        best = ((len(token_semantic), 0), start, token_columns)
+    for end in range(start, min(start + 3, len(lines))):
+        clusters: list[dict[str, Any]] = []
+        for row_offset, line in enumerate(lines[start : end + 1]):
+            for x, text in _layout_segments(line):
+                nearby = [
+                    cluster
+                    for cluster in clusters
+                    if row_offset not in cluster["rows"]
+                    and abs(int(cluster["x"]) - x) <= 8
+                ]
+                if nearby:
+                    cluster = min(nearby, key=lambda item: abs(int(item["x"]) - x))
+                    cluster["parts"].append(text)
+                    cluster["rows"].add(row_offset)
+                    cluster["x"] = min(int(cluster["x"]), x)
+                else:
+                    clusters.append({"x": x, "parts": [text], "rows": {row_offset}})
+        columns: list[tuple[int, str, str]] = []
+        for index, cluster in enumerate(sorted(clusters, key=lambda item: int(item["x"]))):
+            raw = " ".join(str(value) for value in cluster["parts"])
+            columns.append((int(cluster["x"]), _layout_field(raw, index), raw))
+        semantic = {field for _x, field, _raw in columns if not field.startswith("_extra:")}
+        if not ({"address", "protocol_offset", "display_address"} & semantic) or not (
+            {"name", "description"} & semantic
+        ):
+            continue
+        score = (len(semantic), end - start)
+        if best is None or score > best[0]:
+            best = (score, end, columns)
+    return None if best is None else (best[1], best[2])
+
+
+def _tokenized_header(line: str) -> list[tuple[int, str, str]]:
+    words = list(re.finditer(r"\S+", line))
+    columns: list[tuple[int, str, str]] = []
+    index = 0
+    while index < len(words):
+        matched: tuple[int, str, str] | None = None
+        consumed = 1
+        for width in range(min(4, len(words) - index), 0, -1):
+            raw = " ".join(word.group() for word in words[index : index + width])
+            field = _layout_field(raw, len(columns))
+            if not field.startswith("_extra:"):
+                matched = (words[index].start(), field, raw)
+                consumed = width
+                break
+        if matched is None:
+            raw = words[index].group()
+            matched = (
+                words[index].start(),
+                _layout_field(raw, len(columns)),
+                raw,
+            )
+        columns.append(matched)
+        index += consumed
+    return columns
 
 
 def _claim(parser_id: str, field: str, value: str, locator: Mapping[str, Any]) -> dict[str, Any]:
@@ -131,22 +235,96 @@ def parse_layout_rows(
     for page_number, page in enumerate(text.split("\f"), start=first_page):
         if pages is not None and page_number not in pages:
             continue
-        header: list[str] | None = None
-        for line_number, line in enumerate(page.splitlines(), start=1):
-            candidate = _header(line)
+        header: list[tuple[int, str, str]] | None = None
+        header_end = -1
+        lines = page.splitlines()
+        for line_index, line in enumerate(lines):
+            line_number = line_index + 1
+            if line_index <= header_end:
+                continue
+            candidate = _layout_header_at(lines, line_index)
             if candidate is not None:
-                header = candidate
+                header_end, header = candidate
                 continue
             if header is None or not line.strip():
                 continue
-            parts = re.split(r"\s{2,}", line.strip())
-            if len(parts) != len(header):
+            cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
+            segments = _layout_segments(line)
+            if len(segments) < 2 and len(header) > 1:
                 continue
-            record = dict(zip(header, (value.strip() for value in parts), strict=True))
-            address = record.get("address", record.get("protocol_offset", record.get("display_address")))
-            if not re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|\d+)", str(address or "")):
-                rejected.append({"code": "pdf-row-address-invalid", "page": page_number, "line": line_number, "parser_id": parser_id})
+            if len(segments) == len(header):
+                for (_x, value), (_anchor, field, _raw) in zip(
+                    segments, header, strict=True
+                ):
+                    cells[field].append(value)
+            else:
+                for x, value in segments:
+                    _anchor, field, _raw = min(
+                        header, key=lambda item: (abs(item[0] - x), -item[0])
+                    )
+                    cells[field].append(value)
+            values = {
+                field: " ".join(parts).strip()
+                for field, parts in cells.items()
+                if parts
+            }
+            address_field = next(
+                (
+                    field
+                    for field in ("address", "protocol_offset", "display_address")
+                    if values.get(field)
+                ),
+                None,
+            )
+            address = values.get(address_field, "") if address_field else ""
+            parsed_address = _parse_pdf_address(address)
+            if parsed_address is None or parsed_address.get("status") != "single":
+                rejected.append(
+                    {
+                        "code": (
+                            str(parsed_address.get("code"))
+                            if parsed_address is not None and parsed_address.get("code")
+                            else "pdf-row-address-invalid"
+                        ),
+                        "page": page_number,
+                        "line": line_number,
+                        "parser_id": parser_id,
+                    }
+                )
                 continue
+            extra = {
+                field.split(":", 1)[1]: value
+                for field, value in values.items()
+                if field.startswith("_extra:")
+            }
+            for _anchor, field, raw_header in header:
+                if field == "engineering_unit" and values.get(field):
+                    slug = re.sub(
+                        r"[^a-z0-9]+", "_", raw_header.casefold()
+                    ).strip("_")
+                    extra.setdefault(slug or "unit", values[field])
+            record = {
+                field: value
+                for field, value in values.items()
+                if not field.startswith("_extra:")
+                and field not in {"address", "protocol_offset", "display_address"}
+            }
+            record.update(_address_record_fields(parsed_address))
+            if address_field == "protocol_offset":
+                record.pop("display_address", None)
+                record["address_convention"] = "protocol-offset"
+                record["source_address"] = {
+                    "raw": address,
+                    "convention": "protocol-offset",
+                }
+            if record.get("name") in (None, ""):
+                record["name"] = record.get("description")
+            if record.get("description") in (None, ""):
+                record["description"] = record.get("name")
+            if not record.get("name"):
+                continue
+            if extra:
+                record["_extra"] = extra
             locator = {"page": page_number, "line": line_number, "region": f"p{page_number}:l{line_number}"}
             record["_claims"] = [_claim(parser_id, field, str(value), locator) for field, value in record.items() if not field.startswith("_")]
             record["_source"] = {
@@ -166,18 +344,53 @@ def discover_register_pages(text: str, *, first_page: int = 1) -> list[int]:
     pages: list[int] = []
     previous_was_register = False
     for page_number, page in enumerate(text.split("\f"), start=first_page):
-        has_header = any(_header(line) is not None for line in page.splitlines())
-        has_register_signal = bool(re.search(r"\b(?:modbus|register|address)\b", page, re.IGNORECASE)) and bool(
-            re.search(r"\b(?:[1-4][0-9]{4,5}|0[xX][0-9A-Fa-f]+)\b", page)
+        lines = page.splitlines()
+        has_header = any(
+            _layout_header_at(lines, index) is not None for index in range(len(lines))
         )
+        named_rows = _named_address_row_count(lines)
+        has_register_signal = named_rows >= 1
+        is_index_page = bool(
+            re.search(r"(?im)^\s*(?:table of )?contents\s*$", page)
+            or re.search(r"(?im)^\s*(?:register\s+)?overview\s*$", page)
+        ) and named_rows == 0
         is_continuation = previous_was_register and not (
             has_header or has_register_signal
         ) and _CONTINUATION_ROW.search(page) is not None
-        is_register = has_header or has_register_signal or is_continuation
+        is_register = not is_index_page and (
+            has_header or has_register_signal or is_continuation
+        )
         if is_register:
             pages.append(page_number)
         previous_was_register = is_register
     return pages
+
+
+def _named_address_row_count(lines: Sequence[str]) -> int:
+    count = 0
+    for line in lines:
+        segments = [value for _x, value in _layout_segments(line)]
+        if len(segments) < 2:
+            continue
+        tokens = segments
+        address_indexes = [
+            index
+            for index, token in enumerate(tokens)
+            if (parsed := _parse_pdf_address(token.rstrip(":;,."))) is not None
+            and parsed.get("status") == "single"
+        ]
+        if not address_indexes:
+            continue
+        names = [
+            token
+            for index, token in enumerate(tokens)
+            if index not in address_indexes
+            and re.search(r"[A-Za-z]", token)
+            and not re.fullmatch(r"(?:r/?w|ro|rw|r|w|[34]x)", token, re.IGNORECASE)
+        ]
+        if names:
+            count += 1
+    return count
 
 
 def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any]]:
@@ -204,42 +417,86 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
                 key = y_min
             lines.setdefault(key, []).append((x_min, x_max, y_max, word.text.strip()))
 
-        columns: list[tuple[float, str]] | None = None
-        for y_min in sorted(lines):
-            words = sorted(lines[y_min])
-            header_columns: list[tuple[float, str | None]] = []
-            index = 0
-            while index < len(words):
-                matched: tuple[float, str] | None = None
-                consumed = 1
-                for width in range(min(3, len(words) - index), 0, -1):
-                    phrase = " ".join(item[3] for item in words[index : index + width]).casefold()
-                    alias = _HEADER_ALIASES.get(re.sub(r"\s+", " ", phrase))
-                    if alias is not None:
-                        matched = (words[index][0], alias)
-                        consumed = width
-                        break
-                header_columns.append(matched or (words[index][0], None))
-                index += consumed
-            if any(name in {"address", "protocol_offset", "display_address"} for _, name in header_columns) and sum(name is not None for _, name in header_columns) >= 2:
-                columns = [(x, str(name)) for x, name in header_columns if name is not None]
+        line_items = [(y_min, sorted(lines[y_min])) for y_min in sorted(lines)]
+        columns: list[tuple[float, str, str]] | None = None
+        header_end = -1
+        for line_index, (y_min, words) in enumerate(line_items):
+            if line_index <= header_end:
+                continue
+            candidate = _bbox_header_at(line_items, line_index)
+            if candidate is not None:
+                header_end, columns = candidate
                 continue
             if columns is None:
                 continue
-            cells: dict[str, list[str]] = {name: [] for _, name in columns}
+            cells: dict[str, list[str]] = {name: [] for _, name, _raw in columns}
             cell_regions: dict[str, list[float]] = {}
             for x_min, x_max, y_max, text in words:
-                candidates = [(x, name) for x, name in columns if x <= x_min + 3]
-                _anchor, name = max(candidates or [columns[0]], key=lambda item: item[0])
+                candidates = [(x, name) for x, name, _raw in columns if x <= x_min + 3]
+                fallback = (columns[0][0], columns[0][1])
+                _anchor, name = max(candidates or [fallback], key=lambda item: item[0])
                 cells[name].append(text)
                 bounds = cell_regions.setdefault(name, [x_min, y_min, x_max, y_max])
                 bounds[0] = min(bounds[0], x_min)
                 bounds[2] = max(bounds[2], x_max)
                 bounds[3] = max(bounds[3], y_max)
-            record = {name: " ".join(values).strip() for name, values in cells.items() if values}
-            address = record.get("address", record.get("protocol_offset", record.get("display_address")))
-            if not re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|\d+)", str(address or "")):
+            values = {name: " ".join(items).strip() for name, items in cells.items() if items}
+            address_field = next(
+                (
+                    field
+                    for field in ("address", "protocol_offset", "display_address")
+                    if values.get(field)
+                ),
+                None,
+            )
+            address = values.get(address_field, "") if address_field else ""
+            parsed_address = _parse_pdf_address(address)
+            if parsed_address is None or parsed_address.get("status") != "single":
                 continue
+            area, area_error = _parse_register_area(values.get("area"))
+            if area_error is not None:
+                continue
+            if (
+                area is not None
+                and parsed_address.get("area") is not None
+                and parsed_address.get("area") != area
+            ):
+                continue
+            if area is not None and parsed_address.get("area") is None:
+                parsed_address = _address_with_area(parsed_address, area)
+            extra = {
+                field.split(":", 1)[1]: value
+                for field, value in values.items()
+                if field.startswith("_extra:")
+            }
+            for _anchor, field, raw_header in columns:
+                if field == "engineering_unit" and values.get(field):
+                    slug = re.sub(
+                        r"[^a-z0-9]+", "_", raw_header.casefold()
+                    ).strip("_")
+                    extra.setdefault(slug or "unit", values[field])
+            record = {
+                field: value
+                for field, value in values.items()
+                if not field.startswith("_extra:")
+                and field not in {"address", "protocol_offset", "display_address"}
+            }
+            record.update(_address_record_fields(parsed_address))
+            if address_field == "protocol_offset":
+                record.pop("display_address", None)
+                record["address_convention"] = "protocol-offset"
+                record["source_address"] = {
+                    "raw": address,
+                    "convention": "protocol-offset",
+                }
+            if record.get("name") in (None, ""):
+                record["name"] = record.get("description")
+            if record.get("description") in (None, ""):
+                record["description"] = record.get("name")
+            if not record.get("name"):
+                continue
+            if extra:
+                record["_extra"] = extra
             region = f"p{page_number}:y{y_min:g}"
             record["_claims"] = [
                 _claim(
@@ -248,19 +505,80 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
                     str(value),
                     {"page": page_number, "region": region, "bbox": cell_regions[field]},
                 )
-                for field, value in record.items()
-                if not field.startswith("_")
+                for field, value in values.items()
+                if not field.startswith("_extra:") and field in cell_regions
             ]
+            if "description" not in values and values.get("name") and "name" in cell_regions:
+                record["_claims"].append(
+                    _claim(
+                        "pdftotext-bbox-layout/v1",
+                        "description",
+                        str(values["name"]),
+                        {
+                            "page": page_number,
+                            "region": region,
+                            "bbox": cell_regions["name"],
+                        },
+                    )
+                )
             record["_source"] = {
                 "format": "pdf",
                 "page": page_number,
                 "region": region,
                 "parser_id": "pdftotext-bbox-layout/v1",
                 "method": "coordinate-derived",
-                "excerpt": " | ".join(str(record[name]) for _, name in columns if name in record)[:300],
+                "excerpt": " | ".join(
+                    str(record[name]) for _, name, _raw in columns if name in record
+                )[:300],
             }
             records.append(record)
     return records
+
+
+def _bbox_header_at(
+    line_items: Sequence[tuple[float, list[tuple[float, float, float, str]]]],
+    start: int,
+) -> tuple[int, list[tuple[float, str, str]]] | None:
+    best: tuple[tuple[int, int], int, list[tuple[float, str, str]]] | None = None
+    for end in range(start, min(start + 3, len(line_items))):
+        clusters: list[dict[str, Any]] = []
+        for row_offset, (_y, words) in enumerate(line_items[start : end + 1]):
+            phrases: list[tuple[float, float, str]] = []
+            for x_min, x_max, _y_max, text in words:
+                if phrases and x_min - phrases[-1][1] <= 6:
+                    old_x, _old_max, old_text = phrases[-1]
+                    phrases[-1] = (old_x, x_max, f"{old_text} {text}")
+                else:
+                    phrases.append((x_min, x_max, text))
+            for x_min, _x_max, text in phrases:
+                nearby = [
+                    cluster
+                    for cluster in clusters
+                    if row_offset not in cluster["rows"]
+                    and abs(float(cluster["x"]) - x_min) <= 12
+                ]
+                if nearby:
+                    cluster = min(nearby, key=lambda item: abs(float(item["x"]) - x_min))
+                    cluster["parts"].append(text)
+                    cluster["rows"].add(row_offset)
+                    cluster["x"] = min(float(cluster["x"]), x_min)
+                else:
+                    clusters.append(
+                        {"x": x_min, "parts": [text], "rows": {row_offset}}
+                    )
+        columns = []
+        for index, cluster in enumerate(sorted(clusters, key=lambda item: float(item["x"]))):
+            raw = " ".join(str(value) for value in cluster["parts"])
+            columns.append((float(cluster["x"]), _layout_field(raw, index), raw))
+        semantic = {field for _x, field, _raw in columns if not field.startswith("_extra:")}
+        if not ({"address", "protocol_offset", "display_address"} & semantic) or not (
+            {"name", "description"} & semantic
+        ):
+            continue
+        score = (len(semantic), end - start)
+        if best is None or score > best[0]:
+            best = (score, end, columns)
+    return None if best is None else (best[1], best[2])
 
 
 def _call(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[bytes]:
@@ -514,6 +832,24 @@ def _envelope(
         records, rejected, quarantined, discovered_pages, discovery_complete
     )
     effective_holds = list(holds)
+    quarantine_counts: dict[str, int] = {}
+    for row in quarantined:
+        code = str(row.get("code", "")) if isinstance(row, Mapping) else ""
+        if code in _QUARANTINE_HOLD_MESSAGES:
+            quarantine_counts[code] = quarantine_counts.get(code, 0) + 1
+    existing_codes = {str(hold.get("code", "")) for hold in effective_holds}
+    for code in sorted(quarantine_counts):
+        if code in existing_codes:
+            continue
+        effective_holds.append(
+            {
+                "code": code,
+                "severity": "hold",
+                "blocking": True,
+                "message": _QUARANTINE_HOLD_MESSAGES[code],
+                "affected_count": quarantine_counts[code],
+            }
+        )
     if records and coverage["status"] != "complete" and not any(
         str(hold.get("code", "")) == "pdf-source-coverage-unproven"
         for hold in effective_holds

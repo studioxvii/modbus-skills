@@ -16,17 +16,30 @@ class PdfTableExtractionError(ValueError):
     """Raised when the optional grid extractor cannot run safely."""
 
 
-_ADDRESS_TOKEN = r"(?:0[xX][0-9A-Fa-f]+|\d+)"
-_ADDRESS = re.compile(rf"^({_ADDRESS_TOKEN})(?:/({_ADDRESS_TOKEN}))?(\*)?$")
+_ADDRESS_TOKEN = r"(?:0[xX][0-9A-Fa-f]+|(?:[34][xX]){1,2}\d+|\d+)"
+_ADDRESS = re.compile(
+    rf"^(?P<first>{_ADDRESS_TOKEN})(?:(?P<separator>[/\-])(?P<second>{_ADDRESS_TOKEN}))?(?P<footnote>\*)?$"
+)
 _PAIR_SUFFIX = re.compile(r"\s*\((MSR|LSR)\)$", re.IGNORECASE)
-_HEADER_NAMES = {
+_BIT_ENUMERATION = re.compile(
+    r"\b0\s*[—–-]\s*No\b.*\b1\s*[—–-]\s*Yes\b", re.IGNORECASE
+)
+PDF_HEADER_ALIASES = {
     "address": "address",
     "register": "address",
     "register address": "address",
+    "register address (decimal)": "address",
+    "register number": "address",
+    "reg no": "address",
+    "reg no.": "address",
+    "reg addr": "address",
+    "reg addr.": "address",
     "start": "address",
     "start address": "address",
     "reg": "address",
     "reg.": "address",
+    "protocol offset": "protocol_offset",
+    "display address": "display_address",
     "r/w": "access",
     "access": "access",
     "nv": "nonvolatile",
@@ -42,11 +55,25 @@ _HEADER_NAMES = {
     "scale factor": "scale",
     "range": "range",
     "description": "description",
-    "name": "description",
+    "meaning": "description",
+    "name": "name",
+    "tag": "name",
+    "symbolic register name": "name",
+    "parameter": "name",
+    "variable": "name",
+    "modbus register type": "area",
+    "area": "area",
+    "unit id": "unit_id",
+    "word count": "word_count",
+    "byte order": "byte_order",
+    "bit order": "bit_order",
 }
+_HEADER_NAMES = PDF_HEADER_ALIASES
 _INHERITED_FIELDS = frozenset(
     {"access", "nonvolatile", "format", "units", "scale", "range"}
 )
+_AREA_BY_PREFIX = {"3": "input-register", "4": "holding-register"}
+_PREFIX_BY_AREA = {value: key for key, value in _AREA_BY_PREFIX.items()}
 _MAX_GRID_PAGES = 256
 _MAX_GRID_RECORDS = 50_000
 _MAX_GRID_OUTPUT_BYTES = 32_000_000
@@ -196,7 +223,7 @@ def parse_pdf_table_evidence(
 
     if not table:
         return {"records": [], "quarantined_records": []}
-    header_index, columns = _find_header(table)
+    header_index, columns, extra_columns, confident = _find_header(table)
     if columns is None:
         return {"records": [], "quarantined_records": []}
     records: list[dict[str, Any]] = []
@@ -206,6 +233,15 @@ def parse_pdf_table_evidence(
         row = list(raw_row)
         resolved, conflicts = _resolve_cells(row, columns)
         region = f"p{page_number}:t{table_index}:r{row_index}"
+        source = {
+            "format": "pdf",
+            "page": page_number,
+            "row": row_index,
+            "region": region,
+            "parser_id": "pdfplumber-table/v1",
+            "method": "coordinate-derived",
+            "excerpt": " | ".join(_clean_values(row))[:300],
+        }
         if conflicts:
             address_text = resolved.get("address", "") or " | ".join(
                 _clean_values(
@@ -217,27 +253,13 @@ def parse_pdf_table_evidence(
                     "code": "pdf-grid-column-ambiguous",
                     "fields": sorted(conflicts),
                     "source_register": address_text,
-                    "_source": {
-                        "format": "pdf",
-                        "page": page_number,
-                        "row": row_index,
-                        "region": region,
-                        "parser_id": "pdfplumber-table/v1",
-                        "method": "coordinate-derived",
-                        "excerpt": " | ".join(_clean_values(row))[:300],
-                    },
+                    "_source": source,
                 }
             )
             continue
         address_text = resolved.get("address", "")
-        address_match = _ADDRESS.fullmatch(address_text)
-        if address_match is None:
-            continue
-        first_address = _address_number(address_match.group(1))
-        second_address = (
-            _address_number(address_match.group(2)) if address_match.group(2) else None
-        )
-        if second_address is not None and second_address != first_address + 1:
+        parsed_address = _parse_pdf_address(address_text)
+        if parsed_address is None:
             continue
         values: dict[str, str] = {}
         claims: list[dict[str, Any]] = []
@@ -278,12 +300,99 @@ def parse_pdf_table_evidence(
             claims.append(claim)
             if field in _INHERITED_FIELDS and value:
                 inherited[field] = (value, claim)
+        name = values.get("name", "")
+        description = values.get("description", "")
+        if not name and not description:
+            continue
+        raw_area = values.get("area", "")
+        area, area_error = _parse_register_area(raw_area)
+        if area_error is not None:
+            quarantined.append(
+                {
+                    "code": "pdf-grid-register-area-ambiguous",
+                    "fields": ["area"],
+                    "source_register": address_text,
+                    "name": name or description,
+                    "description": description or name,
+                    "raw_area": raw_area,
+                    "_source": source,
+                }
+            )
+            continue
+        if parsed_address["status"] != "single":
+            quarantined.append(
+                {
+                    "code": str(parsed_address["code"]),
+                    "fields": ["address"],
+                    "source_register": address_text,
+                    "name": name or description,
+                    "description": description or name,
+                    "address_parse": _address_parse_evidence(parsed_address),
+                    "_source": source,
+                }
+            )
+            continue
+        parsed_area = parsed_address.get("area")
+        if area is not None and parsed_area is not None and area != parsed_area:
+            quarantined.append(
+                {
+                    "code": "pdf-grid-address-area-conflict",
+                    "fields": ["address", "area"],
+                    "source_register": address_text,
+                    "name": name or description,
+                    "description": description or name,
+                    "address_area": parsed_area,
+                    "register_type_area": area,
+                    "_source": source,
+                }
+            )
+            continue
+        if area is not None and parsed_area is None:
+            parsed_address = _address_with_area(parsed_address, area)
+        if (
+            not resolved.get("format")
+            and not resolved.get("access")
+            and _BIT_ENUMERATION.search(source["excerpt"])
+        ):
+            quarantined.append(
+                {
+                    "code": "pdf-grid-bit-list-vs-register-unresolved",
+                    "fields": ["datatype", "access"],
+                    "source_register": address_text,
+                    "name": name or description,
+                    "description": description or name,
+                    "address_parse": _address_parse_evidence(parsed_address),
+                    "_source": source,
+                }
+            )
+            continue
+        if not confident:
+            quarantined.append(
+                {
+                    "code": "pdf-grid-type-unresolved",
+                    "fields": ["datatype", "access"],
+                    "source_register": address_text,
+                    "name": name or description,
+                    "description": description or name,
+                    "address_parse": _address_parse_evidence(parsed_address),
+                    "_source": source,
+                }
+            )
+            continue
         description_candidates = columns.get("description", [])
         description_column = max((item[0] for item in description_candidates), default=None)
+        last_header_column = max(
+            [
+                column
+                for candidates in columns.values()
+                for column, _header in candidates
+            ]
+            + [column for column, _header in extra_columns],
+            default=-1,
+        )
         trailing = []
-        if description_column is not None:
-            trailing = _clean_values(row[description_column + 1 :])
-        description = values.get("description", "")
+        if description_column is not None and description_column == last_header_column:
+            trailing = _clean_values(row[last_header_column + 1 :])
         if trailing and trailing[0] in {"MSR", "LSR"}:
             suffix = trailing.pop(0)
             if description:
@@ -295,27 +404,36 @@ def parse_pdf_table_evidence(
                     str(records[-1].get("description", "")),
                 ).strip()
                 description = f"{base} ({suffix})" if base else suffix
+        description = description or name
+        name = name or description
+        if not values.get("description") and values.get("name"):
+            name_claim = next(
+                (claim for claim in claims if claim.get("field") == "name"), None
+            )
+            if name_claim is not None:
+                description_claim = dict(name_claim)
+                description_claim["field"] = "description"
+                description_claim["value"] = description
+                claims.append(description_claim)
+        extra_fields = {
+            header: _clean(_cell(row, column))
+            for column, header in extra_columns
+            if _clean(_cell(row, column))
+        }
+        for column, header in columns.get("units", []):
+            raw_unit = _clean(_cell(row, column))
+            if raw_unit:
+                extra_fields.setdefault(header, raw_unit)
         record: dict[str, Any] = {
-            "source_register": address_text,
-            "address": first_address,
-            "word_count": 2 if second_address is not None else 1,
-            "footnote_marker": bool(address_match.group(3)),
             **{field: value for field, value in values.items() if value},
-            "name": description,
+            **_address_record_fields(parsed_address),
+            "name": name,
             "description": description,
             "_claims": claims,
-            "_source": {
-                "format": "pdf",
-                "page": page_number,
-                "row": row_index,
-                "region": region,
-                "parser_id": "pdfplumber-table/v1",
-                "method": "coordinate-derived",
-                "excerpt": " | ".join(
-                    _clean(value) for value in row if _clean(value)
-                )[:300],
-            },
+            "_source": source,
         }
+        if extra_fields:
+            record["_extra"] = extra_fields
         if trailing:
             record["notes"] = " | ".join(trailing)
         records.append(record)
@@ -447,19 +565,56 @@ def _source_register_number(value: Any) -> int | None:
 
 def _find_header(
     table: Sequence[Sequence[Any]],
-) -> tuple[int, dict[str, list[tuple[int, str]]] | None]:
-    for row_index, row in enumerate(table[:5]):
-        columns: dict[str, list[tuple[int, str]]] = {}
-        for column, value in enumerate(row):
-            header = _clean(value)
-            name = _HEADER_NAMES.get(_header_text(header))
-            if name is not None:
-                columns.setdefault(name, []).append((column, header))
-        if "address" in columns and "description" in columns and (
-            "access" in columns or "format" in columns
-        ):
-            return row_index, columns
-    return 0, None
+) -> tuple[
+    int,
+    dict[str, list[tuple[int, str]]] | None,
+    list[tuple[int, str]],
+    bool,
+]:
+    """Find one joined header without rejecting unknown columns."""
+
+    best: tuple[
+        tuple[int, int, int],
+        int,
+        dict[str, list[tuple[int, str]]],
+        list[tuple[int, str]],
+        bool,
+    ] | None = None
+    limit = min(5, len(table))
+    for start in range(limit):
+        for end in range(start, min(start + 3, limit)):
+            width = max((len(row) for row in table[start : end + 1]), default=0)
+            columns: dict[str, list[tuple[int, str]]] = {}
+            extras: list[tuple[int, str]] = []
+            for column in range(width):
+                header = " ".join(
+                    value
+                    for value in (
+                        _clean(_cell(table[row_index], column))
+                        for row_index in range(start, end + 1)
+                    )
+                    if value
+                )
+                if not header:
+                    continue
+                name = _HEADER_NAMES.get(_header_text(header))
+                if name is None:
+                    extras.append((column, header))
+                else:
+                    if name in {"protocol_offset", "display_address"}:
+                        name = "address"
+                    columns.setdefault(name, []).append((column, header))
+            has_name = "name" in columns or "description" in columns
+            if "address" not in columns or not has_name:
+                continue
+            confident = bool({"access", "format", "area"} & set(columns))
+            score = (int(confident), len(columns), end - start)
+            if best is None or score > best[0]:
+                best = (score, end, columns, extras, confident)
+    if best is None:
+        return 0, None, [], False
+    _score, end, columns, extras, confident = best
+    return end, columns, extras, confident
 
 
 def _resolve_cells(
@@ -478,8 +633,229 @@ def _resolve_cells(
     return values, conflicts
 
 
-def _address_number(value: str) -> int:
-    return int(value, 16 if value.lower().startswith("0x") else 10)
+def _parse_pdf_address(value: Any) -> dict[str, Any] | None:
+    """Parse one source address without creating a protocol offset."""
+
+    raw = _clean(value)
+    match = _ADDRESS.fullmatch(raw)
+    if match is None:
+        return None
+    first = _parse_address_component(match.group("first"))
+    second_text = match.group("second")
+    separator = match.group("separator")
+    parsed: dict[str, Any] = {
+        "raw": raw,
+        "first": first,
+        "second": _parse_address_component(second_text) if second_text else None,
+        "separator": separator,
+        "footnote_marker": bool(match.group("footnote")),
+        "status": "single",
+    }
+    if first["status"] != "single" or (
+        parsed["second"] is not None and parsed["second"]["status"] != "single"
+    ):
+        parsed.update(
+            {
+                "status": "ambiguous",
+                "code": "pdf-grid-address-ambiguous",
+            }
+        )
+        return parsed
+    if separator == "-":
+        parsed.update(
+            {
+                "status": "range",
+                "code": "pdf-grid-address-range-unresolved",
+                "convention": first["convention"],
+                "area": first.get("area"),
+                "number": first["number"],
+                "end_number": parsed["second"]["number"],
+            }
+        )
+        return parsed
+    second = parsed["second"]
+    if second is not None:
+        compatible = (
+            first["convention"] == second["convention"]
+            and first.get("area") == second.get("area")
+            and second["number"] == first["number"] + 1
+        )
+        if not compatible:
+            parsed.update(
+                {
+                    "status": "pair",
+                    "code": "pdf-grid-address-pair-unresolved",
+                }
+            )
+            return parsed
+    parsed.update(
+        {
+            "convention": first["convention"],
+            "area": first.get("area"),
+            "number": first["number"],
+            "display_address": first.get("display_address"),
+            "word_count": 2 if second is not None else 1,
+        }
+    )
+    return parsed
+
+
+def _parse_address_component(value: str) -> dict[str, Any]:
+    text = _clean(value)
+    if re.fullmatch(r"0[xX][0-9A-Fa-f]+", text):
+        return {
+            "raw": text,
+            "status": "single",
+            "convention": "protocol-offset",
+            "area": None,
+            "number": int(text, 16),
+        }
+    x_match = re.fullmatch(r"((?:[34][xX])+)(\d+)", text)
+    if x_match is not None:
+        prefixes = re.findall(r"[34]", x_match.group(1))
+        if len(prefixes) != 1:
+            return {
+                "raw": text,
+                "status": "ambiguous",
+                "convention": "unknown",
+                "area": None,
+                "number": int(x_match.group(2)),
+            }
+        number_text = x_match.group(2)
+        number = int(number_text)
+        display = prefixes[0] + number_text.zfill(4)
+        return {
+            "raw": text,
+            "status": "single",
+            "convention": "modicon-reference",
+            "area": _AREA_BY_PREFIX[prefixes[0]],
+            "number": number,
+            "display_address": display,
+        }
+    number = int(text)
+    if len(text) in {5, 6} and text[0] in _AREA_BY_PREFIX and int(text[1:]) >= 1:
+        return {
+            "raw": text,
+            "status": "single",
+            "convention": "modicon-reference",
+            "area": _AREA_BY_PREFIX[text[0]],
+            "number": int(text[1:]),
+            "display_address": text,
+        }
+    return {
+        "raw": text,
+        "status": "single",
+        "convention": "unknown",
+        "area": None,
+        "number": number,
+    }
+
+
+def _parse_register_area(value: Any) -> tuple[str | None, str | None]:
+    text = _header_text(value)
+    if not text:
+        return None, None
+    prefixes = set(re.findall(r"(?<!\w)([34])x(?!\w)", text))
+    if len(prefixes) == 1:
+        return _AREA_BY_PREFIX[prefixes.pop()], None
+    if len(prefixes) > 1 or re.search(r"(?:[34]x){2}", text):
+        return None, "ambiguous"
+    aliases = {
+        "input": "input-register",
+        "input register": "input-register",
+        "input registers": "input-register",
+        "input-register": "input-register",
+        "holding": "holding-register",
+        "holding register": "holding-register",
+        "holding registers": "holding-register",
+        "holding-register": "holding-register",
+    }
+    return aliases.get(text), None if text in aliases else "unrecognized"
+
+
+def _address_with_area(parsed: Mapping[str, Any], area: str) -> dict[str, Any]:
+    result = dict(parsed)
+    raw_number = str(parsed["first"]["raw"])
+    if not raw_number.isdigit() or area not in _PREFIX_BY_AREA:
+        return result
+    prefix = _PREFIX_BY_AREA[area]
+    source_register = f"{prefix}x{raw_number}"
+    display = prefix + raw_number.zfill(4)
+    first = dict(parsed["first"])
+    first.update(
+        {
+            "raw": source_register,
+            "convention": "modicon-reference",
+            "area": area,
+            "display_address": display,
+        }
+    )
+    result.update(
+        {
+            "raw": source_register,
+            "first": first,
+            "convention": "modicon-reference",
+            "area": area,
+            "display_address": display,
+        }
+    )
+    return result
+
+
+def _address_parse_evidence(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    evidence = {
+        field: parsed.get(field)
+        for field in (
+            "raw",
+            "status",
+            "convention",
+            "area",
+            "number",
+            "display_address",
+            "word_count",
+            "separator",
+        )
+        if parsed.get(field) is not None
+    }
+    for field in ("first", "second"):
+        component = parsed.get(field)
+        if isinstance(component, Mapping):
+            evidence[field] = {
+                key: component.get(key)
+                for key in (
+                    "raw",
+                    "status",
+                    "convention",
+                    "area",
+                    "number",
+                    "display_address",
+                )
+                if component.get(key) is not None
+            }
+    if parsed.get("end_number") is not None:
+        evidence["end_number"] = parsed["end_number"]
+    return evidence
+
+
+def _address_record_fields(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "source_register": parsed["raw"],
+        "address_convention": parsed["convention"],
+        "address_number": parsed["number"],
+        "word_count": parsed["word_count"],
+        "footnote_marker": parsed["footnote_marker"],
+        "address_parse": _address_parse_evidence(parsed),
+    }
+    if parsed.get("area") is not None:
+        fields["area"] = parsed["area"]
+    if parsed.get("display_address") is not None:
+        fields["display_address"] = parsed["display_address"]
+    else:
+        fields["source_address"] = {
+            "raw": parsed["first"]["raw"],
+            "convention": parsed["convention"],
+        }
+    return fields
 
 
 def _clean_values(values: Iterable[Any]) -> list[str]:

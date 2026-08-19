@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import subprocess
 import unittest
@@ -9,6 +10,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins" / "modbus-skills" / "runtime"))
+PDF_FIXTURES = ROOT / "tests" / "fixtures" / "pdf-extraction"
 
 from modbus_skills.pdf_table_extraction import (  # noqa: E402
     PdfTableExtractionError,
@@ -61,7 +63,7 @@ class PdfTableExtractionTests(unittest.TestCase):
         records = parse_pdf_table(table, page_number=19, table_index=0)
 
         self.assertEqual(["001", "002", "257/258*"], [row["source_register"] for row in records])
-        self.assertEqual([1, 2, 257], [row["address"] for row in records])
+        self.assertEqual([1, 2, 257], [row["address_number"] for row in records])
         self.assertTrue(all("protocol_offset" not in row for row in records))
         self.assertEqual([1, 1, 2], [row["word_count"] for row in records])
         self.assertEqual("R", records[1]["access"])
@@ -104,7 +106,12 @@ class PdfTableExtractionTests(unittest.TestCase):
         prepared = prepare_pdf_records(evidence)["records"][0]
 
         self.assertEqual([], evidence["quarantined_records"])
-        self.assertEqual(0x43, prepared["address"])
+        self.assertEqual(0x43, prepared["address_number"])
+        self.assertEqual(
+            {"raw": "0x0043", "convention": "protocol-offset"},
+            prepared["source_address"],
+        )
+        self.assertNotIn("protocol_offset", prepared)
         self.assertEqual(1, prepared["word_count"])
         self.assertEqual("int16", prepared["datatype"])
         self.assertEqual("uF", prepared["engineering_unit"])
@@ -115,6 +122,115 @@ class PdfTableExtractionTests(unittest.TestCase):
         self.assertEqual("Start", claims["address"]["raw_header"])
         self.assertEqual("Type", claims["format"]["raw_header"])
         self.assertEqual("Scale Factor", claims["scale"]["raw_header"])
+
+    def test_parses_symbolic_register_fixture_as_display_addresses(self) -> None:
+        table = json.loads(
+            (PDF_FIXTURES / "symbolic-register-table.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        evidence = parse_pdf_table_evidence(table, page_number=4, table_index=0)
+
+        self.assertEqual(
+            ["REG_SYNTHETIC_INPUT", "REG_SYNTHETIC_HOLDING"],
+            [row["name"] for row in evidence["records"]],
+        )
+        self.assertEqual(
+            ["3x1000", "4x1161"],
+            [row["source_register"] for row in evidence["records"]],
+        )
+        self.assertEqual(
+            ["31000", "41161"],
+            [row["display_address"] for row in evidence["records"]],
+        )
+        self.assertEqual(
+            ["input-register", "holding-register"],
+            [row["area"] for row in evidence["records"]],
+        )
+        self.assertTrue(
+            all("protocol_offset" not in row for row in evidence["records"])
+        )
+        self.assertEqual(
+            {"Min": "0", "Max": "100", "Step": "1"},
+            evidence["records"][0]["_extra"],
+        )
+        self.assertEqual(
+            ["pdf-grid-address-ambiguous"],
+            [row["code"] for row in evidence["quarantined_records"]],
+        )
+        self.assertEqual(4, evidence["records"][0]["_source"]["page"])
+
+    def test_accepts_display_address_grammar_without_emitting_offsets(self) -> None:
+        table = [
+            ["Reg addr", "R/W", "Data Type", "Meaning"],
+            ["33000", "R", "uint16", "Input display reference"],
+            ["40001", "R", "uint16", "Holding display reference"],
+            ["0x1A", "R", "uint16", "Hex source address"],
+            ["3x1000", "R", "uint16", "Input shorthand"],
+            ["4x1161", "R", "uint16", "Holding shorthand"],
+            ["40001/40002", "R", "uint32", "Two-word display pair"],
+            ["33004-33019", "R", "uint16", "Range"],
+            ["4x3x1160", "R", "uint16", "Mixed prefix"],
+        ]
+
+        evidence = parse_pdf_table_evidence(table, page_number=6, table_index=0)
+        records = {row["source_register"]: row for row in evidence["records"]}
+
+        self.assertEqual(
+            {"33000", "40001", "0x1A", "3x1000", "4x1161", "40001/40002"},
+            set(records),
+        )
+        self.assertEqual("33000", records["33000"]["display_address"])
+        self.assertEqual("31000", records["3x1000"]["display_address"])
+        self.assertEqual("41161", records["4x1161"]["display_address"])
+        self.assertEqual(2, records["40001/40002"]["word_count"])
+        self.assertEqual("protocol-offset", records["0x1A"]["address_convention"])
+        self.assertTrue(all("protocol_offset" not in row for row in records.values()))
+        self.assertEqual(
+            {
+                "pdf-grid-address-range-unresolved",
+                "pdf-grid-address-ambiguous",
+            },
+            {row["code"] for row in evidence["quarantined_records"]},
+        )
+
+    def test_address_and_name_without_type_are_quarantined(self) -> None:
+        table = [
+            ["Register number", "Meaning", "Remarks"],
+            ["40001", "Synthetic status", "Read only"],
+        ]
+
+        evidence = parse_pdf_table_evidence(table, page_number=8, table_index=0)
+
+        self.assertEqual([], evidence["records"])
+        self.assertEqual(
+            ["pdf-grid-type-unresolved"],
+            [row["code"] for row in evidence["quarantined_records"]],
+        )
+
+    def test_joins_wrapped_grid_header_and_quarantines_bit_list(self) -> None:
+        table = [
+            ["Register", "Meaning", "Data", "Unit", "Remarks"],
+            ["Address", None, "Type", None, None],
+            ["(Decimal)", None, None, None, None],
+            ["12510", "Synthetic state", "uint16", "%", "Read only"],
+            ["12514", "Reserved", None, None, "0—No 1—Yes"],
+        ]
+
+        evidence = parse_pdf_table_evidence(table, page_number=7, table_index=0)
+
+        self.assertEqual(["12510"], [row["source_register"] for row in evidence["records"]])
+        self.assertEqual("Synthetic state", evidence["records"][0]["name"])
+        self.assertEqual("uint16", evidence["records"][0]["format"])
+        self.assertEqual(
+            {"Unit": "%", "Remarks": "Read only"},
+            evidence["records"][0]["_extra"],
+        )
+        self.assertEqual(
+            ["pdf-grid-bit-list-vs-register-unresolved"],
+            [row["code"] for row in evidence["quarantined_records"]],
+        )
 
     def test_conflicting_duplicate_semantic_columns_are_quarantined(self) -> None:
         table = [

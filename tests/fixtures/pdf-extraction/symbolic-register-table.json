@@ -1,0 +1,14 @@
+[
+  [
+    "Symbolic register name",
+    "Register number",
+    "Modbus Register type",
+    "Description",
+    "Min",
+    "Max",
+    "Step"
+  ],
+  ["REG_SYNTHETIC_INPUT", "1000", "3x", "Synthetic input", "0", "100", "1"],
+  ["REG_SYNTHETIC_HOLDING", "1161", "4x", "Synthetic holding value", "0", "100", "1"],
+  ["REG_SYNTHETIC_MIXED", "4x3x1160", "4x", "Ambiguous mixed prefix", "0", "1", "1"]
+]
