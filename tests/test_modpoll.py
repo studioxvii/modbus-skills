@@ -173,6 +173,48 @@ class ModpollExporterTests(unittest.TestCase):
         self.assertEqual("held", result.status)
         self.assertIn("MODPOLL_BLOCK_ENDIAN_CONFLICT", {finding.code for finding in result.findings})
 
+    def test_gavinying_maps_coil_and_discrete_input_read_only_bases(self) -> None:
+        coil = point(
+            logical_point_id="pump_run",
+            name="Pump Run",
+            route_id="lab",
+            area="coil",
+            protocol_offset=0,
+            datatype="bool",
+            word_span=1,
+            byte_order=None,
+            byte_order_confirmed=True,
+            scale=None,
+            engineering_unit=None,
+        )
+        discrete = point(
+            logical_point_id="alarm",
+            name="Alarm Bit",
+            route_id="lab",
+            area="discrete-input",
+            protocol_offset=5,
+            datatype="bool",
+            word_span=1,
+            byte_order=None,
+            byte_order_confirmed=True,
+            scale=None,
+            engineering_unit=None,
+        )
+        canonical_map, read_plan = inputs(coil, discrete)
+        self.assertEqual(
+            {1, 2}, {request["function_code"] for request in read_plan["requests"]}
+        )
+        result = export_modpoll(canonical_map, read_plan, profile="gavinying-cli")
+        self.assertEqual("generated", result.status)
+        config = text(result, "lab.csv")
+        # coil traditional base 0, discrete-input traditional base 10000.
+        self.assertIn("poll,coil,0,1,BE_BE", config)
+        self.assertIn("ref,pump_run,0,bool,r,,", config)
+        self.assertIn("poll,discrete_input,10005,1,BE_BE", config)
+        self.assertIn("ref,alarm_bit,10005,bool,r,,", config)
+        # Read-only: no writable references are emitted.
+        self.assertNotIn(",rw,", config)
+
     def test_witte_desktop_uses_documented_read_automation_only(self) -> None:
         canonical_map, read_plan = inputs()
         result = export_modpoll(canonical_map, read_plan, profile="witte-desktop")
