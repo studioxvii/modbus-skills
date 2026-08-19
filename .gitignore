@@ -8,6 +8,7 @@ venv/
 .review-studio17/
 build/
 dist/
+*.egg-info/
 artifacts/
 private/
 vendor/
