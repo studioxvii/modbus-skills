@@ -188,6 +188,54 @@ class ModscanExporterTests(unittest.TestCase):
             text(result, "test-message-plan.csv"),
         )
 
+    def test_read_plan_and_message_plan_cover_coil_and_discrete_input_reads(self) -> None:
+        coil = point(
+            logical_point_id="pump_run",
+            name="Pump Run",
+            route_id="lab",
+            area="coil",
+            protocol_offset=0,
+            datatype="bool",
+            word_span=1,
+            byte_order=None,
+            scale=None,
+            engineering_unit=None,
+        )
+        discrete = point(
+            logical_point_id="alarm",
+            name="Alarm Bit",
+            route_id="lab",
+            area="discrete-input",
+            protocol_offset=5,
+            datatype="bool",
+            word_span=1,
+            byte_order=None,
+            scale=None,
+            engineering_unit=None,
+        )
+        canonical_map = {"points": [coil, discrete]}
+        read_plan = artifact_envelope(
+            compile_read_plan([coil, discrete]).to_dict(),
+            schema_version="modbus-read-plan/v1",
+            inputs={"canonical_map": canonical_map},
+        )
+        result = export_modscan(canonical_map, read_plan)
+        self.assertEqual("generated", result.status)
+        read_plan_csv = text(result, "read-plan.csv")
+        # coil -> FC01 at PDU 0 (base-1 reference 1); discrete-input -> FC02 at
+        # PDU 5 (base-1 reference 10006).
+        self.assertIn(",01,coil,0,1,", read_plan_csv)
+        self.assertIn(",02,discrete-input,5,10006,", read_plan_csv)
+        message_plan = text(result, "test-message-plan.csv")
+        leading = [
+            row["request_pdu_hex"].split()[0]
+            for row in csv.DictReader(StringIO(message_plan))
+        ]
+        # Only bounded read PDUs (FC01/FC02) are emitted, never a write code.
+        self.assertEqual({"01", "02"}, set(leading))
+        self.assertIn("01 00 00 00 01", message_plan)
+        self.assertIn("02 00 05 00 01", message_plan)
+
     def test_message_plan_contains_only_bounded_read_pdu(self) -> None:
         canonical_map, read_plan = inputs()
         result = export_modscan(canonical_map, read_plan)
