@@ -1,0 +1,4 @@
+{
+  "name": "Modbus Skills",
+  "install": "set -e\nif [ ! -f pyproject.toml ]; then\n  if [ -f modbus-skills/pyproject.toml ]; then cd modbus-skills\n  elif [ -f repos/modbus-skills/pyproject.toml ]; then cd repos/modbus-skills\n  fi\nfi\npython3 -m pip install -e ."
+}
