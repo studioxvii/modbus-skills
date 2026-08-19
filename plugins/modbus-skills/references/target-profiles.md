@@ -17,3 +17,8 @@ Native application verification has not been run for either Modpoll profile.
 Generate readable setup and poll-plan files. Do not synthesize undocumented binary projects.
 
 Native application verification has not been run.
+
+## Addressing and native verification
+
+See `addressing-and-native-verification.md` for the address base each target uses
+and a loopback-only recipe to natively verify Modpoll and ModScan artifacts.
