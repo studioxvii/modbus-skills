@@ -592,6 +592,78 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual("Units", evidence["engineering_unit"]["raw_header"])
         self.assertEqual("uF", evidence["engineering_unit"]["raw_value"])
 
+    def test_symbolic_pdf_grid_compiles_display_addresses_as_a_partial_map(self) -> None:
+        source = self.root / "symbolic-grid.pdf"
+        source.write_bytes(b"%PDF-1.4\n% synthetic rights-safe fixture\n")
+        table = json.loads(
+            (
+                ROOT
+                / "tests"
+                / "fixtures"
+                / "pdf-extraction"
+                / "symbolic-register-table.json"
+            ).read_text(encoding="utf-8")
+        )
+        grid_evidence = parse_pdf_table_evidence(
+            table, page_number=4, table_index=0
+        )
+        effects = [
+            subprocess.CompletedProcess([], 0, b"", b"pdftotext version 25.06.0\n"),
+            subprocess.CompletedProcess([], 0, b"", b"-f -l -layout -bbox-layout -enc\n"),
+            subprocess.CompletedProcess(
+                [],
+                0,
+                b"Symbolic register name Register number Modbus Register type Description\n",
+                b"",
+            ),
+            subprocess.CompletedProcess([], 0, b"<doc><page/></doc>", b""),
+        ]
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "pdf"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        with mock.patch(
+            "modbus_skills.pdf_extraction.shutil.which",
+            return_value="/usr/bin/pdftotext",
+        ), mock.patch(
+            "modbus_skills.pdf_extraction._call", side_effect=effects
+        ), mock.patch(
+            "modbus_skills.pdf_extraction.extract_pdf_table_evidence",
+            return_value=grid_evidence,
+        ):
+            result = compile_user_map(
+                compile_request, self.root / "symbolic-grid-case"
+            )
+
+        self.assertEqual("partial", result["state"])
+        oem_map = json.loads(
+            (
+                self.root
+                / "symbolic-grid-case"
+                / "artifacts"
+                / "oem-map.json"
+            ).read_text()
+        )
+        self.assertEqual(
+            {"3x1000", "4x1161"},
+            {point["source_register"] for point in oem_map["points"]},
+        )
+        self.assertEqual(
+            {999, 1160}, {point["protocol_offset"] for point in oem_map["points"]}
+        )
+        hold_codes = {hold["code"] for hold in oem_map["holds"]}
+        self.assertIn("pdf-grid-address-ambiguous", hold_codes)
+        self.assertIn("point.datatype-unresolved", hold_codes)
+        self.assertNotIn("pdf-structured-rows-unavailable", hold_codes)
+
     def test_same_pdf_address_in_two_tables_becomes_two_source_rows(self) -> None:
         source = self.root / "duplicate-address.pdf"
         source.write_bytes(b"%PDF synthetic")

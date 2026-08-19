@@ -1,0 +1,6 @@
+Register                      Data
+Address      Meaning          Type    Unit    Remarks
+(Decimal)
+12510        Synthetic state  uint16  %       Read only
+
+12514  Reserved  0—No 1—Yes

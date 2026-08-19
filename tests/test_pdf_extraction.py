@@ -17,6 +17,7 @@ from modbus_skills.pdf_extraction import (  # noqa: E402
     _source_coverage,
     discover_register_pages,
     extract_pdf,
+    parse_layout_rows,
 )
 
 
@@ -27,6 +28,7 @@ HELP = subprocess.CompletedProcess(
     b"",
     b"-f <int> -l <int> -layout -bbox-layout -enc <string>\n",
 )
+PDF_FIXTURES = ROOT / "tests" / "fixtures" / "pdf-extraction"
 
 
 def completed(stdout: bytes = b"", *, stderr: bytes = b"", code: int = 0):
@@ -53,7 +55,14 @@ def bbox(*rows: tuple[str, str, str]) -> bytes:
 
 
 class PdfExtractionTests(unittest.TestCase):
-    def extract(self, effects, *, name: str = "map.pdf", grid_rows=None):
+    def extract(
+        self,
+        effects,
+        *,
+        name: str = "map.pdf",
+        grid_rows=None,
+        grid_quarantined=None,
+    ):
         with mock.patch(
             "modbus_skills.pdf_extraction.shutil.which", return_value="/usr/bin/pdftotext"
         ), mock.patch(
@@ -62,7 +71,9 @@ class PdfExtractionTests(unittest.TestCase):
             "modbus_skills.pdf_extraction.extract_pdf_table_evidence",
             return_value={
                 "records": [] if grid_rows is None else grid_rows,
-                "quarantined_records": [],
+                "quarantined_records": (
+                    [] if grid_quarantined is None else grid_quarantined
+                ),
             },
         ):
             result = extract_pdf(Path(name), b"%PDF synthetic")
@@ -210,6 +221,92 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual("unknown", coverage["status"])
         self.assertEqual([1], coverage["covered_pages"])
 
+    def test_wrapped_meaning_header_and_enum_continuation_fixture(self) -> None:
+        text = (PDF_FIXTURES / "wrapped-register-meaning.txt").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual([1, 2], discover_register_pages(text))
+        records, rejected = parse_layout_rows(text)
+
+        self.assertEqual([], rejected)
+        self.assertEqual(["12510"], [row["source_register"] for row in records])
+        self.assertEqual("Synthetic state", records[0]["name"])
+        self.assertEqual("uint16", records[0]["datatype"])
+        self.assertEqual(
+            {"unit": "%", "remarks": "Read only"}, records[0]["_extra"]
+        )
+        self.assertEqual(1, records[0]["_source"]["page"])
+
+    def test_wrapped_manual_returns_partial_rows_not_structured_unavailable(self) -> None:
+        layout = (PDF_FIXTURES / "wrapped-register-meaning.txt").read_bytes()
+
+        result, _ = self.extract(
+            [VERSION, HELP, completed(layout), completed(b"<doc><page/></doc>")]
+        )
+
+        self.assertEqual("held", result["status"])
+        self.assertEqual(["12510"], [row["source_register"] for row in result["records"]])
+        self.assertNotIn(
+            "pdf-structured-rows-unavailable",
+            {hold["code"] for hold in result["holds"]},
+        )
+        self.assertIn(
+            "pdf-source-coverage-unproven",
+            {hold["code"] for hold in result["holds"]},
+        )
+
+    def test_document_code_footer_is_not_a_register_page(self) -> None:
+        text = "Modbus guide\nLT–20174\fRegister overview\nLT–20174\n"
+
+        self.assertEqual([], discover_register_pages(text))
+
+    def test_page_without_address_and_name_returns_a_hold(self) -> None:
+        layout = b"Modbus overview\nLT\xe2\x80\x9320174\n"
+
+        result, _ = self.extract([VERSION, HELP, completed(layout)])
+
+        self.assertEqual("held", result["status"])
+        self.assertEqual([], result["records"])
+        self.assertEqual(
+            ["pdf-register-pages-unavailable"],
+            [hold["code"] for hold in result["holds"]],
+        )
+
+    def test_grid_quarantine_returns_specific_hold_instead_of_empty_success(self) -> None:
+        layout = b"Address  Meaning  Remarks\n33004-33019  Synthetic range  Reserved\n"
+        quarantine = {
+            "code": "pdf-grid-address-range-unresolved",
+            "fields": ["address"],
+            "source_register": "33004-33019",
+            "name": "Synthetic range",
+            "_source": {
+                "format": "pdf",
+                "page": 1,
+                "row": 1,
+                "region": "p1:t0:r1",
+                "parser_id": "pdfplumber-table/v1",
+                "method": "coordinate-derived",
+                "excerpt": "33004-33019 | Synthetic range | Reserved",
+            },
+        }
+
+        result, _ = self.extract(
+            [VERSION, HELP, completed(layout), completed(b"<doc><page/></doc>")],
+            grid_quarantined=[quarantine],
+        )
+
+        self.assertEqual("held", result["status"])
+        self.assertNotIn(
+            "pdf-structured-rows-unavailable",
+            {hold["code"] for hold in result["holds"]},
+        )
+        self.assertIn(
+            "pdf-grid-address-range-unresolved",
+            {hold["code"] for hold in result["holds"]},
+        )
+        self.assertEqual([quarantine], result["quarantined_records"])
+
     def test_narrative_page_number_is_not_a_register_continuation(self) -> None:
         text = (
             "Address  Name  Data Type\n40001  Temperature  uint16\f"
@@ -259,7 +356,7 @@ class PdfExtractionTests(unittest.TestCase):
         self.assertEqual(2, len(result["records"]))
         self.assertEqual(
             {"40001", "40002"},
-            {record["address"] for record in result["records"]},
+            {record["display_address"] for record in result["records"]},
         )
 
     def test_unique_address_with_name_drift_is_quarantined_not_duplicated(self) -> None:
