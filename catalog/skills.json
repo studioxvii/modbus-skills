@@ -67,7 +67,7 @@
     {
       "id": "capture-sample",
       "display_name": "Capture Sample",
-      "description": "Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool. Use when the user needs one physical read, raw words for byte-order work, or a manual probe before decoding.",
+      "description": "Generate a bounded read-only probe pack and stop before the live Modbus read. Use when the user needs an operator-controlled sample, raw words for byte-order work, or a manual probe before decoding; the operator or enabled target tool creates capture.json only after confirmation.",
       "license": "Apache-2.0",
       "short_description": "Build a bounded one-read probe",
       "default_prompt": "Use $capture-sample to build a one-read probe for this point.",

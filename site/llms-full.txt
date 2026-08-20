@@ -31,7 +31,7 @@ If the next step is unclear, use [Modbus Help](skills/modbus-help.html).
 - [Build ModScan (BETA)](skills/build-modscan.html): Build deterministic read-only BETA ModScan setup, poll-plan, point-map, and protocol test-message artifacts. Use when the user asks for ModScan files, a ModScan read plan, or ModScan probe/final setup.
 - [Build Node-RED](skills/build-node-red.html): Build deterministic read-only Node-RED Modbus flow JSON from a canonical map and compiled read plan. Use when the user asks for a Node-RED flow, Modbus flex-getter setup, or Node-RED probe/final capture path.
 - [Build Tool Pack](skills/build-tool-pack.html): Build any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) from one validated map and read plan. Use when the user wants multiple target tools, an undecided target set, or one combined probe/final pack.
-- [Capture Sample](skills/capture-sample.html): Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool. Use when the user needs one physical read, raw words for byte-order work, or a manual probe before decoding.
+- [Capture Sample](skills/capture-sample.html): Generate a bounded read-only probe pack and stop before the live Modbus read. Use when the user needs an operator-controlled sample, raw words for byte-order work, or a manual probe before decoding; the operator or enabled target tool creates capture.json only after confirmation.
 - [Check Byte Order](skills/check-byte-order.html): Evaluate every supported byte and word layout from one immutable raw Modbus sample without choosing a winner. Use when byte order, word order, or multi-register decoding is unknown and raw words or a capture already exist.
 - [Check Map](skills/check-map.html): Check a normalized Modbus map for identity, range, overlap, width, access, function, and byte-order problems. Use when the user wants deterministic lint/validation findings on a normalized or reviewed register map.
 - [Compare Maps](skills/compare-maps.html): Compare two reviewed Modbus maps and report added, removed, moved, changed, and unresolved points. Use when the user compares firmware/map revisions or asks what changed between two validated maps.
@@ -82,7 +82,7 @@ Build any selected combination of Node-RED, Modpoll (BETA), and ModScan (BETA) f
 Example: Use $build-tool-pack to build these selected target outputs.
 ## Capture Sample
 
-Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool. Use when the user needs one physical read, raw words for byte-order work, or a manual probe before decoding.
+Generate a bounded read-only probe pack and stop before the live Modbus read. Use when the user needs an operator-controlled sample, raw words for byte-order work, or a manual probe before decoding; the operator or enabled target tool creates capture.json only after confirmation.
 
 Example: Use $capture-sample to build a one-read probe for this point.
 ## Check Byte Order
@@ -178,7 +178,7 @@ Evaluate every supported layout from one immutable sample, record one human conf
 
 ## Workflow: Determine byte order from a one-read probe
 
-Collect one raw sample with capture-sample when words are missing, then confirm the layout.
+Build a bounded probe with capture-sample when raw words are missing. After live-read confirmation, an operator or enabled target tool runs the gated read. Byte-order confirmation follows.
 
 1. capture-sample: probe-request/v1 -> modbus-tool-pack/v1
 2. external-gate: modbus-tool-pack/v1 -> capture/v1
