@@ -1,14 +1,14 @@
 # Capture Sample
 
-Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool.
+Generate a bounded read-only probe pack and stop before the live Modbus read.
 
 ## Use this when
 
-The user needs one physical read, raw words for byte-order work, or a manual probe before decoding.
+The user needs an operator-controlled sample, raw words for byte-order work, or a manual probe before decoding; the operator or enabled target tool creates capture.json only after confirmation.
 
 ## What you get back
 
-- `README.md` and the selected tool folder - Start here. These files describe and perform one bounded manual read; they do not connect automatically.
+- `README.md` and the selected tool folder - Start here. These files contain instructions or operator-controlled artifacts for one bounded read. The skill does not run them.
 - `tool-pack.zip` - The portable copy of the probe files.
 - `manifest.json`, `checksums.sha256`, and `tool-pack-result.json` - Normally ignore these. They verify the probe contents and safety limits.
 
