@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
+import os
 import stat
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 import subprocess
@@ -14,10 +17,36 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins" / "modbus-skills" / "runtime"))
 
+from modbus_skills import compiler
 from modbus_skills.artifacts import stable_input_hash
 from modbus_skills.compiler import CompilerError, compile_user_map
 from modbus_skills.compiler_contracts import build_device_binding, build_oem_map
 from modbus_skills.pdf_table_extraction import parse_pdf_table_evidence
+
+
+POSIX = os.name == "posix"
+
+
+@contextlib.contextmanager
+def without_os_attribute(name: str) -> Iterator[None]:
+    """Emulate a platform such as Windows where a POSIX-only os function is absent."""
+    missing = object()
+    original = getattr(os, name, missing)
+    if original is not missing:
+        delattr(os, name)
+    try:
+        yield
+    finally:
+        if original is not missing:
+            setattr(os, name, original)
+
+
+def descriptor_is_open(descriptor: int) -> bool:
+    try:
+        os.fstat(descriptor)
+    except OSError:
+        return False
+    return True
 
 
 def oem_map(*, multiword: bool = False) -> dict[str, object]:
@@ -123,10 +152,11 @@ class CompilerTests(unittest.TestCase):
         self.assertTrue((case_root / "compile-result.json").is_file())
         self.assertTrue((case_root / "case.json").is_file())
         self.assertEqual(result, compile_user_map(copy.deepcopy(request()), case_root))
-        self.assertEqual(stat.S_IMODE(case_root.stat().st_mode), 0o700)
-        self.assertEqual(
-            stat.S_IMODE((case_root / "case.json").stat().st_mode), 0o600
-        )
+        if POSIX:
+            self.assertEqual(stat.S_IMODE(case_root.stat().st_mode), 0o700)
+            self.assertEqual(
+                stat.S_IMODE((case_root / "case.json").stat().st_mode), 0o600
+            )
 
     def test_selected_blocking_hold_cannot_report_offline_complete(self) -> None:
         held_map = build_oem_map(
@@ -889,6 +919,207 @@ class CompilerTests(unittest.TestCase):
         changed["selection_candidate"]["requested_measurements"] = ["different"]
         with self.assertRaisesRegex(CompilerError, "different request"):
             compile_user_map(changed, case_root)
+
+
+class AtomicWriteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name) / "case"
+        self.descriptors: list[int] = []
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    @contextlib.contextmanager
+    def capture_descriptors(self) -> Iterator[None]:
+        real_mkstemp = tempfile.mkstemp
+
+        def spy(*args: object, **kwargs: object) -> tuple[int, str]:
+            descriptor, path = real_mkstemp(*args, **kwargs)
+            self.descriptors.append(descriptor)
+            return descriptor, path
+
+        with mock.patch.object(compiler.tempfile, "mkstemp", spy):
+            yield
+
+    @contextlib.contextmanager
+    def observe_cleanup(self, observed: list[bool]) -> Iterator[None]:
+        real_discard = compiler._discard_temporary
+
+        def observing_discard(path: Path) -> None:
+            observed.append(descriptor_is_open(self.descriptors[-1]))
+            real_discard(path)
+
+        with mock.patch.object(compiler, "_discard_temporary", observing_discard):
+            yield
+
+    def temporaries(self, directory: Path) -> list[str]:
+        return sorted(
+            entry.name for entry in directory.iterdir() if entry.name.startswith(".")
+        )
+
+    def test_atomic_write_creates_then_replaces_and_leaves_no_open_handles(self) -> None:
+        target = self.root / "output" / "user-map.json"
+        with self.capture_descriptors():
+            compiler._atomic_write(self.root, "output/user-map.json", b"first")
+            compiler._atomic_write(self.root, "output/user-map.json", b"second")
+
+        self.assertEqual(b"second", target.read_bytes())
+        self.assertEqual([], self.temporaries(target.parent))
+        self.assertEqual(2, len(self.descriptors))
+        self.assertEqual(
+            [], [item for item in self.descriptors if descriptor_is_open(item)]
+        )
+        if POSIX:
+            self.assertEqual(0o600, stat.S_IMODE(target.stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE(target.parent.stat().st_mode))
+
+    def test_replace_failure_closes_descriptor_before_discarding_temporary(self) -> None:
+        self.root.mkdir(parents=True)
+        target = self.root / "case.json"
+        target.write_bytes(b"original")
+        observed: list[bool] = []
+
+        def sharing_violation(*args: object, **kwargs: object) -> None:
+            raise OSError(32, "used by another process")
+
+        with self.capture_descriptors(), self.observe_cleanup(observed):
+            with mock.patch.object(compiler.os, "replace", sharing_violation):
+                with self.assertRaises(OSError):
+                    compiler._atomic_write(self.root, "case.json", b"updated")
+
+        self.assertEqual([False], observed)
+        self.assertFalse(descriptor_is_open(self.descriptors[-1]))
+        self.assertEqual([], self.temporaries(self.root))
+        self.assertEqual(b"original", target.read_bytes())
+
+    def test_fdopen_failure_closes_descriptor_before_discarding_temporary(self) -> None:
+        observed: list[bool] = []
+
+        with self.capture_descriptors(), self.observe_cleanup(observed):
+            with mock.patch.object(
+                compiler.os, "fdopen", side_effect=OSError("no handle available")
+            ):
+                with self.assertRaises(OSError):
+                    compiler._atomic_write(self.root, "case.json", b"payload")
+
+        self.assertEqual([False], observed)
+        self.assertFalse(descriptor_is_open(self.descriptors[-1]))
+        self.assertEqual([], self.temporaries(self.root))
+        self.assertFalse((self.root / "case.json").exists())
+
+    def test_write_completes_when_fchmod_is_absent(self) -> None:
+        with without_os_attribute("fchmod"), self.capture_descriptors():
+            compiler._atomic_write(self.root, "output/user-map.csv", b"payload")
+
+        self.assertEqual(b"payload", (self.root / "output" / "user-map.csv").read_bytes())
+        self.assertEqual([], self.temporaries(self.root / "output"))
+        self.assertFalse(descriptor_is_open(self.descriptors[-1]))
+
+    def test_write_completes_when_fchmod_raises_attribute_error(self) -> None:
+        error = AttributeError("module 'os' has no attribute 'fchmod'")
+        with self.capture_descriptors():
+            with mock.patch.object(compiler.os, "fchmod", side_effect=error):
+                compiler._atomic_write(self.root, "case.json", b"payload")
+
+        self.assertEqual(b"payload", (self.root / "case.json").read_bytes())
+        self.assertEqual([], self.temporaries(self.root))
+        self.assertFalse(descriptor_is_open(self.descriptors[-1]))
+
+    def test_windows_like_platform_writes_without_a_sharing_violation(self) -> None:
+        """Emulate Windows: no os.fchmod, and no unlink or replace on an open handle."""
+        real_replace = os.replace
+        real_unlink = Path.unlink
+        replaced: list[bool] = []
+
+        def guarded_replace(source: object, destination: object) -> None:
+            if descriptor_is_open(self.descriptors[-1]):
+                raise OSError(32, "used by another process")
+            replaced.append(True)
+            real_replace(source, destination)
+
+        def guarded_unlink(path: Path, **kwargs: object) -> None:
+            if self.descriptors and descriptor_is_open(self.descriptors[-1]):
+                raise OSError(32, "used by another process")
+            real_unlink(path, **kwargs)
+
+        with without_os_attribute("fchmod"), self.capture_descriptors():
+            with mock.patch.object(compiler.os, "replace", guarded_replace):
+                with mock.patch.object(Path, "unlink", guarded_unlink):
+                    compiler._atomic_write(self.root, "case.json", b"first")
+                    compiler._atomic_write(self.root, "case.json", b"second")
+
+        self.assertEqual([True, True], replaced)
+        self.assertEqual(b"second", (self.root / "case.json").read_bytes())
+        self.assertEqual([], self.temporaries(self.root))
+
+    def test_write_completes_when_chmod_is_not_supported(self) -> None:
+        def unsupported(*args: object, **kwargs: object) -> None:
+            raise OSError(1, "operation not permitted")
+
+        with mock.patch.object(compiler.os, "chmod", unsupported):
+            compiler._atomic_write(self.root, "output/user-map.md", b"payload")
+
+        self.assertEqual(b"payload", (self.root / "output" / "user-map.md").read_bytes())
+
+    def test_compile_user_map_is_byte_identical_without_fchmod(self) -> None:
+        expected = self.root / "posix-case"
+        compile_user_map(request(), expected)
+
+        without = self.root / "no-fchmod-case"
+        with without_os_attribute("fchmod"):
+            result = compile_user_map(request(), without)
+
+        self.assertEqual("offline-complete", result["state"])
+        # compile-result.json carries elapsed_ms, and case.json hashes it, so both
+        # differ between any two runs regardless of platform.
+        timed = {"compile-result.json", "case.json"}
+        artifacts = sorted(
+            path.relative_to(expected).as_posix()
+            for path in expected.rglob("*")
+            if path.is_file()
+        )
+        self.assertIn("output/user-map.json", artifacts)
+        self.assertEqual(
+            artifacts,
+            sorted(
+                path.relative_to(without).as_posix()
+                for path in without.rglob("*")
+                if path.is_file()
+            ),
+        )
+        for relative in artifacts:
+            if relative in timed:
+                continue
+            self.assertEqual(
+                (expected / relative).read_bytes(),
+                (without / relative).read_bytes(),
+                relative,
+            )
+        self.assertEqual(
+            json.loads((expected / "case.json").read_text())["artifacts"]["oem_map"],
+            json.loads((without / "case.json").read_text())["artifacts"]["oem_map"],
+        )
+
+    def test_unsafe_artifact_paths_are_rejected_before_any_temporary_file(self) -> None:
+        for relative in ("", "../escape.json", "/absolute.json", "output\\user-map.json"):
+            with self.subTest(relative=relative):
+                with self.assertRaises(CompilerError):
+                    compiler._atomic_write(self.root, relative, b"payload")
+        self.assertFalse(self.root.exists())
+
+    @unittest.skipUnless(POSIX, "symbolic-link artifacts need POSIX symlink support")
+    def test_symbolic_link_artifact_is_refused(self) -> None:
+        self.root.mkdir(parents=True)
+        outside = Path(self.temporary.name) / "outside.json"
+        outside.write_bytes(b"outside")
+        (self.root / "case.json").symlink_to(outside)
+
+        with self.assertRaises(CompilerError):
+            compiler._atomic_write(self.root, "case.json", b"payload")
+
+        self.assertEqual(b"outside", outside.read_bytes())
+        self.assertEqual([], self.temporaries(self.root))
 
 
 if __name__ == "__main__":
