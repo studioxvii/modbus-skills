@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "modbus-skills"
 PACKAGING = ROOT / "packaging"
 VARIANTS = ("agent-plugin", "codex", "cursor", "claude")
+CLAUDE_ADAPTER_TOKEN = "disable-model-invocation"
+CLAUDE_ADAPTER_LINE = f"{CLAUDE_ADAPTER_TOKEN}: true\n"
 PACKAGE_SOURCE_NAMES = frozenset(
     {
         ".codex-plugin",
@@ -70,16 +72,20 @@ def _copy_canonical(
 
 
 def _add_claude_manual_invocation(skill_path: Path) -> None:
-    text = skill_path.read_text(encoding="utf-8")
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    # Byte-level insertion keeps the adapter line LF and leaves the canonical bytes
+    # untouched; text mode would rewrite every newline as CRLF on Windows.
+    data = skill_path.read_bytes()
+    lines = data.splitlines(keepends=True)
+    if not lines or lines[0].strip() != b"---":
         raise ValueError(f"missing frontmatter in {skill_path}")
     try:
-        closing = next(index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---")
+        closing = next(
+            index for index, line in enumerate(lines[1:], start=1) if line.strip() == b"---"
+        )
     except StopIteration as exc:
         raise ValueError(f"unterminated frontmatter in {skill_path}") from exc
-    lines.insert(closing, "disable-model-invocation: true\n")
-    skill_path.write_text("".join(lines), encoding="utf-8")
+    lines.insert(closing, CLAUDE_ADAPTER_LINE.encode("utf-8"))
+    skill_path.write_bytes(b"".join(lines))
 
 
 def _build_into(staging: Path) -> None:

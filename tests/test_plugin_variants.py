@@ -6,12 +6,35 @@ import unittest
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from unittest import mock
 
-from scripts.build_plugin_variants import ROOT, build_variants
-from scripts.validate_plugin_variants import validate_variants
+from scripts.build_plugin_variants import (
+    CLAUDE_ADAPTER_LINE,
+    ROOT,
+    _add_claude_manual_invocation,
+    build_variants,
+)
+from scripts.validate_plugin_variants import _without_claude_adapter, validate_variants
 
 
 PLUGIN = ROOT / "plugins" / "modbus-skills"
+SKILL_RELATIVE = Path("skills") / "check-map" / "SKILL.md"
+ADAPTER_LF = CLAUDE_ADAPTER_LINE.encode("utf-8")
+ADAPTER_CRLF = CLAUDE_ADAPTER_LINE.replace("\n", "\r\n").encode("utf-8")
+
+
+def windows_write_text(
+    path: Path,
+    data: str,
+    encoding: str | None = None,
+    errors: str | None = None,
+    newline: str | None = None,
+) -> int:
+    """Emulate the Windows text-mode default that rewrites "\\n" as "\\r\\n"."""
+
+    if newline is None:
+        data = data.replace("\n", "\r\n")
+    return Path.write_bytes(path, data.encode(encoding or "utf-8", errors or "strict"))
 
 
 @contextmanager
@@ -53,6 +76,14 @@ class PluginVariantTests(unittest.TestCase):
         errors = validate_variants(output or self.output)
         self.assertTrue(any(expected in error for error in errors), errors)
 
+    def assert_no_validation_error(self, unexpected: str, output: Path | None = None) -> None:
+        errors = validate_variants(output or self.output)
+        self.assertEqual([], [error for error in errors if unexpected in error])
+
+    def strip_adapter(self, data: bytes) -> tuple[bytes, list[str]]:
+        errors: list[str] = []
+        return _without_claude_adapter(data, SKILL_RELATIVE, errors), errors
+
     def test_builds_valid_host_specific_variants(self) -> None:
         self.assertEqual([], validate_variants(self.output))
         self.assertTrue((self.output / "agent-plugin" / "plugin.json").is_file())
@@ -72,6 +103,129 @@ class PluginVariantTests(unittest.TestCase):
         )
         self.assertIn("disable-model-invocation: true\n", skill)
         self.assertFalse((self.output / "claude" / "skills" / "check-map" / "agents").exists())
+
+    def test_claude_variant_skills_keep_lf_newlines_and_canonical_bytes(self) -> None:
+        packaged = sorted((self.output / "claude" / "skills").glob("*/SKILL.md"))
+        self.assertNotEqual([], packaged)
+        for skill_path in packaged:
+            with self.subTest(skill=skill_path.name):
+                data = skill_path.read_bytes()
+                self.assertNotIn(b"\r", data)
+                self.assertIn(ADAPTER_LF, data)
+                stripped, errors = self.strip_adapter(data)
+                self.assertEqual([], errors)
+                canonical = PLUGIN / skill_path.relative_to(self.output / "claude")
+                self.assertEqual(canonical.read_bytes(), stripped)
+
+    def test_builder_writes_lf_adapter_when_the_platform_translates_newlines(self) -> None:
+        canonical = (PLUGIN / SKILL_RELATIVE).read_bytes()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            skill_path = Path(temp_dir) / "SKILL.md"
+            skill_path.write_bytes(canonical)
+            with mock.patch.object(Path, "write_text", windows_write_text):
+                _add_claude_manual_invocation(skill_path)
+            data = skill_path.read_bytes()
+        self.assertNotIn(b"\r", data)
+        self.assertIn(ADAPTER_LF, data)
+        stripped, errors = self.strip_adapter(data)
+        self.assertEqual([], errors)
+        self.assertEqual(canonical, stripped)
+
+    def test_builder_inserts_lf_adapter_without_rewriting_source_newlines(self) -> None:
+        canonical = (PLUGIN / SKILL_RELATIVE).read_bytes()
+        crlf_source = canonical.replace(b"\n", b"\r\n")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            skill_path = Path(temp_dir) / "SKILL.md"
+            skill_path.write_bytes(crlf_source)
+            _add_claude_manual_invocation(skill_path)
+            data = skill_path.read_bytes()
+        self.assertEqual(crlf_source, data.replace(ADAPTER_LF, b""))
+        stripped, errors = self.strip_adapter(data)
+        self.assertEqual([], errors)
+        self.assertEqual(crlf_source, stripped)
+
+    def test_validator_strips_a_crlf_adapter_line_from_lf_skill_content(self) -> None:
+        skill_path = self.output / "claude" / "skills" / "check-map" / "SKILL.md"
+        crlf_adapter = skill_path.read_bytes().replace(ADAPTER_LF, ADAPTER_CRLF)
+        self.assertIn(ADAPTER_CRLF, crlf_adapter)
+        with temporary_file(skill_path, crlf_adapter):
+            self.assertEqual([], validate_variants(self.output))
+
+    def test_validator_strips_the_adapter_from_windows_rewritten_skill_bytes(self) -> None:
+        canonical = (PLUGIN / SKILL_RELATIVE).read_bytes()
+        closing = canonical.index(b"---\n", len(b"---\n"))
+        packaged = canonical[:closing] + ADAPTER_LF + canonical[closing:]
+        stripped, errors = self.strip_adapter(packaged.replace(b"\n", b"\r\n"))
+        self.assertEqual([], errors)
+        self.assertNotIn(b"disable-model-invocation", stripped)
+        self.assertEqual(canonical.replace(b"\n", b"\r\n"), stripped)
+
+    def test_validator_reports_line_ending_drift_beyond_the_claude_adapter(self) -> None:
+        skill_path = self.output / "claude" / "skills" / "check-map" / "SKILL.md"
+        rewritten = skill_path.read_bytes().replace(b"\n", b"\r\n")
+        with temporary_file(skill_path, rewritten):
+            self.assert_validation_error(
+                f"claude skill content differs beyond its adapter: {SKILL_RELATIVE}"
+            )
+            self.assert_no_validation_error("claude manual-invocation metadata")
+
+    def test_validator_rejects_missing_or_wrong_claude_adapter(self) -> None:
+        skill_path = self.output / "claude" / "skills" / "check-map" / "SKILL.md"
+        packaged = skill_path.read_bytes()
+        cases = (
+            ("missing", packaged.replace(ADAPTER_LF, b""), "metadata invalid"),
+            (
+                "wrong value",
+                packaged.replace(ADAPTER_LF, b"disable-model-invocation: false\n"),
+                "metadata has a wrong value or format",
+            ),
+            (
+                "wrong format",
+                packaged.replace(ADAPTER_LF, b"disable-model-invocation:true\n"),
+                "metadata has a wrong value or format",
+            ),
+            ("duplicated", packaged.replace(ADAPTER_LF, ADAPTER_LF * 2), "metadata invalid"),
+        )
+        for name, data, expected in cases:
+            with self.subTest(case=name):
+                self.assertNotEqual(packaged, data)
+                with temporary_file(skill_path, data):
+                    self.assert_validation_error(f"claude manual-invocation {expected}")
+
+    def test_validator_rejects_incomplete_claude_skill_frontmatter(self) -> None:
+        skill_path = self.output / "claude" / "skills" / "check-map" / "SKILL.md"
+        cases = (
+            (
+                "missing opening",
+                b"name: check-map\n" + ADAPTER_LF + b"---\n\n# Check Map\n",
+                "claude skill missing opening frontmatter",
+            ),
+            (
+                "unterminated",
+                b"---\nname: check-map\n" + ADAPTER_LF + b"\n# Check Map\n",
+                "claude skill has unterminated frontmatter",
+            ),
+        )
+        for name, data, expected in cases:
+            with self.subTest(case=name):
+                with temporary_file(skill_path, data):
+                    self.assert_validation_error(expected)
+
+    def test_builder_rejects_incomplete_skill_frontmatter(self) -> None:
+        cases = (
+            ("missing opening", b"name: check-map\n---\n\n# Check Map\n", "missing frontmatter"),
+            ("empty file", b"", "missing frontmatter"),
+            ("unterminated", b"---\nname: check-map\n\n# Check Map\n", "unterminated frontmatter"),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for name, data, expected in cases:
+                with self.subTest(case=name):
+                    skill_path = Path(temp_dir) / f"{name}.md"
+                    skill_path.write_bytes(data)
+                    with self.assertRaises(ValueError) as raised:
+                        _add_claude_manual_invocation(skill_path)
+                    self.assertIn(expected, str(raised.exception))
+                    self.assertEqual(data, skill_path.read_bytes())
 
     def test_generated_python_artifacts_are_excluded_without_source_residue(self) -> None:
         generated = (

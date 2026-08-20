@@ -12,6 +12,8 @@ from pathlib import Path
 
 try:
     from scripts.build_plugin_variants import (
+        CLAUDE_ADAPTER_LINE,
+        CLAUDE_ADAPTER_TOKEN,
         GENERATED_SOURCE_PATTERNS,
         PACKAGE_SOURCE_NAMES,
         PACKAGING,
@@ -22,6 +24,8 @@ try:
     )
 except ModuleNotFoundError:  # Direct execution sets scripts/ as sys.path[0].
     from build_plugin_variants import (
+        CLAUDE_ADAPTER_LINE,
+        CLAUDE_ADAPTER_TOKEN,
         GENERATED_SOURCE_PATTERNS,
         PACKAGE_SOURCE_NAMES,
         PACKAGING,
@@ -76,6 +80,13 @@ HOST_TOKEN_RE = re.compile(
     r"\$[a-z][a-z0-9-]*|\b(?:Codex|Claude|OpenAI|Anthropic|Cursor)\b|bundled workspace",
     re.IGNORECASE,
 )
+ADAPTER_TOKEN = CLAUDE_ADAPTER_TOKEN.encode("utf-8")
+# Accept either newline so a CRLF adapter line is stripped rather than reported as
+# missing metadata; the remaining bytes still have to match the canonical source.
+ADAPTER_LINES = (
+    CLAUDE_ADAPTER_LINE.encode("utf-8"),
+    CLAUDE_ADAPTER_LINE.replace("\n", "\r\n").encode("utf-8"),
+)
 
 
 def _load_json(path: Path, errors: list[str]) -> dict[str, object]:
@@ -120,10 +131,8 @@ def _without_claude_adapter(data: bytes, relative: Path, errors: list[str]) -> b
         errors.append(f"claude skill has unterminated frontmatter: {relative}")
         return data
 
-    token = b"disable-model-invocation"
-    exact = b"disable-model-invocation: true\n"
-    token_indexes = [index for index, line in enumerate(lines) if token in line]
-    exact_indexes = [index for index, line in enumerate(lines) if line == exact]
+    token_indexes = [index for index, line in enumerate(lines) if ADAPTER_TOKEN in line]
+    exact_indexes = [index for index, line in enumerate(lines) if line in ADAPTER_LINES]
     adapter_indexes = [index for index in exact_indexes if 0 < index < closing]
 
     if len(exact_indexes) != 1 or len(adapter_indexes) != 1:
