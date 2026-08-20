@@ -17,6 +17,7 @@ from .models import (
     RegisterArea,
     coerce_points,
 )
+from .unit_id_scope import unit_id_error
 from .validation import READ_FUNCTION_BY_AREA, READ_FUNCTION_CODES, validate_points
 
 
@@ -445,10 +446,9 @@ def _positive_int(value: Any, field: str) -> int:
 
 
 def _unit_id(value: Any, field: str) -> int:
-    result = _positive_int(value, field)
-    if result > 247:
-        raise ValueError(f"{field} must be from 1 through 247")
-    return result
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 247:
+        raise ValueError(unit_id_error(field))
+    return value
 
 
 def _offset(value: Any, field: str) -> int:

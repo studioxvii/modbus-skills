@@ -16,6 +16,7 @@ from .byte_order import datatype_width_compatible
 from .models import AddressConvention, DataType, RegisterArea, normalize_bit_order
 from .parsers import parse_source
 from .pdf_extraction import PdfExtractionError, extract_pdf
+from .unit_id_scope import UNIT_ID_SCOPE_NOTE, unit_id_error
 from .validation import READ_FUNCTION_BY_AREA, validate_points
 
 
@@ -672,11 +673,26 @@ def _normalize_one(
     unit_raw, unit_source = _get(record, defaults, "unit_id")
     try:
         unit_id = _integer(unit_raw, minimum=1, maximum=247)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError):
         unit_id = None
-        holds.append(_hold("point.unit-id-invalid", str(exc), "unit_id", source=source, severity="error"))
+        holds.append(
+            _hold(
+                "point.unit-id-invalid",
+                unit_id_error(),
+                "unit_id",
+                source=source,
+                severity="error",
+            )
+        )
     if unit_id is None and not any(item["field"] == "unit_id" for item in holds):
-        holds.append(_hold("point.unit-id-unresolved", "Declare the Modbus unit ID from 1 through 247.", "unit_id", source=source))
+        holds.append(
+            _hold(
+                "point.unit-id-unresolved",
+                f"Declare the Modbus unit ID from 1 through 247. {UNIT_ID_SCOPE_NOTE}",
+                "unit_id",
+                source=source,
+            )
+        )
     if unit_source == "workflow_default":
         assumptions.append(
             _assumption(

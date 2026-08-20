@@ -313,6 +313,32 @@ class CompilerContractTests(unittest.TestCase):
                 unit_id=None,
             )
 
+    def test_binding_contract_rejects_tcp_gateway_unit_ids_with_disclosure(self) -> None:
+        point = oem_points()[0]
+        oem_map = build_oem_map(oem_points(), source_hash=SOURCE_HASH)
+        operations = {
+            "device-binding": lambda unit_id: build_device_binding(
+                oem_map,
+                route_id="plant-a",
+                unit_id=unit_id,
+                transport={"kind": "tcp"},
+            ),
+            "bound-identity": lambda unit_id: bound_point_identity(
+                point,
+                route_id="plant-a",
+                unit_id=unit_id,
+            ),
+        }
+        for operation_name, operation in operations.items():
+            for unit_id in (0, 255):
+                with self.subTest(
+                    operation=operation_name, unit_id=unit_id
+                ), self.assertRaisesRegex(
+                    CompilerContractError,
+                    "1 through 247.*broadcast requests.*Modbus TCP gateway unit IDs 0 and 255",
+                ):
+                    operation(unit_id)
+
     def test_selection_dispositions_are_unique_and_reasoned(self) -> None:
         oem_map = build_oem_map(oem_points(), source_hash=SOURCE_HASH)
         entries = selection_entries()

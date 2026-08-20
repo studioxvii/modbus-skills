@@ -151,11 +151,25 @@ class PointValidationTests(unittest.TestCase):
         )
         self.assertIn("function-code.area-mismatch", {item.code for item in findings})
 
-    def test_broadcast_unit_id_is_forbidden(self):
-        findings = validate_points((point(unit=0),))
-        self.assertIn(
-            "point.unit-id-broadcast-forbidden", {item.code for item in findings}
+    def test_unit_ids_zero_and_255_are_rejected_with_scope_disclosure(self):
+        self.assertEqual(validate_points((point(unit=247),)), ())
+        cases = (
+            (0, "point.unit-id-broadcast-forbidden"),
+            (255, "point.unit-id-invalid"),
         )
+        for unit_id, expected_code in cases:
+            with self.subTest(unit_id=unit_id):
+                finding = next(
+                    item
+                    for item in validate_points((point(unit=unit_id),))
+                    if item.code == expected_code
+                )
+
+                self.assertEqual(FindingSeverity.ERROR, finding.severity)
+                self.assertIn("1 through 247", finding.message)
+                self.assertIn("broadcast requests", finding.message)
+                self.assertIn("Modbus TCP gateway unit IDs 0 and 255", finding.message)
+                self.assertIn("not accepted in this release", finding.message)
 
     def test_coil_with_multi_register_byte_layout_is_an_error(self):
         findings = validate_points(

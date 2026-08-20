@@ -99,31 +99,37 @@ class ExporterContractTests(unittest.TestCase):
         findings = preflight_common(canonical_map, plan, mode="probe")
         self.assertFalse(any(finding.severity == "error" for finding in findings))
 
-    def test_probe_rejects_broadcast_unit_and_missing_route(self) -> None:
-        point = sample_point(unit_id=0, route_id=None)
-        canonical_map = sample_map(point)
-        plan = {
-            "requests": [
-                {
-                    "request_id": "raw",
-                    "route_id": None,
-                    "unit_id": 0,
-                    "area": "holding-register",
-                    "function_code": 3,
-                    "start_offset": 100,
-                    "quantity": 2,
-                    "points": [{"logical_point_id": "pressure"}],
+    def test_probe_rejects_tcp_gateway_unit_ids_and_discloses_scope(self) -> None:
+        for unit_id in (0, 255):
+            with self.subTest(unit_id=unit_id):
+                point = sample_point(unit_id=unit_id, route_id=None)
+                canonical_map = sample_map(point)
+                plan = {
+                    "requests": [
+                        {
+                            "request_id": "raw",
+                            "route_id": None,
+                            "unit_id": unit_id,
+                            "area": "holding-register",
+                            "function_code": 3,
+                            "start_offset": 100,
+                            "quantity": 2,
+                            "points": [{"logical_point_id": "pressure"}],
+                        }
+                    ]
                 }
-            ]
-        }
-        codes = {
-            finding.code
-            for finding in preflight_common(canonical_map, plan, mode="probe")
-        }
-        self.assertIn("POINT_ROUTE_UNRESOLVED", codes)
-        self.assertIn("POINT_UNIT_UNRESOLVED", codes)
-        self.assertIn("BLOCK_ROUTE_UNRESOLVED", codes)
-        self.assertIn("BLOCK_UNIT_UNRESOLVED", codes)
+                findings = {
+                    finding.code: finding
+                    for finding in preflight_common(canonical_map, plan, mode="probe")
+                }
+                self.assertIn("POINT_ROUTE_UNRESOLVED", findings)
+                self.assertIn("BLOCK_ROUTE_UNRESOLVED", findings)
+                for code in ("POINT_UNIT_UNRESOLVED", "BLOCK_UNIT_UNRESOLVED"):
+                    self.assertIn(code, findings)
+                    message = findings[code].message
+                    self.assertIn("1 through 247", message)
+                    self.assertIn("broadcast requests", message)
+                    self.assertIn("Modbus TCP gateway unit IDs 0 and 255", message)
 
     def test_plan_hash_must_match_the_current_map_after_review_changes(self) -> None:
         original_map = sample_map()
