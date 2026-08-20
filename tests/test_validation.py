@@ -4,6 +4,7 @@ from modbus_skills.models import (
     AddressConvention,
     CanonicalPoint,
     DataType,
+    FindingSeverity,
     RegisterArea,
     SourceAddress,
 )
