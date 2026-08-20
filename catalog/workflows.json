@@ -46,10 +46,10 @@
     {
       "id": "determine-byte-order",
       "name": "Determine byte order from a one-read probe",
-      "goal": "Collect one raw sample with capture-sample when words are missing, then confirm the layout.",
+      "goal": "Build a bounded probe with capture-sample when raw words are missing. After live-read confirmation, an operator or enabled target tool runs the gated read. Byte-order confirmation follows.",
       "steps": [
         {"id": "capture", "kind": "skill", "skill": "capture-sample", "condition": "no raw words or capture/v1 yet", "inputs": ["probe-request/v1"], "output": "modbus-tool-pack/v1"},
-        {"id": "run-probe", "kind": "external-gate", "condition": "no raw words or capture/v1 yet", "inputs": ["modbus-tool-pack/v1"], "output": "capture/v1", "instruction": "Run one bounded read and save the returned raw 16-bit words with complete sample identity. Do not scan or write."},
+        {"id": "run-probe", "kind": "external-gate", "condition": "no raw words or capture/v1 yet", "inputs": ["modbus-tool-pack/v1"], "output": "capture/v1", "instruction": "After operator confirmation, run one bounded read and save the returned raw 16-bit words with complete sample identity. Do not scan or write."},
         {"id": "confirm", "kind": "workflow", "workflow": "confirm-byte-order", "inputs": ["modbus-map/v1", "capture/v1"], "output": "modbus-map/v1"}
       ],
       "stop_conditions": ["no probe identity when raw words are missing", "no raw words after the probe gate", "ambiguous sample identity", "no human confirmation"]
