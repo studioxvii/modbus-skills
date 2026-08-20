@@ -42,7 +42,9 @@ offline map look complete.
 - `modbus-device-binding/v1` supplies a route, unit identifier, transport kind,
   read constraints, and optional point overrides only when a target needs them.
   Its `input_hashes.oem_map` must match the exact OEM map. A bound target requires
-  a non-empty route and a unit identifier from 1 through 247.
+  a non-empty route and a unit identifier from 1 through 247. Unit ID 0 is
+  forbidden because this package does not generate broadcast requests. Modbus TCP
+  gateway unit IDs 0 and 255 are not accepted in this release.
 - `modbus-user-map/v1` is the portable selected map. Its OEM-map and selection
   hashes must both match, and every delivered point must be included exactly
   once by the selection.

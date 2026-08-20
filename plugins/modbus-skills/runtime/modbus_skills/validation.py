@@ -13,6 +13,7 @@ from .models import (
     RegisterArea,
     coerce_points,
 )
+from .unit_id_scope import UNIT_ID_SCOPE_NOTE, unit_id_error
 
 
 READ_FUNCTION_BY_AREA: dict[RegisterArea, int] = {
@@ -114,14 +115,14 @@ def _validate_point(point: CanonicalPoint) -> list[Finding]:
         add(
             "point.unit-id-unresolved",
             FindingSeverity.HOLD,
-            "Declare the Modbus unit ID.",
+            f"Declare the Modbus unit ID from 1 through 247. {UNIT_ID_SCOPE_NOTE}",
             "unit_id",
         )
     elif point.unit_id == 0:
         add(
             "point.unit-id-broadcast-forbidden",
             FindingSeverity.ERROR,
-            "Unit ID 0 is not permitted because broadcast requests are disabled.",
+            unit_id_error(),
             "unit_id",
             value=point.unit_id,
         )
@@ -133,7 +134,7 @@ def _validate_point(point: CanonicalPoint) -> list[Finding]:
         add(
             "point.unit-id-invalid",
             FindingSeverity.ERROR,
-            "Unit ID must be from 1 through 247.",
+            unit_id_error(),
             "unit_id",
             value=point.unit_id,
         )

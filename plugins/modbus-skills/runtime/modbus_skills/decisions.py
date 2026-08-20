@@ -13,6 +13,7 @@ from .artifacts import ArtifactContractError, assert_artifact_envelope, stable_i
 from .byte_order import RawSample, evaluate_byte_orders
 from .map_workflows import lint_map
 from .models import DataType, RegisterArea, normalize_bit_order
+from .unit_id_scope import UNIT_ID_SCOPE_NOTE
 
 
 class ReviewDecisionError(ValueError):
@@ -672,8 +673,8 @@ def _validate_byte_order_evidence(
                 f"byte-order evidence {field} does not match the reviewed point"
             )
     try:
-        identity_unit = _integer(
-            identity.get("unit_id"), "byte-order evidence unit_id", 1, 247
+        identity_unit = _unit_id(
+            identity.get("unit_id"), "byte-order evidence unit_id"
         )
         identity_offset = _integer(
             identity.get("protocol_offset"),
@@ -844,6 +845,13 @@ def _integer(value: Any, label: str, minimum: int, maximum: int) -> int:
     return result
 
 
+def _unit_id(value: Any, label: str) -> int:
+    try:
+        return _integer(value, label, 1, 247)
+    except ReviewDecisionError as exc:
+        raise ReviewDecisionError(f"{exc}. {UNIT_ID_SCOPE_NOTE}") from exc
+
+
 def _number(value: Any, label: str) -> float:
     if isinstance(value, bool):
         raise ReviewDecisionError(f"{label} must be a finite number")
@@ -860,7 +868,7 @@ def _decision_value(field: str, value: Any, point: Mapping[str, Any]) -> Any:
     if field == "route_id":
         return _required_text(value, field)
     if field == "unit_id":
-        return _integer(value, field, 1, 247)
+        return _unit_id(value, field)
     if field == "protocol_offset":
         return _integer(value, field, 0, 65_535)
     if field == "word_span":

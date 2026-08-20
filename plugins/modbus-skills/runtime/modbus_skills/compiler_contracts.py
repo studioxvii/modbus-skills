@@ -21,6 +21,7 @@ from .artifacts import (
     stable_input_hash,
 )
 from .models import DataType
+from .unit_id_scope import unit_id_error
 
 
 OEM_MAP_SCHEMA_VERSION = "modbus-oem-map/v1"
@@ -424,7 +425,7 @@ def validate_device_binding(
     route_id = _text(value.get("route_id"), "binding route_id")
     unit_id = value.get("unit_id")
     if isinstance(unit_id, bool) or not isinstance(unit_id, int) or not 1 <= unit_id <= 247:
-        raise CompilerContractError("binding unit_id must be an integer from 1 through 247")
+        raise CompilerContractError(unit_id_error("Binding unit_id"))
     if not route_id:
         raise CompilerContractError("binding route_id must be non-empty text")
     _mapping(value.get("transport"), "binding transport")
@@ -606,7 +607,7 @@ def bound_point_identity(
 
     route = _text(route_id, "route_id")
     if isinstance(unit_id, bool) or not isinstance(unit_id, int) or not 1 <= unit_id <= 247:
-        raise CompilerContractError("unit_id must be an integer from 1 through 247")
+        raise CompilerContractError(unit_id_error("unit_id"))
     point_id = _text(point.get("oem_point_id"), "OEM point oem_point_id")
     area = _text(point.get("area"), "OEM point area")
     offset = point.get("protocol_offset")
