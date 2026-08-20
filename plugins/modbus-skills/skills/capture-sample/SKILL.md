@@ -40,9 +40,6 @@ does not capture the sample itself.
 
 ## Stop
 
-- Require a unit ID from 1 through 247. Unit ID 0 is forbidden because this package
-  does not generate broadcast requests. Modbus TCP gateway unit IDs 0 and 255 are
-  not accepted in this release.
 - Stop for writes, broadcasts, discovery scans, stored credentials, or unbounded polling.
 - Stop if probe identity is incomplete.
 - Do not run the live read. Present the probe and wait for the operator.
