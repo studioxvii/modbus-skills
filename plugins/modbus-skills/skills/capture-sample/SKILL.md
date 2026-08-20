@@ -1,12 +1,13 @@
 ---
 name: capture-sample
-description: Create a bounded read-only probe that collects one raw Modbus sample through a selected target tool. Use when the user needs one physical read, raw words for byte-order work, or a manual probe before decoding.
+description: Generate a bounded read-only probe pack and stop before the live Modbus read. Use when the user needs an operator-controlled sample, raw words for byte-order work, or a manual probe before decoding; the operator or enabled target tool creates capture.json only after confirmation.
 license: Apache-2.0
 ---
 
 # Capture Sample
 
-Generate an operator-controlled probe for one bounded read.
+Generate an operator-controlled probe pack for one bounded read. This skill does
+not connect to the device or perform the read.
 
 Follow `../../references/interaction-contract.md`.
 
@@ -15,23 +16,33 @@ Follow `../../references/interaction-contract.md`.
 1. Read `references/probe-request.md`.
 2. Require route, unit identifier, register area, protocol offset, word count, and target.
 3. Run `python3 <skill-dir>/scripts/run.py --request <probe.json> --output <directory>`.
-4. Confirm the artifact uses only function codes 01 through 04.
-5. Generate and validate the complete probe before asking once for the live physical
-   read against the intended device, then stop.
-6. For Node-RED, use the generated `MODBUS_CAPTURE_PATH` output directly. For other tools, save the returned raw words as `capture/v1` with the complete sample identity.
+4. Confirm the probe pack uses only function codes 01 through 04.
+5. Present the complete probe pack and one scoped live-read confirmation gate,
+   then stop. Do not enable the target tool or perform the live Modbus read.
+6. After confirmation, the operator or enabled target tool performs the bounded
+   read and creates `capture.json`. For Node-RED, use the generated
+   `MODBUS_CAPTURE_PATH` output directly. For other tools, save the returned raw
+   words as `capture/v1` with the complete sample identity.
 
 ## Output files
 
-- `README.md` and the selected tool folder - Start here. These files describe and perform one bounded manual read; they do not connect automatically.
+The skill writes only the probe pack:
+
+- `README.md` and the selected tool folder - Start here. These files contain instructions or operator-controlled artifacts for one bounded read. The skill does not run them.
 - `tool-pack.zip` - The portable copy of the probe files.
 - `manifest.json`, `checksums.sha256`, and `tool-pack-result.json` - Normally ignore these. They verify the probe contents and safety limits.
-- `capture.json` - Created after the operator performs the read. It is not produced by this skill.
+
+`capture.json` is not a skill output. The operator or enabled target tool creates
+it only after confirmation and the gated live read.
 
 Completion requires a generated probe pack and one presented live-read gate. This skill
 does not capture the sample itself.
 
 ## Stop
 
+- Require a unit ID from 1 through 247. Unit ID 0 is forbidden because this package
+  does not generate broadcast requests. Modbus TCP gateway unit IDs 0 and 255 are
+  not accepted in this release.
 - Stop for writes, broadcasts, discovery scans, stored credentials, or unbounded polling.
 - Stop if probe identity is incomplete.
 - Do not run the live read. Present the probe and wait for the operator.

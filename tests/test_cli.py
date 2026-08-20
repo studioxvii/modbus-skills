@@ -160,9 +160,14 @@ class CliIntegrationTests(unittest.TestCase):
             )
             self.assertEqual("generated", receipt["status"])
             if command == "generate-node-red":
-                self.assertEqual("run-bounded-read-plan", receipt["next_action"]["action"])
+                self.assertEqual("present-live-read-gate", receipt["next_action"]["action"])
                 self.assertEqual("capture-sample", receipt["next_action"]["skill"])
                 self.assertEqual("node-red/flow.json", receipt["next_action"]["uses"])
+                self.assertEqual(
+                    "probe pack and live-read gate",
+                    receipt["next_action"]["skill_output"],
+                )
+                self.assertNotIn("produces", receipt["next_action"])
                 self.assertIn(
                     "every five seconds until you disable the tab",
                     receipt["next_action"]["instruction"],
@@ -363,6 +368,23 @@ class CliIntegrationTests(unittest.TestCase):
             "capture-sample", "--request", request_path, "--output", self.root / "relative-probe"
         )
         self.assertEqual("generated", receipt["status"])
+
+    def test_capture_next_action_stops_before_the_live_read(self) -> None:
+        receipt = self.run_command(
+            "capture-sample",
+            "--request",
+            FIXTURES / "probe_request.json",
+            "--output",
+            self.root / "gated-probe",
+        )
+
+        next_action = receipt["next_action"]
+        self.assertEqual("present-live-read-gate", next_action["action"])
+        self.assertEqual("generated probe pack", next_action["uses"])
+        self.assertIn("After operator confirmation", next_action["instruction"])
+        self.assertIn("operator or enabled target tool", next_action["instruction"])
+        self.assertIn("creates capture.json", next_action["instruction"])
+        self.assertNotIn("produces", next_action)
 
     def test_capture_does_not_plan_excluded_unresolved_or_write_only_points(self) -> None:
         def probe_point(identifier: str, offset: int, **updates: object) -> dict[str, object]:

@@ -970,9 +970,13 @@ def _handle_capture(args: argparse.Namespace) -> dict[str, Any]:
         "output": Path(args.output).name,
         "next_action": (
             {
-                "action": "run-bounded-read",
-                "uses": "README.md and the selected target folder",
-                "produces": "capture.json",
+                "action": "present-live-read-gate",
+                "uses": "generated probe pack",
+                "instruction": (
+                    "Stop before the live Modbus read. After operator confirmation, "
+                    "the operator or enabled target tool runs one bounded read and "
+                    "creates capture.json."
+                ),
             }
             if pack.status == "generated"
             else {"action": "resolve-holds"}
@@ -1319,17 +1323,21 @@ def _handle_node_red(args: argparse.Namespace) -> dict[str, Any]:
         "output": Path(args.output).name,
         "next_action": (
             {
-                "action": "run-bounded-read-plan",
+                "action": "present-live-read-gate",
                 "skill": "capture-sample",
                 "uses": "node-red/flow.json",
-                "produces": "capture.json",
+                "skill_output": "probe pack and live-read gate",
                 "instruction": (
-                    "Import flow.json, review the local endpoint, then enable the tab. "
-                    "Final mode runs one read plan every five seconds until you disable the tab."
+                    "The capture-sample skill stops before the live Modbus read. After "
+                    "operator confirmation, import flow.json, review the local endpoint, "
+                    "and enable the tab. Node-RED creates capture.json. Final mode runs one "
+                    "read plan every five seconds until you disable the tab."
                     if args.mode == "final"
                     else
-                    "Import flow.json, review the local endpoint, enable the tab, then click "
-                    "01 Start bounded plan once."
+                    "The capture-sample skill stops before the live Modbus read. After "
+                    "operator confirmation, import flow.json, review the local endpoint, "
+                    "enable the tab, and click 01 Start bounded plan once. Node-RED creates "
+                    "capture.json."
                 ),
             }
             if result.status == "generated"
