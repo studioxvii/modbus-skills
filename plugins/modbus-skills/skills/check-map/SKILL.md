@@ -28,6 +28,9 @@ Completion requires every check to have a visible pass, finding, or skipped reas
 
 - Hold final generation while an error or hold remains, including packed-bit numbering.
 - Do not guess byte order, bit order, address convention, or register area.
+- Accept unit IDs 1 through 247 only. Unit ID 0 is forbidden because this package
+  does not generate broadcast requests. Modbus TCP gateway unit IDs 0 and 255 are
+  not accepted in this release.
 - Permit read functions 01 through 04 only.
 - Stop for writes, broadcasts, discovery, or unbounded polling.
 

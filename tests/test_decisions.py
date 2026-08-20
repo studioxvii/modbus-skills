@@ -266,6 +266,28 @@ class ReviewDecisionTests(unittest.TestCase):
         with self.assertRaises(ReviewDecisionError):
             apply_review_decisions(draft_map(), missing_timezone)
 
+    def test_rejects_tcp_gateway_unit_ids_with_scope_disclosure(self) -> None:
+        for unit_id in (0, 255):
+            with self.subTest(unit_id=unit_id):
+                canonical = draft_map()
+                decision = decision_record(
+                    {
+                        "point_id": "runtime",
+                        "field": "unit_id",
+                        "value": unit_id,
+                        "reason": "Synthetic unit-ID boundary test.",
+                        "evidence_refs": ["source-map"],
+                    },
+                    approve_map=False,
+                    canonical_map=canonical,
+                )
+
+                with self.assertRaisesRegex(
+                    ReviewDecisionError,
+                    "1 through 247.*broadcast requests.*Modbus TCP gateway unit IDs 0 and 255",
+                ):
+                    apply_review_decisions(canonical, decision)
+
     def test_rejects_missing_schema_evidence_and_write_only_conversion(self) -> None:
         missing_schema = decision_record(approve_map=False)
         missing_schema.pop("schema_version")

@@ -21,6 +21,7 @@ from .read_plan import (
     normalize_readable_islands,
     normalize_unsafe_intervals,
 )
+from .unit_id_scope import unit_id_error
 
 
 TARGET_MANIFEST_SCHEMA_VERSION = "modbus-target-manifest/v1"
@@ -1046,7 +1047,14 @@ def preflight_common(
         if point_protocol_offset(point) is None:
             findings.append(Finding("error", "POINT_ADDRESS_UNRESOLVED", "Protocol offset is unresolved.", f"{path}.protocol_offset"))
         if point_unit_id(point) is None:
-            findings.append(Finding("error", "POINT_UNIT_UNRESOLVED", "Unit ID is unresolved.", f"{path}.unit_id"))
+            findings.append(
+                Finding(
+                    "error",
+                    "POINT_UNIT_UNRESOLVED",
+                    unit_id_error("Point unit ID"),
+                    f"{path}.unit_id",
+                )
+            )
 
         access = _normalized_access(point)
         if access == "write-only":
@@ -1120,7 +1128,14 @@ def preflight_common(
         if area is None:
             findings.append(Finding("error", "BLOCK_AREA_UNRESOLVED", "Read block area is unresolved.", f"{path}.area"))
         if unit is None:
-            findings.append(Finding("error", "BLOCK_UNIT_UNRESOLVED", "Read block unit ID is unresolved.", f"{path}.unit_id"))
+            findings.append(
+                Finding(
+                    "error",
+                    "BLOCK_UNIT_UNRESOLVED",
+                    unit_id_error("Read block unit ID"),
+                    f"{path}.unit_id",
+                )
+            )
         if start is None:
             findings.append(Finding("error", "BLOCK_ADDRESS_UNRESOLVED", "Read block start offset is unresolved.", f"{path}.start_offset"))
         if quantity is None:

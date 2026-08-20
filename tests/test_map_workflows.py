@@ -208,6 +208,34 @@ class NormalizeMapTests(unittest.TestCase):
             {assumption["code"] for assumption in result["assumptions"]},
         )
 
+    def test_tcp_gateway_unit_ids_are_held_with_scope_disclosure(self) -> None:
+        for unit_id in (0, 255):
+            with self.subTest(unit_id=unit_id):
+                result = normalize_map(
+                    [
+                        {
+                            "logical_point_id": "unsupported-unit",
+                            "route_id": "lab",
+                            "unit_id": unit_id,
+                            "area": "holding-register",
+                            "protocol_offset": 0,
+                            "datatype": "uint16",
+                        }
+                    ]
+                )
+                hold = next(
+                    item
+                    for item in result["holds"]
+                    if item["code"] == "point.unit-id-invalid"
+                )
+
+                self.assertIsNone(result["points"][0]["unit_id"])
+                self.assertIn("1 through 247", hold["message"])
+                self.assertIn("broadcast requests", hold["message"])
+                self.assertIn(
+                    "Modbus TCP gateway unit IDs 0 and 255", hold["message"]
+                )
+
     def test_synthetic_csv_normalizes_without_blocking_holds(self) -> None:
         parsed = parse_csv((FIXTURES / "synthetic_registers.csv").read_bytes())
         result = normalize_map(parsed)
