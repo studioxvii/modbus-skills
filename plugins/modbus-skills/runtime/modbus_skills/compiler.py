@@ -45,6 +45,11 @@ COMPILE_RESUME_SCHEMA_VERSION = "modbus-compile-resume/v1"
 COMPILE_RESULT_SCHEMA_VERSION = "modbus-compile-result/v1"
 COMPILER_VERSION = "1"
 
+# POSIX owner-only modes. Windows honours only the read-only bit, and lacks
+# os.fchmod entirely, so permission calls are best-effort off POSIX.
+_CASE_DIRECTORY_MODE = 0o700
+_ARTIFACT_MODE = 0o600
+
 _REQUEST_FIELDS = frozenset(
     {
         "schema_version",
@@ -1027,16 +1032,22 @@ def _atomic_write(root: Path, relative: str, data: bytes) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
     temporary_path = Path(temporary)
     try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "wb") as stream:
+        stream = os.fdopen(descriptor, "wb")
+    except BaseException:
+        _close_descriptor(descriptor)
+        _discard_temporary(temporary_path)
+        raise
+    try:
+        with stream:
+            _restrict_descriptor(descriptor)
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary_path, target)
-        os.chmod(target, 0o600)
     except BaseException:
-        temporary_path.unlink(missing_ok=True)
+        _discard_temporary(temporary_path)
         raise
+    _restrict_path(target, _ARTIFACT_MODE)
 
 
 def _contained_path(root: Path, relative: str) -> Path:
@@ -1053,8 +1064,41 @@ def _contained_path(root: Path, relative: str) -> Path:
 def _prepare_directory(path: Path) -> None:
     if path.exists() and path.is_symlink():
         raise CompilerError(f"case directory must not be a symbolic link: {path.name}")
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path, 0o700)
+    path.mkdir(parents=True, exist_ok=True, mode=_CASE_DIRECTORY_MODE)
+    _restrict_path(path, _CASE_DIRECTORY_MODE)
+
+
+def _close_descriptor(descriptor: int) -> None:
+    """Release a temporary descriptor so Windows can unlink or replace the file."""
+    try:
+        os.close(descriptor)
+    except OSError:
+        return
+
+
+def _discard_temporary(path: Path) -> None:
+    """Remove a partially written temporary artifact without masking the original error."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def _restrict_descriptor(descriptor: int) -> None:
+    fchmod = getattr(os, "fchmod", None)
+    if fchmod is None:
+        return
+    try:
+        fchmod(descriptor, _ARTIFACT_MODE)
+    except (AttributeError, NotImplementedError, OSError):
+        return
+
+
+def _restrict_path(path: Path, mode: int) -> None:
+    try:
+        os.chmod(path, mode)
+    except (NotImplementedError, OSError):
+        return
 
 
 def _reject_symlink(path: Path) -> None:
