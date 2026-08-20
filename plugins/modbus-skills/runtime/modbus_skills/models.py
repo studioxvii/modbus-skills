@@ -14,6 +14,8 @@ import re
 from types import MappingProxyType
 from typing import Any, ClassVar, Iterable, Mapping
 
+from .unit_id_scope import unit_id_error
+
 
 class _StringEnum(str, Enum):
     """String-valued enum with conservative coercion."""
@@ -477,7 +479,7 @@ class ReadRequest:
         if isinstance(self.unit_id, bool) or not isinstance(self.unit_id, int):
             raise TypeError("read request unit ID must be an integer")
         if not 1 <= self.unit_id <= 247:
-            raise ValueError("read request unit ID must be from 1 through 247")
+            raise ValueError(unit_id_error("Read request unit ID"))
         if isinstance(self.start_offset, bool) or not isinstance(self.start_offset, int):
             raise TypeError("read request start offset must be an integer")
         if not 0 <= self.start_offset <= 65_535:

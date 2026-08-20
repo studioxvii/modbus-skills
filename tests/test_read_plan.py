@@ -258,6 +258,23 @@ class ReadPlanTests(unittest.TestCase):
                 points=(),
             )
 
+    def test_read_request_rejects_tcp_gateway_unit_ids_with_scope_disclosure(self):
+        for unit_id in (0, 255):
+            with self.subTest(unit_id=unit_id), self.assertRaisesRegex(
+                ValueError,
+                "1 through 247.*broadcast requests.*Modbus TCP gateway unit IDs 0 and 255",
+            ):
+                ReadRequest(
+                    request_id="unsupported-unit",
+                    route_id="r",
+                    unit_id=unit_id,
+                    area=RegisterArea.HOLDING_REGISTER,
+                    function_code=3,
+                    start_offset=0,
+                    quantity=1,
+                    points=(),
+                )
+
     def test_requests_and_ids_are_deterministic_for_input_order(self):
         points = (point("c", 20), point("a", 0), point("b", 1))
         forward = compile_read_plan(points).to_dict()
