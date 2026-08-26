@@ -10,6 +10,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -486,8 +487,18 @@ def _benchmark(fixtures: Path, output: Path) -> dict[str, Any]:
     }
 
 
-def run(fixtures: Path, output: Path, *, benchmark: bool = False) -> dict[str, Any]:
+def _reset_output(output: Path) -> None:
+    if output.exists():
+        for child in output.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
     output.mkdir(parents=True, exist_ok=True)
+
+
+def run(fixtures: Path, output: Path, *, benchmark: bool = False) -> dict[str, Any]:
+    _reset_output(output)
     cases = [
         _clean_case(output),
         _fallback_case(output),

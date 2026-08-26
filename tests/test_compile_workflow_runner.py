@@ -91,6 +91,21 @@ class CompileWorkflowRunnerTests(unittest.TestCase):
 
             self.assertEqual(report["dependencies"], [])
 
+    def test_runner_is_idempotent_on_the_same_output_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "out"
+            first = self._run(output)
+            self.assertEqual(0, first.returncode, first.stderr)
+            first_report = json.loads(
+                (output / "compile-workflow-report.json").read_text(encoding="utf-8")
+            )
+            second = self._run(output)
+            self.assertEqual(0, second.returncode, second.stderr)
+            second_report = json.loads(
+                (output / "compile-workflow-report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(first_report, second_report)
+
     def test_normal_report_is_deterministic_across_output_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
