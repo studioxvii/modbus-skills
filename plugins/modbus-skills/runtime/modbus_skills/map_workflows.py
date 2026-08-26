@@ -112,7 +112,18 @@ _DATATYPE_ALIASES = {
     "ieee754 double": "float64",
     "string": "string",
     "ascii": "string",
+    "int16u": "uint16",
+    "uint16u": "uint16",
+    "int32u": "uint32",
+    "uint32u": "uint32",
+    "int64u": "uint64",
+    "uint64u": "uint64",
+    "utf8": "string",
+    "datetime": "string",
+    "bitmap": "uint16",
+    "4q fp pf": "float32",
 }
+_PLACEHOLDER_TOKENS = frozenset({"---", "n/a", "na", "none", "null"})
 _BYTE_ORDER_ALIASES = {
     "abcd": "ABCD",
     "big endian": "ABCD",
@@ -148,6 +159,7 @@ _ACCESS_ALIASES = {
     "write": "write-only",
     "write only": "write-only",
     "write-only": "write-only",
+    "rwc": "read-write",
 }
 _RESOLVED_DISPOSITIONS = frozenset({"accepted", "corrected", "excluded", "resolved"})
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -347,11 +359,22 @@ def _simulator_point_holds(
     return holds
 
 
+def _is_placeholder_token(value: Any) -> bool:
+    if value in (None, ""):
+        return True
+    text = _text(value)
+    return text is not None and text.casefold() in _PLACEHOLDER_TOKENS
+
+
 def _alias(value: Any, aliases: Mapping[str, str]) -> str | None:
     text = _text(value)
     if text is None:
         return None
-    normalized = re.sub(r"\s+", " ", text.lower().replace("_", " ")).strip()
+    if text.casefold() in _PLACEHOLDER_TOKENS:
+        return None
+    normalized = re.sub(r"\s+", " ", text.lower().replace("_", " ").strip())
+    if normalized in _PLACEHOLDER_TOKENS:
+        return None
     return aliases.get(normalized) or aliases.get(text.lower())
 
 
@@ -585,13 +608,34 @@ def _source_hold_items(value: Any) -> tuple[list[Any], list[dict[str, Any]]]:
 
 def _stable_point_id(record: Mapping[str, Any], normalized_parts: Mapping[str, Any]) -> str:
     name = _text(record.get("name"))
-    payload = {
+    protocol_offset = normalized_parts.get("protocol_offset")
+    payload: dict[str, Any] = {
         "name": name,
         "route_id": normalized_parts.get("route_id"),
         "unit_id": normalized_parts.get("unit_id"),
         "area": normalized_parts.get("area"),
-        "fallback_address": None if name else normalized_parts.get("raw_address"),
     }
+    if not name:
+        payload["raw_address"] = normalized_parts.get("raw_address")
+        if protocol_offset is not None:
+            payload["protocol_offset"] = protocol_offset
+        description = _text(record.get("description"))
+        if description:
+            payload["description"] = description
+        datatype = _text(record.get("datatype"))
+        if datatype and not _is_placeholder_token(datatype):
+            payload["datatype"] = datatype
+        access_value = record.get("access")
+        if not _is_placeholder_token(access_value):
+            payload["access"] = access_value
+        source = record.get("_source") if isinstance(record.get("_source"), Mapping) else {}
+        region = source.get("region")
+        if isinstance(region, str) and region:
+            payload["source_region"] = region
+        else:
+            row = source.get("row", source.get("line"))
+            if isinstance(row, int) and not isinstance(row, bool) and row >= 0:
+                payload["source_row"] = row
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return "point-" + hashlib.sha256(encoded).hexdigest()[:16]
 
@@ -899,10 +943,30 @@ def _normalize_one(
 
     datatype_raw, datatype_source = _get(record, defaults, "datatype")
     datatype_value = _alias(datatype_raw, _DATATYPE_ALIASES)
-    if datatype_value is None:
-        code = "point.datatype-unresolved" if datatype_raw in (None, "") else "point.datatype-unrecognized"
-        message = "Declare the point data type." if datatype_raw in (None, "") else f"Data type {datatype_raw!r} is not recognized."
-        holds.append(_hold(code, message, "datatype", source=source))
+    metadata_row = (
+        datatype_value is None
+        and _is_placeholder_token(record.get("access"))
+        and not _text(record.get("description"))
+    )
+    if datatype_value is None and not metadata_row:
+        if datatype_raw in (None, ""):
+            holds.append(
+                _hold(
+                    "point.datatype-unresolved",
+                    "Declare the point data type.",
+                    "datatype",
+                    source=source,
+                )
+            )
+        elif not _is_placeholder_token(datatype_raw):
+            holds.append(
+                _hold(
+                    "point.datatype-unrecognized",
+                    f"Data type {datatype_raw!r} is not recognized.",
+                    "datatype",
+                    source=source,
+                )
+            )
     if datatype_source == "workflow_default":
         assumptions.append(
             _assumption(
@@ -1141,7 +1205,7 @@ def _normalize_one(
 
     access_raw = record.get("access")
     access = _alias(access_raw, _ACCESS_ALIASES)
-    if access_raw not in (None, "") and access is None:
+    if not _is_placeholder_token(access_raw) and access is None:
         holds.append(
             _hold(
                 "point.access-unrecognized",
@@ -1459,6 +1523,7 @@ def _normalize_one(
         "route_id": route_id,
         "unit_id": unit_id,
         "area": area_value,
+        "protocol_offset": protocol_offset,
     }
     logical_point_id = explicit_id or _stable_point_id(record, id_parts)
     if explicit_id is None:

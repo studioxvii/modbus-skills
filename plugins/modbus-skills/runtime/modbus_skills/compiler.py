@@ -681,6 +681,19 @@ def _pdf_coverage_complete(oem_map: Mapping[str, Any]) -> bool:
     )
 
 
+_NON_SOURCE_REPLACEMENT_HOLDS = frozenset(
+    {
+        "point.not-readable",
+        "point.write-only-not-readable",
+        "point.datatype-span-mismatch",
+        "point.byte-order-unrecognized",
+        "point.datatype-unrecognized",
+        "point.span-invalid",
+        "source.rejected-rows-unresolved",
+    }
+)
+
+
 def _requires_source_correction(
     oem_map: Mapping[str, Any], source_format: str
 ) -> bool:
@@ -688,13 +701,14 @@ def _requires_source_correction(
 
     PDF semantic uncertainty belongs in the generated map's exception annex;
     it is not evidence that the user must replace the source document.
+    Point-level normalization holds on tabular sources are reviewed in the
+    generated user map, not treated as a broken source file.
     """
 
     holds = [
         hold
         for hold in _blocking_holds(oem_map)
-        if str(hold.get("code", ""))
-        not in {"point.not-readable", "point.write-only-not-readable"}
+        if str(hold.get("code", "")) not in _NON_SOURCE_REPLACEMENT_HOLDS
     ]
     if source_format != "pdf":
         return bool(holds)
