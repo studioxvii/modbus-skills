@@ -51,8 +51,25 @@ from .pymodbus_fallback import (
 ADAPTER_VERSION = "1.0.0"
 TARGET = "modpoll"
 SUPPORTED_PROFILES = frozenset(
-    {"gavinying-cli", "witte-desktop", "witte-v12-xml"}
+    {"gavinying-cli", "proconx-cli", "witte-desktop", "witte-v12-xml"}
 )
+_PROCONX_AREA_TYPE = {
+    "coil": "0",
+    "discrete-input": "1",
+    "input-register": "3",
+    "holding-register": "4",
+}
+_PROCONX_FINAL_TYPE_SUFFIX = {
+    "int16": ":int16",
+    "uint16": ":uint16",
+    "float16": ":float16",
+    "int32": ":int32",
+    "uint32": ":uint32",
+    "float32": ":f32",
+    "float64": ":f64",
+    "double": ":f64",
+}
+_PROCONX_SUPPORTED_BYTE_ORDERS = frozenset({"ABCD", "BE_BE"})
 WITTE_DESKTOP_MIN_SCAN_INTERVAL_MS = 1000
 WITTE_DESKTOP_MAX_ROUTE_READS_PER_SECOND = 5
 
@@ -111,9 +128,10 @@ def export_modpoll(
     """Generate one explicit Modpoll profile.
 
     ``gavinying-cli`` produces the documented ``device``/``poll``/``ref`` CSV
-    format.  ``witte-desktop`` produces an auditable read plan and a PowerShell
-    automation script.  The Witte application, not this exporter, creates any
-    native ``.mbp`` files.
+    format.  ``proconx-cli`` produces one bounded ``modpoll`` command per
+    compiled read block for the proconX FieldTalk CLI.  ``witte-desktop``
+    produces an auditable read plan and a PowerShell automation script.  The
+    Witte application, not this exporter, creates any native ``.mbp`` files.
     """
 
     mode = normalize_mode(mode)
@@ -128,6 +146,8 @@ def export_modpoll(
         )
     if selected_profile == "gavinying-cli":
         return _export_gavinying(canonical_map, read_plan, mode=mode, options=options)
+    if selected_profile == "proconx-cli":
+        return _export_proconx(canonical_map, read_plan, mode=mode, options=options)
     if selected_profile == "witte-v12-xml":
         return _export_witte_v12_xml(
             canonical_map, read_plan, mode=mode, options=options
@@ -253,6 +273,315 @@ def _export_gavinying(
         findings=tuple(findings),
         artifacts=tuple(artifacts),
     )
+
+
+def _export_proconx(
+    canonical_map: Mapping[str, Any],
+    read_plan: Mapping[str, Any],
+    *,
+    mode: str,
+    options: Mapping[str, Any],
+) -> ExportResult:
+    profile = "proconx-cli"
+    findings = list(preflight_common(canonical_map, read_plan, mode=mode))
+    blocks = tuple(blocks_from_plan(read_plan))
+    if not has_errors(findings):
+        findings.extend(_proconx_preflight(canonical_map, blocks, mode=mode))
+    if has_errors(findings):
+        return held_result(
+            TARGET,
+            canonical_map,
+            read_plan,
+            mode=mode,
+            adapter_version=ADAPTER_VERSION,
+            findings=findings,
+            profile=profile,
+        )
+
+    routes = sorted({block_route_id(block) for block in blocks})
+    multiple_routes = len(routes) > 1
+    artifacts: list[Artifact] = []
+    route_commands: list[dict[str, Any]] = []
+    command_lines = [
+        "# proconX FieldTalk modpoll command reference.",
+        "# Review host, port, and unit values before use.",
+        "# Each command performs one bounded read.",
+    ]
+    for route in routes:
+        prefix = env_prefix_for_route(route, multiple_routes=multiple_routes)
+        host_var = "$" + "{" + prefix + "_HOST}"
+        port_var = "$" + "{" + prefix + "_PORT}"
+        route_blocks = [
+            (index, block)
+            for index, block in enumerate(blocks)
+            if block_route_id(block) == route
+        ]
+        for source_index, block in sorted(
+            route_blocks, key=lambda item: block_id(item[1], item[0])
+        ):
+            points = points_for_block(canonical_map, block, source_index)
+            command = _proconx_command(
+                block,
+                host_var=host_var,
+                port_var=port_var,
+                mode=mode,
+                points=points,
+            )
+            command_lines.append(command)
+            route_commands.append(
+                {
+                    "request_id": block_id(block, source_index),
+                    "route_id": route,
+                    "command": command,
+                }
+            )
+
+    artifacts.append(
+        Artifact.text(
+            "modpoll/proconx-cli/commands.txt",
+            "text/plain",
+            "\n".join(command_lines) + "\n",
+            "operator-command-reference",
+        )
+    )
+    artifacts.append(
+        Artifact.text(
+            "modpoll/proconx-cli/read-plan.csv",
+            "text/csv",
+            _proconx_read_plan_csv(blocks),
+            "proconx-read-plan",
+        )
+    )
+    artifacts.append(
+        pymodbus_fallback_artifact(
+            blocks, f"modpoll/proconx-cli/{FALLBACK_FILENAME}"
+        )
+    )
+    route_setup = [
+        {
+            "route_id": route,
+            "host_environment": f"{env_prefix_for_route(route, multiple_routes=multiple_routes)}_HOST",
+            "port_environment": f"{env_prefix_for_route(route, multiple_routes=multiple_routes)}_PORT",
+        }
+        for route in routes
+    ]
+    manifest = target_manifest(
+        target=TARGET,
+        profile=profile,
+        mode=mode,
+        adapter_version=ADAPTER_VERSION,
+        canonical_map=canonical_map,
+        read_plan=read_plan,
+        findings=findings,
+        extra={
+            "format": "proconx-modpoll-cli",
+            "format_documentation": "https://www.modbusdriver.com/modpoll.html",
+            "routes": route_setup,
+            "commands": route_commands,
+            "unsupported_features": [
+                "gavinying device/poll/ref CSV import",
+                "engineering offsets",
+                "non-default byte orders for multi-register values",
+            ],
+            "native_verification": native_verification_not_run("Modpoll"),
+        },
+    )
+    artifacts.extend(
+        [
+            Artifact.text(
+                "modpoll/proconx-cli/manifest.json",
+                "application/json",
+                stable_json(manifest),
+                "target-manifest",
+            ),
+            Artifact.text(
+                "modpoll/proconx-cli/README.md",
+                "text/markdown",
+                _proconx_readme(mode),
+                "operator-instructions",
+            ),
+        ]
+    )
+    return ExportResult(
+        target=TARGET,
+        status="generated",
+        mode=mode,
+        map_hash=canonical_map_hash(canonical_map),
+        read_plan_hash=read_plan_hash(read_plan),
+        adapter_version=ADAPTER_VERSION,
+        profile=profile,
+        findings=tuple(findings),
+        artifacts=tuple(artifacts),
+    )
+
+
+def _proconx_preflight(
+    canonical_map: Mapping[str, Any],
+    blocks: Iterable[Mapping[str, Any]],
+    *,
+    mode: str,
+) -> tuple[Finding, ...]:
+    findings: list[Finding] = []
+    for block_index, block in enumerate(blocks):
+        block_path = f"requests[{block_index}]"
+        unit = block_unit_id(block)
+        if unit is not None and not 1 <= unit <= 255:
+            findings.append(
+                Finding(
+                    "error",
+                    "MODPOLL_UNIT_UNSUPPORTED",
+                    "proconX modpoll documents read unit IDs from 1 through 255.",
+                    f"{block_path}.unit_id",
+                )
+            )
+        layouts: set[str] = set()
+        points = points_for_block(canonical_map, block, block_index)
+        for point_index, point in enumerate(points):
+            point_path = f"{block_path}.points[{point_index}]"
+            if mode == "final":
+                datatype = point_datatype(point)
+                area = block_area(block)
+                assert area is not None
+                if area in {"holding-register", "input-register"} and datatype:
+                    suffix = _PROCONX_FINAL_TYPE_SUFFIX.get(
+                        (datatype or "").strip().lower()
+                    )
+                    if suffix is None and not (datatype or "").startswith("string"):
+                        findings.append(
+                            Finding(
+                                "error",
+                                "MODPOLL_DATATYPE_UNSUPPORTED",
+                                f"proconX modpoll does not document datatype {datatype!r}.",
+                                f"{point_path}.datatype",
+                            )
+                        )
+                engineering_offset = point.get(
+                    "engineering_offset", point.get("offset")
+                )
+                if engineering_offset not in (None, 0, 0.0, "0", "0.0"):
+                    findings.append(
+                        Finding(
+                            "error",
+                            "MODPOLL_OFFSET_UNSUPPORTED",
+                            "proconX modpoll does not apply additive engineering offsets.",
+                            f"{point_path}.engineering_offset",
+                        )
+                    )
+                if (
+                    (point_word_count(point) or 1) > 1
+                    and not (datatype or "").startswith("string")
+                ):
+                    order = point_byte_order(point) or "ABCD"
+                    if order not in _PROCONX_SUPPORTED_BYTE_ORDERS:
+                        findings.append(
+                            Finding(
+                                "error",
+                                "MODPOLL_BYTE_ORDER_UNSUPPORTED",
+                                f"proconX modpoll cannot map byte order {order!r}.",
+                                f"{point_path}.byte_order",
+                            )
+                        )
+                    else:
+                        layouts.add(order)
+        if len(layouts) > 1:
+            findings.append(
+                Finding(
+                    "error",
+                    "MODPOLL_BLOCK_ENDIAN_CONFLICT",
+                    "One proconX modpoll command cannot decode points with different byte orders.",
+                    block_path,
+                )
+            )
+    return tuple(findings)
+
+
+def _proconx_command(
+    block: Mapping[str, Any],
+    *,
+    host_var: str,
+    port_var: str,
+    mode: str,
+    points: Iterable[Mapping[str, Any]],
+) -> str:
+    area = block_area(block)
+    unit = block_unit_id(block)
+    start = block_start(block)
+    quantity = block_quantity(block)
+    assert area is not None
+    assert unit is not None
+    assert start is not None
+    assert quantity is not None
+    zero_prefix, reference = _proconx_reference(area, start)
+    type_flag = _proconx_type_flag(area, mode=mode, points=tuple(points))
+    return (
+        f"modpoll -m tcp -p \"{port_var}\" -a {unit} {zero_prefix}-r {reference} "
+        f"-c {quantity} -t {type_flag} -1 \"{host_var}\""
+    )
+
+
+def _proconx_reference(area: str, protocol_offset: int) -> tuple[str, str]:
+    if area in {"coil", "discrete-input"}:
+        return "-0 ", str(protocol_offset)
+    return "", str(_TRADITIONAL_BASE[area] + protocol_offset)
+
+
+def _proconx_type_flag(
+    area: str,
+    *,
+    mode: str,
+    points: tuple[Mapping[str, Any], ...],
+) -> str:
+    base = _PROCONX_AREA_TYPE[area]
+    if mode == "probe" or area in {"coil", "discrete-input"}:
+        return base
+    if mode == "final" and points:
+        datatype = (point_datatype(points[0]) or "").strip().lower()
+        suffix = _PROCONX_FINAL_TYPE_SUFFIX.get(datatype)
+        if suffix is not None:
+            return f"{base}{suffix}"
+    return base
+
+
+def _proconx_read_plan_csv(blocks: Iterable[Mapping[str, Any]]) -> str:
+    buffer = StringIO(newline="")
+    writer = csv.writer(buffer, lineterminator="\n")
+    write_csv_row(
+        writer,
+        [
+            "request_id",
+            "route_id",
+            "unit_id",
+            "function_code",
+            "area",
+            "protocol_offset",
+            "reference",
+            "quantity",
+            "poll_interval_ms",
+        ],
+    )
+    for index, block in sorted(
+        enumerate(blocks), key=lambda item: block_id(item[1], item[0])
+    ):
+        area = block_area(block)
+        start = block_start(block)
+        assert area is not None
+        assert start is not None
+        _, reference = _proconx_reference(area, start)
+        write_csv_row(
+            writer,
+            [
+                block_id(block, index),
+                block_route_id(block),
+                block_unit_id(block),
+                f"{block_function_code(block):02d}",
+                area,
+                start,
+                reference,
+                block_quantity(block),
+                block_interval_ms(block),
+            ],
+        )
+    return buffer.getvalue()
 
 
 def _gavinying_preflight(
@@ -1151,6 +1480,31 @@ def _witte_plan_csv(blocks: Iterable[Mapping[str, Any]]) -> str:
             ]
         )
     return buffer.getvalue()
+
+
+def _proconx_readme(mode: str) -> str:
+    return f"""# proconX FieldTalk modpoll {mode.title()} Commands
+
+These files target the proconX ``modpoll`` CLI documented at modbusdriver.com.
+Each line in ``commands.txt`` performs one bounded read using ``-m tcp`` and
+``-1 host`` syntax. Discrete areas use ``-0`` with a zero-based reference.
+
+This target is BETA. Native Modpoll verification was not run, so native verification is unavailable.
+The cross-platform ``pymodbus-read-once.py`` fallback runs one selected compiled
+request and requires an explicit host, port, matching unit ID, and
+``--confirm-read READ``.
+
+``gavinying-cli`` CSV files are not compatible with proconX modpoll. Use this
+profile when the installed tool is proconX FieldTalk modpoll rather than
+gavinying/modpoll.
+
+Review ``read-plan.csv`` and every command before use. Set the route host and
+port environment variables shown in ``manifest.json``. Engineering scale factors
+are informational only; proconX modpoll does not apply them during reads.
+
+Probe configurations read raw 16-bit register words or discrete bits. They do
+not claim that an unknown datatype or byte order is correct.
+"""
 
 
 def _gavinying_readme(mode: str) -> str:

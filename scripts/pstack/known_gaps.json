@@ -1,0 +1,20 @@
+{
+  "schema_version": "pstack-known-gaps/v1",
+  "gaps": [
+    {
+      "id": "compile-user-map-cwd",
+      "skills": ["compile-user-map"],
+      "workflows": ["compile-user-map"],
+      "severity": "medium",
+      "summary": "OEM compile request relative paths fail unless run from private/oem-corpus/<asset>/",
+      "suggested_fix": "Resolve request paths relative to request.json directory in compile-user-map run.py."
+    },
+    {
+      "id": "user-map-to-plan-reads",
+      "skills": ["plan-reads", "compile-user-map"],
+      "severity": "medium",
+      "summary": "user-map.json output cannot feed plan-reads without canonical map fields.",
+      "suggested_fix": "Emit modbus-map/v1 compatible artifact or document normalize step in compile completion contract."
+    }
+  ]
+}
