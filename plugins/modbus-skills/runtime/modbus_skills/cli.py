@@ -166,7 +166,7 @@ def _parser(command: str) -> argparse.ArgumentParser:
         if command == "generate-modpoll":
             parser.add_argument(
                 "--profile",
-                choices=("gavinying-cli", "witte-desktop", "witte-v12-xml"),
+                choices=("gavinying-cli", "proconx-cli", "witte-desktop", "witte-v12-xml"),
                 default="gavinying-cli",
             )
     elif command == "build-tool-pack":

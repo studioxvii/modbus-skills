@@ -3,6 +3,13 @@
 ## `gavinying-cli`
 
 Generate the documented open-source `device`, `poll`, and `ref` CSV collections.
+Use with the gavinying/modpoll CLI, not proconX FieldTalk modpoll.
+
+## `proconx-cli`
+
+Generate one bounded proconX FieldTalk `modpoll` command per compiled read block.
+Use when the installed tool is proconX modpoll from modbusdriver.com. This profile
+does not emit gavinying CSV files.
 
 ## `witte-desktop`
 

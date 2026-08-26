@@ -6,7 +6,10 @@ Generate importable JSON with environment-based endpoint settings. Read compiled
 
 ## Modpoll (BETA)
 
-`gavinying-cli` generates its documented CSV records.
+`gavinying-cli` generates its documented CSV records for the gavinying/modpoll CLI.
+
+`proconx-cli` generates bounded proconX FieldTalk `modpoll` commands for the
+Windows verification lab and other proconX installs.
 
 `witte-desktop` generates readable plans and documented automation. Let the installed application create native files.
 

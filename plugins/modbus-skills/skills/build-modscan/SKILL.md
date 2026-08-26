@@ -21,6 +21,8 @@ Follow `../../references/interaction-contract.md`.
 5. Inspect the setup manifest and generated CSV files.
 6. Load them through ModScan when available. Otherwise report native verification
    as unavailable and use the fallback only for one reviewed request.
+7. Enter `read-plan.csv` and `test-message-plan.csv` rows directly in ModScan.
+   Do not reformat function codes, protocol offsets, or unit IDs.
 
 ## Output files
 
@@ -33,6 +35,14 @@ Follow `../../references/interaction-contract.md`.
 - The JSON manifest and result files - Normally ignore these. They prove which map and plan produced the CSV files and record any holds.
 
 Completion requires a generated or held status with visible native-verification state.
+
+## Windows lab verification
+
+When native ModScan verification runs in the Windows lab, save the receipt under
+`artifacts/windows-lab/<asset-id>/modscan/` (git-ignored). Follow the field list in
+`tests/windows-lab/campaign.json` (`receipt_schema`) and the matrix in
+`docs/windows-lab-setup.md`. Bootstrap example receipt:
+`artifacts/windows-lab/synthetic/receipts/modscan.json`.
 
 ## Stop
 
