@@ -119,7 +119,7 @@ class SkillUsabilityScenarioTests(unittest.TestCase):
         self.assertEqual("inconclusive", result["status"])
         self.assertIn("oracle-evidence-missing", result["issue_codes"])
 
-    def test_stateless_specialist_does_not_claim_hidden_resume(self) -> None:
+    def test_revision_compare_stateless_without_hidden_resume(self) -> None:
         result = self._run("07-revision-compare")
         self.assertEqual("passed", result["status"], result)
         self.assertEqual("not-applicable", result["dimensions"]["resume_behavior"])
