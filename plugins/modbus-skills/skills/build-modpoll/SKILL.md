@@ -13,7 +13,7 @@ Follow `../../references/interaction-contract.md`.
 
 ## Process
 
-1. Read `references/profiles.md` and select `gavinying-cli`, `witte-desktop`, or `witte-v12-xml`.
+1. Read `references/profiles.md` and select `gavinying-cli`, `proconx-cli`, `witte-desktop`, or `witte-v12-xml`.
 2. Require a canonical map, read plan, profile, and `probe` or `final` mode.
 3. Run `python3 <skill-dir>/scripts/run.py --map <map.json> --plan <read-plan.json> --profile <profile> --mode <mode> --output <directory>`.
 4. Inspect the setup manifest, decision report, polling limits, and generated files.

@@ -70,7 +70,7 @@ class ModpollExporterTests(unittest.TestCase):
     def test_every_profile_includes_the_same_bounded_pymodbus_fallback(self) -> None:
         canonical_map, read_plan = inputs()
         scripts = []
-        for profile in ("gavinying-cli", "witte-desktop", "witte-v12-xml"):
+        for profile in ("gavinying-cli", "proconx-cli", "witte-desktop", "witte-v12-xml"):
             with self.subTest(profile=profile):
                 result = export_modpoll(canonical_map, read_plan, profile=profile)
                 script = text(result, "pymodbus-read-once.py")
@@ -215,6 +215,48 @@ class ModpollExporterTests(unittest.TestCase):
         # Read-only: no writable references are emitted.
         self.assertNotIn(",rw,", config)
 
+    def test_proconx_cli_emits_fieldtalk_commands_for_coil_and_holding(self) -> None:
+        coil = point(
+            logical_point_id="pump_run",
+            name="Pump Run",
+            route_id="lab",
+            area="coil",
+            protocol_offset=20,
+            datatype="bool",
+            word_span=1,
+            byte_order=None,
+            byte_order_confirmed=True,
+            scale=None,
+            engineering_unit=None,
+        )
+        holding = point(
+            logical_point_id="temperature",
+            name="Temperature",
+            route_id="lab",
+            area="holding-register",
+            protocol_offset=0,
+            datatype="float32",
+            word_span=2,
+            byte_order="ABCD",
+            byte_order_confirmed=True,
+            scale=None,
+            engineering_unit="degC",
+        )
+        canonical_map, read_plan = inputs(coil, holding)
+        result = export_modpoll(canonical_map, read_plan, profile="proconx-cli")
+        self.assertEqual("generated", result.status)
+        commands = text(result, "commands.txt")
+        self.assertIn(
+            'modpoll -m tcp -p "${MODBUS_LAB_PORT}" -a 1 -0 -r 20 -c 1 -t 0 -1 "${MODBUS_LAB_HOST}"',
+            commands,
+        )
+        self.assertIn(
+            'modpoll -m tcp -p "${MODBUS_LAB_PORT}" -a 1 -r 40000 -c 2 -t 4:f32 -1 "${MODBUS_LAB_HOST}"',
+            commands,
+        )
+        self.assertIn("gavinying-cli", text(result, "README.md"))
+        self.assertIn("40000", text(result, "read-plan.csv"))
+
     def test_witte_desktop_uses_documented_read_automation_only(self) -> None:
         canonical_map, read_plan = inputs()
         result = export_modpoll(canonical_map, read_plan, profile="witte-desktop")
@@ -334,7 +376,7 @@ class ModpollExporterTests(unittest.TestCase):
         read_plan = {
             "requests": [{"request_id": "r", "route_id": "default", "unit_id": 0, "area": "holding-register", "function_code": 3, "start_offset": 100, "quantity": 2, "points": [{"logical_point_id": "pressure"}]}]
         }
-        for profile in ("gavinying-cli", "witte-desktop", "witte-v12-xml"):
+        for profile in ("gavinying-cli", "proconx-cli", "witte-desktop", "witte-v12-xml"):
             with self.subTest(profile=profile):
                 self.assertEqual("held", export_modpoll(canonical_map, read_plan, profile=profile).status)
 
