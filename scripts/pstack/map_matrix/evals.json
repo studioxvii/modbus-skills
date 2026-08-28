@@ -1,0 +1,61 @@
+{
+  "schema_version": "pstack-map-matrix-evals/v2",
+  "models": {
+    "coordinator": "claude-opus-5-thinking-high",
+    "worker": "composer-2.5-fast",
+    "scorer_notes": "gpt-5.6-sol-medium",
+    "improver": "claude-sonnet-5-thinking-high"
+  },
+  "concurrency": 4,
+  "budgets": {
+    "map_wall_seconds": 600,
+    "pdf_page_cap": 40,
+    "improve_max_per_round": 26,
+    "max_rounds": 20
+  },
+  "pass_mode": "all_evaluable",
+  "acceptable_compile_states": [
+    "offline-complete",
+    "partial",
+    "awaiting-source-decision",
+    "awaiting-device-binding"
+  ],
+  "pipeline": [
+    {"id": "classify", "required": true},
+    {"id": "intake", "required": true, "skills": ["parse-map", "extract-pdf-map"]},
+    {"id": "normalize", "required": true, "skills": ["normalize-map"]},
+    {"id": "check-map", "required": true, "skills": ["check-map"]},
+    {"id": "compile-user-map", "required": true, "skills": ["compile-user-map"]},
+    {"id": "plan-reads", "required": true, "skills": ["plan-reads"]},
+    {"id": "build-tool-pack", "required": true, "skills": ["build-tool-pack"]},
+    {"id": "modbus-help-route", "required": false, "skills": ["modbus-help"]}
+  ],
+  "not_applicable": {
+    "analyze-capture": "Needs capture samples, not OEM register files",
+    "check-byte-order": "Needs raw words from a live or fixture capture",
+    "capture-sample": "Needs device binding and probe request after plan",
+    "apply-review": "Needs human decision packet; covered by compile holds",
+    "review-evidence": "Covered inside compile/review path for matrix night-1",
+    "review-map": "Covered by compile-user-map outcome path",
+    "compare-maps": "Needs two revisions; single-file corpus",
+    "remap-addresses": "Optional follow-on; not required for intake scoring",
+    "build-custom-export": "Needs documented export example",
+    "build-node-red": "Covered via build-tool-pack",
+    "build-modpoll": "Covered via build-tool-pack",
+    "build-modscan": "Covered via build-tool-pack",
+    "modbus-help": "Routing smoke covered separately; not map-corpus gated"
+  },
+  "score_weights": {
+    "intake_ok": 1,
+    "normalize_ok": 1,
+    "check_map_ok": 1,
+    "compile_legal_state": 1,
+    "user_map_when_points": 1,
+    "lineage": 1,
+    "downstream_plan": 1,
+    "tool_pack_ok": 1,
+    "no_crash": 1
+  },
+  "pass_threshold": 9,
+  "notes": "pass_mode=all_evaluable requires points == max_points (every evaluable skill) and no crash. Threshold kept equal to max for clarity."
+}

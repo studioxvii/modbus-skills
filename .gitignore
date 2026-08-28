@@ -15,3 +15,9 @@ vendor/
 *.pdf
 modbus-capture.json
 .DS_Store
+
+# pstack map-matrix: derived from the local private/modbus-maps/ corpus or
+# mutated at runtime — never public-repo material, same boundary as private/.
+scripts/pstack/map_matrix/manifest.json
+scripts/pstack/map_matrix/program.json
+scripts/pstack/map_matrix/program.lock
