@@ -1,0 +1,8 @@
+display_address,Point,datatype,Gain,Unit,register_area
+5000,Device type code,uint16,1,,input register
+5019,Phase A voltage,uint16,0.1,V,input register
+5020,Phase B voltage,uint16,0.1,V,input register
+5021,Phase C voltage,uint16,0.1,V,input register
+5033,Total active power,int32,1,W,input register
+5036,Reactive power,int32,1,var,input register
+5003,Daily yield,uint32,0.1,kWh,input register

@@ -1,0 +1,9 @@
+display_address,Parameter,FC,Format,Gain,Units,Access
+40001,Phase A Voltage,03,Float32,1,Volts,R
+40003,Phase B Voltage,03,Float32,1,Volts,R
+40005,Phase C Voltage,03,Float32,1,Volts,R
+40007,Phase A Current,03,Float32,1,Amps,R
+40009,Total kW,03,Float32,1,kW,R
+40011,Import kWh,03,Float32,1,kWh,R
+40013,Export kWh,03,Float32,1,kWh,R
+130,System Type,03,UInt16,1,,RW

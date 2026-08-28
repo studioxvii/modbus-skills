@@ -1,0 +1,455 @@
+{
+  "schema_version": "modbus-oem-corpus/v1",
+  "retrieved_on": "2026-08-25",
+  "purpose": "Energy-asset OEM register-map corpus for compile, usability, and Windows native-tool verification.",
+  "format_targets": {
+    "pdf": {"minimum": 4, "assigned": 7},
+    "xlsx": {"minimum": 2, "assigned": 2},
+    "csv": {"minimum": 2, "assigned": 3}
+  },
+  "storage_policy": {
+    "tracked": "manifest.json, README stubs, and extracted derivatives with documented redistribution rights only",
+    "ignored": "Original OEM PDFs, XLSX, and full maps under private/oem-corpus/ (see repository .gitignore)",
+    "reference": "docs/testing.md — non-synthetic fixtures require documented redistribution rights before tracking source files"
+  },
+  "assets": [
+    {
+      "id": "caterpillar-gen",
+      "display_name": "Caterpillar EMCP generator controller",
+      "asset_class": "generator",
+      "target_format": "pdf",
+      "review_status": "sourced",
+      "model_hint": "EMCP 4.x / EMCP 4.1",
+      "skills_stressed": ["compile-user-map", "extract-pdf-map", "plan-reads"],
+      "measurement_intent": ["engine rpm", "oil pressure", "line voltage", "run hours", "alarm status", "operating mode"],
+      "primary_source": {
+        "title": "EMCP 4 SCADA Data Links (Modbus appendices)",
+        "format": "pdf",
+        "url": "https://www.ccontrol.com/support/dp/ManualEMCP4.pdf",
+        "document_id": "LEBE0006 family",
+        "license": "reference-only",
+        "notes": "Appendices A–C contain Modbus register data. Verify manual revision against panel firmware."
+      },
+      "alternate_sources": [
+        {
+          "title": "EMCP 4.1 Modbus configuration reference (integrator summary)",
+          "format": "html",
+          "url": "https://industrialmonitordirect.com/blogs/knowledgebase/emcp-41-modbus-terminals-register-map-and-configuration",
+          "license": "reference-only"
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/caterpillar-gen/source/",
+        "request": "private/oem-corpus/caterpillar-gen/request.json",
+        "compile_output": "artifacts/oem-corpus/caterpillar-gen/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "cummins-gen",
+      "display_name": "Cummins PowerCommand generator",
+      "asset_class": "generator",
+      "target_format": "pdf",
+      "review_status": "sourced",
+      "model_hint": "PowerCommand 2.x/3.x, PCC 1301, MCM3320",
+      "skills_stressed": ["compile-user-map", "extract-pdf-map", "compare-maps"],
+      "measurement_intent": ["engine status", "rpm", "coolant temperature", "line voltage", "load kW", "fault bitmaps"],
+      "primary_source": {
+        "title": "Modbus Register Mapping (A029X159)",
+        "format": "pdf",
+        "url": "https://www.ccontrols.com/support/dp/modbus2300.pdf",
+        "document_id": "A029X159",
+        "license": "reference-only",
+        "notes": "Large multi-product map. Select one controller section (e.g. PowerCommand 2.x/3.x) for corpus slice."
+      },
+      "alternate_sources": [
+        {
+          "title": "PowerCommand 1.1–3.3 Modbus register mapping (mirror)",
+          "format": "pdf",
+          "url": "https://csdieselgenerators.com/Images/Generators/2852/Cummins-PowerCommand-1.1-1.2-2.2-2.3-3.3-modbus-register-mapping.pdf",
+          "license": "reference-only"
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/cummins-gen/source/",
+        "request": "private/oem-corpus/cummins-gen/request.json",
+        "compile_output": "artifacts/oem-corpus/cummins-gen/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "generac-gen",
+      "display_name": "Generac industrial generator panel",
+      "asset_class": "generator",
+      "target_format": "pdf",
+      "review_status": "sourced",
+      "model_hint": "DG F-panel, G-panel, H-panel, Evolution",
+      "skills_stressed": ["compile-user-map", "parse-map", "normalize-map"],
+      "measurement_intent": ["rpm", "oil pressure", "fuel level", "gen voltage", "utility voltage", "alarm bits"],
+      "primary_source": {
+        "title": "Modbus for the DG Series Generators",
+        "format": "pdf",
+        "url": "http://generator-info.com/Generac/Docs/Control%20Panels/0D2901rev0.pdf",
+        "document_id": "0D2901 rev 0",
+        "license": "reference-only",
+        "notes": "Protocol-offset style addresses (not 4xxxx). Good convention-ambiguity case."
+      },
+      "alternate_sources": [
+        {
+          "title": "Generac G Panel Modbus (integration partner IF)",
+          "format": "pdf",
+          "url": "https://omnimetrix.net/wp-content/uploads/2024/11/interface_generac_g_panel_modbus_2018.pdf",
+          "license": "partner-doc",
+          "notes": "Alarm/analog parameter list; not a full register table. Use with DG manual or Generac tech pubs."
+        },
+        {
+          "title": "Generac Evolution panel Modbus (integration partner IF)",
+          "format": "pdf",
+          "url": "https://omnimetrix.net/wp-content/uploads/2024/11/interface_generac_evolution_panel_modbus_2018.pdf",
+          "license": "partner-doc"
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/generac-gen/source/",
+        "request": "private/oem-corpus/generac-gen/request.json",
+        "compile_output": "artifacts/oem-corpus/generac-gen/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "tesla-bess",
+      "display_name": "Tesla BESS (Powerpack / Megapack site controller)",
+      "asset_class": "bess",
+      "target_format": "pdf",
+      "review_status": "blocked",
+      "model_hint": "Powerpack site controller, Megapack 2",
+      "skills_stressed": ["compile-user-map", "plan-reads"],
+      "measurement_intent": ["real power setpoint", "SOC", "heartbeat", "site real power", "alarms"],
+      "primary_source": {
+        "title": "Secure Communications and API Concept — Tesla Powerpack at Site 300",
+        "format": "pdf",
+        "url": "https://www.osti.gov/servlets/purl/1873633",
+        "document_id": "DOI 10.2172/1873633",
+        "license": "reference-only",
+        "notes": "Public DOE deliverable with sample Modbus register table (e.g. real power mode 1000). Not a full OEM map; site-specific maps require Tesla project access."
+      },
+      "alternate_sources": [
+        {
+          "title": "Megapack 2 XL datasheet (protocols summary)",
+          "format": "pdf",
+          "url": "https://sumnerwa.gov/wp-content/uploads/2024/05/9.-Megapack-datasheet.pdf",
+          "license": "reference-only",
+          "notes": "Lists Modbus TCP / DNP3 / REST; no register map."
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/tesla-bess/source/",
+        "request": "private/oem-corpus/tesla-bess/request.json",
+        "compile_output": "artifacts/oem-corpus/tesla-bess/"
+      },
+      "format_gap": false,
+      "blocked_reason": "Full register map is project-partner restricted. Use OSTI excerpt for partial compile tests until partner map is obtained."
+    },
+    {
+      "id": "gotion-bess",
+      "display_name": "Gotion BESS / BMS",
+      "asset_class": "bess",
+      "target_format": "xlsx",
+      "review_status": "blocked",
+      "model_hint": "Gotion BMS via PCS (Sinexcel), ESC container",
+      "skills_stressed": ["compile-user-map", "parse-map"],
+      "measurement_intent": ["SOC", "SOH", "active power", "reactive power", "DC voltage", "cell temperature"],
+      "primary_source": {
+        "title": "Gotion ESS product manual (communication protocols summary)",
+        "format": "pdf",
+        "url": "https://www.valfrysolar.com/wp-content/uploads/2025/12/2025-ESS-Manual-ENG.pdf",
+        "license": "reference-only",
+        "notes": "Lists Modbus RTU/TCP; does not publish a full public register map."
+      },
+      "alternate_sources": [
+        {
+          "title": "DEIF hybrid controller — Gotion BMS compatibility",
+          "format": "html",
+          "url": "https://documentation.deif.com/r/application-notes-hybrid-controller-compatibility-4189341288-uk/battery/protocols/gotion-%E5%9B%BD%E8%BD%A9",
+          "license": "reference-only"
+        },
+        {
+          "title": "Teleport Gotion integration guide (Modbus settings)",
+          "format": "html",
+          "url": "https://teleport.withthegrid.com/installation-guide/asset-library/battery/gotion/",
+          "license": "reference-only"
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/gotion-bess/source/",
+        "request": "private/oem-corpus/gotion-bess/request.json",
+        "compile_output": "artifacts/oem-corpus/gotion-bess/"
+      },
+      "format_gap": false,
+      "blocked_reason": "No public OEM XLSX found. Use tracked synthetic surrogate for parser testing until integrator map arrives.",
+      "synthetic_surrogate": "synthetic/gotion-bess-integrator-messy.xlsx"
+    },
+    {
+      "id": "narada-bess",
+      "display_name": "Narada BESS (NPFC / NESP BMS)",
+      "asset_class": "bess",
+      "target_format": "csv",
+      "review_status": "sourced",
+      "model_hint": "Narada BMS V1.6, NPFC series",
+      "skills_stressed": ["compile-user-map", "parse-map", "check-byte-order"],
+      "measurement_intent": ["pack voltage", "pack current", "SOC", "SOH", "cell min/max voltage", "temperature"],
+      "primary_source": {
+        "title": "Narada BMS Modbus V1.6",
+        "format": "pdf",
+        "url": "https://pdfcoffee.com/narada-bms-modbus-v16-2-pdf-free.html",
+        "license": "reference-only",
+        "notes": "Third-party mirror; prefer original from Narada support when available. Hex-offset addresses (0x0100 block)."
+      },
+      "alternate_sources": [
+        {
+          "title": "DEIF hybrid controller — Narada BMS compatibility",
+          "format": "html",
+          "url": "https://documentation.deif.com/r/application-notes-hybrid-controller-compatibility-4189341288-uk/battery/protocols/narada-%E5%8D%97%E9%83%BD",
+          "license": "reference-only"
+        },
+        {
+          "title": "ESPHome Narada NPFC register subset (community)",
+          "format": "html",
+          "url": "https://devices.esphome.io/devices/narada-npfc/",
+          "license": "reference-only",
+          "notes": "Useful cross-check for 0x0FFF–0x102E addresses; not authoritative."
+        }
+      ],
+      "derived_formats": [
+        {
+          "format": "csv",
+          "path": "private/oem-corpus/narada-bess/source/register-map.csv",
+          "license": "extracted-derivative",
+          "notes": "Create from primary PDF subset after human review; not yet generated."
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/narada-bess/source/",
+        "request": "private/oem-corpus/narada-bess/request.json",
+        "compile_output": "artifacts/oem-corpus/narada-bess/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "veris-meter",
+      "display_name": "Veris E51 / E54 power meter",
+      "asset_class": "meter",
+      "target_format": "csv",
+      "review_status": "sourced",
+      "model_hint": "E51C2 FDS, E51C3 logging, E54",
+      "skills_stressed": ["compile-user-map", "parse-map", "plan-reads"],
+      "measurement_intent": ["voltage", "current", "kW", "kWh import/export", "power factor", "demand"],
+      "primary_source": {
+        "title": "Veris Modbus downloads (E51xxx point maps)",
+        "format": "html",
+        "url": "https://www.veris.com/Modbus-Downloads",
+        "license": "reference-only",
+        "notes": "Point maps moved to individual product pages. Download E51 installation guide with Modbus Point Map section."
+      },
+      "alternate_sources": [
+        {
+          "title": "E51C2/E51C3 installation guide (Modbus point map, SunSpec blocks)",
+          "format": "pdf",
+          "url": "https://veris-industries.manymanuals.it/equipment/e51c3-install/user-manual-29731/18",
+          "license": "reference-only",
+          "notes": "Third-party manual mirror; prefer Veris product page PDF."
+        }
+      ],
+      "derived_formats": [
+        {
+          "format": "csv",
+          "path": "private/oem-corpus/veris-meter/source/register-map.csv",
+          "license": "extracted-derivative",
+          "notes": "Extract Modbus Point Map table from E51 guide for structured-input testing."
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/veris-meter/source/",
+        "request": "private/oem-corpus/veris-meter/request.json",
+        "compile_output": "artifacts/oem-corpus/veris-meter/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "shark-270",
+      "display_name": "EIG Shark 270 revenue meter",
+      "asset_class": "meter",
+      "target_format": "pdf",
+      "review_status": "sourced",
+      "model_hint": "Shark 270, holding registers (4X) only",
+      "skills_stressed": ["compile-user-map", "extract-pdf-map", "plan-reads"],
+      "measurement_intent": ["voltage", "current", "kW", "kWh", "demand", "power quality indices"],
+      "primary_source": {
+        "title": "Shark 270 Meter Modbus Protocol Application Guide v1.11",
+        "format": "pdf",
+        "url": "https://www.electroind.com/products/Shark_270/pdf/manuals/Shark-270-Meter-Modbus-Protocol-Application-Guide_E159718.pdf",
+        "document_id": "E159718",
+        "license": "reference-only",
+        "notes": "Chapter 4 is the Modbus map. Large dense holding-register table."
+      },
+      "alternate_sources": [
+        {
+          "title": "Shark series downloads index",
+          "format": "html",
+          "url": "https://www.electroind.com/technical-support/shark-series-downloads/",
+          "license": "reference-only"
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/shark-270/source/",
+        "request": "private/oem-corpus/shark-270/request.json",
+        "compile_output": "artifacts/oem-corpus/shark-270/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "sungrow-pv",
+      "display_name": "Sungrow PV grid-connected string inverter",
+      "asset_class": "pv-inverter",
+      "target_format": "pdf",
+      "review_status": "sourced",
+      "model_hint": "SG string inverters, protocol v1.1.37+",
+      "skills_stressed": ["compile-user-map", "extract-pdf-map", "remap-addresses"],
+      "measurement_intent": ["AC voltage", "AC current", "active power", "daily energy", "fault codes", "device type"],
+      "primary_source": {
+        "title": "Communication Protocol of PV Grid-Connected String Inverters v1.1.37",
+        "format": "pdf",
+        "url": "https://www.photovoltaicsolar.in/Sungrow_Manual/Modbus%20RS485%20RTU%20Protocol.pdf",
+        "license": "reference-only",
+        "notes": "Protocol address = register - 1. Mixed endianness by datatype. Good offset-notation stress case."
+      },
+      "alternate_sources": [
+        {
+          "title": "Sungrow inverter Modbus information (community mirror)",
+          "format": "html",
+          "url": "https://github.com/bohdan-s/Sungrow-Inverter/tree/main/Modbus%20Information",
+          "license": "reference-only",
+          "notes": "Multiple protocol revisions; match document version to inverter firmware."
+        },
+        {
+          "title": "Residential hybrid inverter protocol v1.1.9",
+          "format": "pdf",
+          "url": "https://github.com/bohdan-s/Sungrow-Inverter/blob/main/Modbus%20Information/TI_20250620_Communication%20Protocol%20of%20Residential%20Hybrid%20Inverter_V1.1.9_EN.pdf",
+          "license": "reference-only"
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/sungrow-pv/source/",
+        "request": "private/oem-corpus/sungrow-pv/request.json",
+        "compile_output": "artifacts/oem-corpus/sungrow-pv/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "schneider-pm5560",
+      "display_name": "Schneider PowerLogic PM5560 meter",
+      "asset_class": "meter",
+      "target_format": "xlsx",
+      "review_status": "sourced",
+      "model_hint": "PM5560, PM5563, PM56xx",
+      "skills_stressed": ["compile-user-map", "parse-map", "plan-reads"],
+      "measurement_intent": ["voltage", "current", "kW", "kvar", "power factor", "frequency", "import/export energy"],
+      "primary_source": {
+        "title": "PM556x Public Modbus Register List",
+        "format": "xlsx",
+        "url": "https://www.se.com/us/en/faqs/FA234017/",
+        "download_url": "https://se.my.site.com/ckmContent/sfc/servlet.shepherd/document/download/069Kj00000TH2DFIA1",
+        "filename": "PM556x_PublicModbusRegisterList_10th_August-23.xlsx",
+        "license": "reference-only",
+        "notes": "Official Schneider FAQ attachment. Download to private/oem-corpus/schneider-pm5560/source/."
+      },
+      "alternate_sources": [
+        {
+          "title": "PM5560 firmware package (includes register XLSX)",
+          "format": "zip",
+          "url": "https://www.se.com/nz/en/download/document/PM5560_PM5563_V2.1.0/",
+          "license": "reference-only"
+        }
+      ],
+      "synthetic_surrogate": "synthetic/parseable-messy/schneider-pm5560-messy.csv",
+      "local_paths": {
+        "source": "private/oem-corpus/schneider-pm5560/source/",
+        "request": "private/oem-corpus/schneider-pm5560/request.json",
+        "compile_output": "artifacts/oem-corpus/schneider-pm5560/"
+      },
+      "format_gap": false
+    },
+    {
+      "id": "huawei-sun2000",
+      "display_name": "Huawei SUN2000 PV inverter",
+      "asset_class": "pv-inverter",
+      "target_format": "pdf",
+      "review_status": "sourced",
+      "model_hint": "SUN2000 string and hybrid families",
+      "skills_stressed": ["compile-user-map", "extract-pdf-map", "remap-addresses"],
+      "measurement_intent": ["run state", "active power", "daily yield", "AC voltage", "temperature", "fault codes"],
+      "primary_source": {
+        "title": "Modbus Interface Definitions V3.0",
+        "format": "pdf",
+        "url": "https://taphome.com/compatibility/devices/sun2000-tcp/manufacturer/modbus-interface-definitions-v3.pdf",
+        "license": "reference-only",
+        "notes": "Model-specific register tables in chapter 6+. Match firmware and model code."
+      },
+      "alternate_sources": [
+        {
+          "title": "SUN2000LB Modbus Interface Definitions",
+          "format": "pdf",
+          "url": "https://www.datasheet.world/datasheet/huaweienterprises/EDOC1100480303/SUN2000LB_V300R024C10SPC104_RELEASE_DOCUMENTS/SUN2000LB_V300R024C10SPC104_MODBUS_INTERFACE_DEFINITIONS.pdf",
+          "license": "reference-only"
+        },
+        {
+          "title": "olivergregorius/sun2000_modbus register reference",
+          "format": "html",
+          "url": "https://github.com/olivergregorius/sun2000_modbus",
+          "license": "reference-only"
+        }
+      ],
+      "local_paths": {
+        "source": "private/oem-corpus/huawei-sun2000/source/",
+        "request": "private/oem-corpus/huawei-sun2000/request.json",
+        "compile_output": "artifacts/oem-corpus/huawei-sun2000/"
+      },
+      "format_gap": false
+    }
+  ],
+  "synthetic_fixtures": {
+    "schema_version": "modbus-oem-synthetic/v1",
+    "license": "Apache-2.0",
+    "regenerate": "python3 scripts/build_oem_synthetic_fixtures.py",
+    "tiers": {
+      "parseable-messy": "Header on row 1 with non-canonical column names; parser yields records with warnings.",
+      "intake-junk": "Title rows, comments, or wrong header aliases; stresses compile intake and PDF-style cleanup."
+    },
+    "files": [
+      {"path": "synthetic/gotion-bess-integrator-messy.xlsx", "tier": "parseable-messy", "paired_asset": "gotion-bess", "format": "xlsx"},
+      {"path": "synthetic/parseable-messy/veris-meter-messy.csv", "tier": "parseable-messy", "paired_asset": "veris-meter", "format": "csv"},
+      {"path": "synthetic/parseable-messy/narada-bess-messy.csv", "tier": "parseable-messy", "paired_asset": "narada-bess", "format": "csv"},
+      {"path": "synthetic/parseable-messy/generac-dg-messy.csv", "tier": "parseable-messy", "paired_asset": "generac-gen", "format": "csv"},
+      {"path": "synthetic/parseable-messy/cummins-pc-messy.tsv", "tier": "parseable-messy", "paired_asset": "cummins-gen", "format": "tsv"},
+      {"path": "synthetic/parseable-messy/sungrow-inverter-messy.csv", "tier": "parseable-messy", "paired_asset": "sungrow-pv", "format": "csv"},
+      {"path": "synthetic/parseable-messy/cat-emcp-messy.csv", "tier": "parseable-messy", "paired_asset": "caterpillar-gen", "format": "csv"},
+      {"path": "synthetic/parseable-messy/schneider-pm5560-messy.csv", "tier": "parseable-messy", "paired_asset": "schneider-pm5560", "format": "csv"},
+      {"path": "synthetic/parseable-messy/tesla-bess-messy.csv", "tier": "parseable-messy", "paired_asset": "tesla-bess", "format": "csv"},
+      {"path": "synthetic/intake-junk/veris-meter-export-junk.csv", "tier": "intake-junk", "paired_asset": "veris-meter", "format": "csv"},
+      {"path": "synthetic/intake-junk/narada-bess-junk.csv", "tier": "intake-junk", "paired_asset": "narada-bess", "format": "csv"},
+      {"path": "synthetic/intake-junk/sungrow-inverter-junk.csv", "tier": "intake-junk", "paired_asset": "sungrow-pv", "format": "csv"},
+      {"path": "synthetic/intake-junk/cummins-title-junk.csv", "tier": "intake-junk", "paired_asset": "cummins-gen", "format": "csv"}
+    ]
+  },
+  "anchor_assets": {
+    "pdf": "sungrow-pv",
+    "xlsx": "gotion-bess",
+    "csv": "veris-meter",
+    "notes": "PDF anchor uses OEM doc in private/. XLSX anchor uses synthetic gotion workbook until OEM map arrives. CSV anchor uses parseable-messy surrogate until E51 extraction is reviewed."
+  },
+  "next_actions": [
+    "Run python3 scripts/setup_oem_corpus_files.py to refresh private/oem-corpus/",
+    "Install Windows VM tools per docs/windows-lab-setup.md",
+    "Later: compile-user-map and Windows import verification (not started)"
+  ]
+}

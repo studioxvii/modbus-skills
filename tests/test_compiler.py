@@ -409,6 +409,49 @@ class CompilerTests(unittest.TestCase):
         user_map = json.loads((self.root / "source-case" / "output" / "user-map.json").read_text())
         self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
 
+    def test_duplicate_vendor_labels_do_not_crash_the_whole_compile(self) -> None:
+        # Real vendor register maps repeat labels (e.g. two rows both named
+        # "Reserved") across different addresses. normalize-map intentionally
+        # gives those rows the same generated logical_point_id and raises a
+        # collision hold instead of guessing which one is which. The compiler
+        # must still produce one OEM point per source row instead of raising
+        # an uncaught contract error for the whole 258-row map.
+        source = self.root / "duplicate-labels.csv"
+        source.write_text(
+            "name,protocol_offset,area,datatype,access\n"
+            "Reserved,10,holding-register,uint16,read-only\n"
+            "Reserved,11,holding-register,uint16,read-only\n"
+            "Temperature,12,holding-register,uint16,read-only\n",
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "duplicate-label-case")
+
+        self.assertIn(result["state"], {"partial", "awaiting-source-decision"})
+        oem_map = json.loads(
+            (self.root / "duplicate-label-case" / "artifacts" / "oem-map.json").read_text()
+        )
+        point_ids = [point["oem_point_id"] for point in oem_map["points"]]
+        self.assertEqual(3, len(point_ids))
+        self.assertEqual(len(set(point_ids)), len(point_ids))
+        self.assertTrue(
+            any(
+                hold.get("code") == "point.generated-logical-id-collision"
+                for hold in oem_map.get("holds", ())
+            )
+        )
+
     def test_complete_map_intent_selects_every_readable_source_point(self) -> None:
         source = self.root / "complete.csv"
         source.write_text(
@@ -757,6 +800,51 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(
             2, len({point["oem_point_id"] for point in oem_artifact["points"]})
         )
+
+    def test_duplicate_register_labels_are_disambiguated_not_crashed(self) -> None:
+        # Real vendor register lists repeat a display name at different
+        # addresses (e.g. per-interval energy counters all named "Reactive
+        # Energy Received"). normalize_map deliberately reuses one generated
+        # logical_point_id for those rows and raises a collision hold; the
+        # compiler must give each OEM point a unique id and keep going
+        # instead of raising a hard contract error for the whole map.
+        source = self.root / "duplicate-names.csv"
+        source.write_text(
+            "name,protocol_offset,area,datatype,access\n"
+            "Reactive Energy Received,100,holding-register,uint16,read-only\n"
+            "Reactive Energy Received,200,holding-register,uint16,read-only\n"
+            "Unique Point,300,holding-register,uint16,read-only\n",
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "collision-case")
+
+        self.assertIn(result["state"], {"awaiting-source-decision", "partial", "offline-complete"})
+        oem_artifact = json.loads(
+            (self.root / "collision-case" / "artifacts" / "oem-map.json").read_text()
+        )
+        self.assertEqual(3, len(oem_artifact["points"]))
+        self.assertEqual(
+            3, len({point["oem_point_id"] for point in oem_artifact["points"]})
+        )
+        collision_holds = [
+            hold
+            for hold in oem_artifact["holds"]
+            if hold["code"] == "point.generated-logical-id-collision"
+        ]
+        self.assertEqual(1, len(collision_holds))
+        self.assertEqual(2, collision_holds[0]["details"]["record_count"])
 
     def test_source_normalization_exceptions_form_one_grouped_packet(self) -> None:
         source = self.root / "missing-datatype.csv"

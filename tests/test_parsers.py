@@ -86,6 +86,16 @@ class CsvParserTests(unittest.TestCase):
             {warning["code"] for warning in result["warnings"]},
         )
 
+    def test_modbus_address_read_header_is_recognized_as_address(self) -> None:
+        # ComAp/Entergy-style register maps label their address column
+        # "Modbus Address Read" rather than a plain "Address"/"Register".
+        result = parse_csv(
+            "Parameter Name,Modbus Address Read\nCharging status,40005\n",
+            delimiter=",",
+        )
+        self.assertEqual(1, len(result["records"]))
+        self.assertEqual(40005, int(result["records"][0]["address"]))
+
     def test_common_underscore_enum_names_do_not_create_false_warnings(self) -> None:
         result = parse_csv(
             "Address,Area,Data Type,Byte Order\n"
@@ -138,6 +148,54 @@ class JsonAndXmlParserTests(unittest.TestCase):
             parse_xml(unsafe)
 
 
+def make_xlsx_with_title_row() -> bytes:
+    """Build an XLSX where a merged, single-cell title sits above the real header.
+
+    Mirrors vendor workbooks (e.g. OEM register lists) that put a worksheet
+    title in row 1 and the actual column headers in row 2.
+    """
+
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0"?>
+            <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+            </workbook>""",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+            </Relationships>""",
+        )
+        archive.writestr(
+            "xl/sharedStrings.xml",
+            """<?xml version="1.0"?>
+            <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <si><t>Vendor Register List - Title</t></si>
+              <si><t>Parameter Name</t></si><si><t>Holding Register</t></si>
+              <si><t>Voltage</t></si>
+            </sst>""",
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0"?>
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <sheetData>
+                <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                <row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2" t="s"><v>2</v></c></row>
+                <row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>100</v></c></row>
+              </sheetData>
+            </worksheet>""",
+        )
+    return stream.getvalue()
+
+
 class XlsxParserTests(unittest.TestCase):
     def test_basic_xlsx_types_and_formula_cached_values(self) -> None:
         result = parse_xlsx(make_xlsx())
@@ -151,9 +209,257 @@ class XlsxParserTests(unittest.TestCase):
         with self.assertRaises(ParseError):
             parse_xlsx(b"not a workbook")
 
+    def test_single_cell_title_row_above_header_is_skipped(self) -> None:
+        result = parse_xlsx(make_xlsx_with_title_row())
+        self.assertEqual(1, len(result["records"]))
+        record = result["records"][0]
+        self.assertEqual("Voltage", record["name"])
+        self.assertEqual(100, record["address"])
+        skipped = [a for a in result["assumptions"] if a["code"] == "skipped_title_row"]
+        self.assertEqual(1, len(skipped))
+        self.assertEqual([1], skipped[0]["rows"])
+        header = [a for a in result["assumptions"] if a["code"] == "xlsx_header_row"][0]
+        self.assertEqual(2, header["row"])
+
+    def test_holding_register_header_alias_maps_to_address(self) -> None:
+        result = parse_source(
+            "Parameter Name,Holding Register\nGenerator Voltage,100\n",
+            filename="map.csv",
+        )
+        self.assertEqual(100, int(result["records"][0]["address"]))
+
     def test_dispatch_uses_filename_extension(self) -> None:
         result = parse_source("Address\tArea\n0\tholding-register\n", filename="map.tsv")
         self.assertEqual("holding-register", result["records"][0]["area"])
+
+    def test_unit_header_maps_to_engineering_unit_not_slave_id(self) -> None:
+        result = parse_csv(
+            "Address,Area,Type,Unit\n256,holding-register,uint16,V\n",
+            delimiter=",",
+        )
+        record = result["records"][0]
+        self.assertEqual("V", record["engineering_unit"])
+        self.assertNotIn("unit_id", record)
+
+    def test_gotion_integrator_xlsx_skips_cover_and_alarm_sheets(self) -> None:
+        path = ROOT / "tests" / "fixtures" / "oem-corpus" / "synthetic" / "gotion-bess-integrator-messy.xlsx"
+        result = parse_xlsx(path.read_bytes())
+        self.assertEqual(9, len(result["records"]))
+        self.assertEqual(0, len(result["rejected_rows"]))
+        self.assertTrue(
+            any(warning["code"] == "skipped_non_register_worksheet" for warning in result["warnings"])
+        )
+        self.assertEqual("V", result["records"][0]["engineering_unit"])
+        self.assertEqual("4x Holding", result["records"][0]["area"])
+
+    def test_side_by_side_duplicate_title_row_is_skipped(self) -> None:
+        # Some vendor sheets (e.g. ASCO PM8000 register lists) lay out two
+        # side-by-side table blocks that repeat the worksheet title in more
+        # than one cell of row 1 ("PowerLogic PM8000 Power Quality Meter" in
+        # both column A and column I). That row must still be treated as a
+        # title, not a multi-column header, or every data row is rejected for
+        # missing an address.
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="PM8000" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1">
+                      <c r="A1" t="inlineStr"><is><t>PowerLogic PM8000 Power Quality Meter</t></is></c>
+                      <c r="I1" t="inlineStr"><is><t>PowerLogic PM8000 Power Quality Meter</t></is></c>
+                    </row>
+                    <row r="2">
+                      <c r="A2" t="inlineStr"><is><t>Parameter Name</t></is></c>
+                      <c r="B2" t="inlineStr"><is><t>Modbus Address Read</t></is></c>
+                      <c r="C2" t="inlineStr"><is><t>Modbus Data Type</t></is></c>
+                    </row>
+                    <row r="3">
+                      <c r="A3" t="inlineStr"><is><t>Year</t></is></c>
+                      <c r="B3"><v>1836</v></c>
+                      <c r="C3" t="inlineStr"><is><t>UINT16</t></is></c>
+                    </row>
+                  </sheetData>
+                </worksheet>""",
+            )
+        result = parse_xlsx(stream.getvalue())
+        self.assertEqual(1, len(result["records"]))
+        record = result["records"][0]
+        self.assertEqual("Year", record["name"])
+        self.assertEqual(1836, record["address"])
+        skipped = [a for a in result["assumptions"] if a["code"] == "skipped_title_row"]
+        self.assertEqual([1], skipped[0]["rows"])
+
+    def test_modbus_address_read_header_alias_maps_to_address(self) -> None:
+        result = parse_source(
+            "Parameter Name,Modbus Address Read\nYear,1836\n",
+            filename="map.csv",
+        )
+        self.assertEqual(1836, int(result["records"][0]["address"]))
+        self.assertEqual("Year", result["records"][0]["name"])
+
+    def test_non_worksheet_relationships_may_target_outside_xl_directory(self) -> None:
+        # Excel routinely emits workbook-level relationships (customXml, calcChain, ...)
+        # whose Target points above xl/, e.g. "../customXml/item1.xml". Those parts are
+        # never loaded as worksheets, so they must not trip the anti-traversal check.
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                  <Relationship Id="rId2" Target="../customXml/item1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"/>
+                </Relationships>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1"><c r="A1" t="inlineStr"><is><t>Address</t></is></c></row>
+                    <row r="2"><c r="A2"><v>1</v></c></row>
+                  </sheetData>
+                </worksheet>""",
+            )
+        result = parse_xlsx(stream.getvalue())
+        self.assertEqual(1, len(result["records"]))
+
+    def test_worksheet_relationship_escaping_workbook_directory_is_rejected(self) -> None:
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="../../etc/passwd"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>""",
+            )
+        with self.assertRaises(ParseError):
+            parse_xlsx(stream.getvalue())
+
+    def test_merged_title_row_above_header_is_skipped(self) -> None:
+        # Mirrors real vendor workbooks (e.g. Entergy/ComAp) that place a single
+        # merged title cell in row 1 and the real column headers in row 2.
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>""",
+            )
+            archive.writestr(
+                "xl/sharedStrings.xml",
+                """<?xml version="1.0"?>
+                <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <si><t>Battery Charger</t></si><si><t>Address</t></si><si><t>Area</t></si>
+                </sst>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                    <row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2" t="s"><v>2</v></c></row>
+                    <row r="3"><c r="A3"><v>40001</v></c><c r="B3" t="s"><v>2</v></c></row>
+                  </sheetData>
+                </worksheet>""",
+            )
+        result = parse_xlsx(stream.getvalue())
+        self.assertEqual(1, len(result["records"]))
+        self.assertEqual(40001, result["records"][0]["address"])
+        self.assertTrue(any(a["code"] == "skipped_title_row" for a in result["assumptions"]))
+
+    def test_single_column_header_is_not_mistaken_for_a_title(self) -> None:
+        # A genuine one-cell header (single-column worksheet) must not be skipped
+        # just because it only has one populated value.
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>""",
+            )
+            archive.writestr(
+                "xl/sharedStrings.xml",
+                """<?xml version="1.0"?>
+                <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <si><t>Address</t></si>
+                </sst>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                    <row r="2"><c r="A2"><v>40001</v></c></row>
+                  </sheetData>
+                </worksheet>""",
+            )
+        result = parse_xlsx(stream.getvalue())
+        self.assertEqual(1, len(result["records"]))
+        self.assertEqual(40001, result["records"][0]["address"])
+        self.assertFalse(any(a["code"] == "skipped_title_row" for a in result["assumptions"]))
 
 
 if __name__ == "__main__":

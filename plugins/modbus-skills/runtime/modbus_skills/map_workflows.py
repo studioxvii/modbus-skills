@@ -49,8 +49,12 @@ _AREA_ALIASES = {
     "holding registers": "holding-register",
     "holding-register": "holding-register",
     "4x": "holding-register",
+    "4x holding": "holding-register",
     "fc03": "holding-register",
     "03": "holding-register",
+    "3x input": "input-register",
+    "1x discrete": "discrete-input",
+    "0x coil": "coil",
 }
 _CONVENTION_ALIASES = {
     "protocol offset": "protocol-offset",
@@ -81,11 +85,13 @@ _DATATYPE_ALIASES = {
     "boolean": "bool",
     "bit": "bool",
     "uint16": "uint16",
+    "u16": "uint16",
     "unsigned 16": "uint16",
     "unsigned 16-bit": "uint16",
     "word": "uint16",
     "uint": "uint16",
     "int16": "int16",
+    "s16": "int16",
     "signed 16": "int16",
     "signed 16-bit": "int16",
     "sint": "int16",
@@ -941,7 +947,7 @@ def _normalize_one(
         except (TypeError, ValueError):
             display_address = None
 
-    datatype_raw, datatype_source = _get(record, defaults, "datatype")
+    datatype_raw, datatype_source = _get(record, defaults, "datatype", "type")
     datatype_value = _alias(datatype_raw, _DATATYPE_ALIASES)
     metadata_row = (
         datatype_value is None

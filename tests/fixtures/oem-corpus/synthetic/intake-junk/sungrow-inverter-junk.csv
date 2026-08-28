@@ -1,0 +1,6 @@
+# Sungrow string inverter — protocol v1.1.37 style excerpt
+# IMPORTANT: poll address = document register - 1
+Doc Register,Poll Address,Point,Type,Gain,Unit,Area
+5000,4999,Device type code,U16,1,,Input
+5019,5018,Phase A voltage,U16,0.1,V,Input
+5033,5032,Total active power,S32,1,W,Input
