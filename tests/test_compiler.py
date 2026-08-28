@@ -801,6 +801,51 @@ class CompilerTests(unittest.TestCase):
             2, len({point["oem_point_id"] for point in oem_artifact["points"]})
         )
 
+    def test_duplicate_register_labels_are_disambiguated_not_crashed(self) -> None:
+        # Real vendor register lists repeat a display name at different
+        # addresses (e.g. per-interval energy counters all named "Reactive
+        # Energy Received"). normalize_map deliberately reuses one generated
+        # logical_point_id for those rows and raises a collision hold; the
+        # compiler must give each OEM point a unique id and keep going
+        # instead of raising a hard contract error for the whole map.
+        source = self.root / "duplicate-names.csv"
+        source.write_text(
+            "name,protocol_offset,area,datatype,access\n"
+            "Reactive Energy Received,100,holding-register,uint16,read-only\n"
+            "Reactive Energy Received,200,holding-register,uint16,read-only\n"
+            "Unique Point,300,holding-register,uint16,read-only\n",
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "collision-case")
+
+        self.assertIn(result["state"], {"awaiting-source-decision", "partial", "offline-complete"})
+        oem_artifact = json.loads(
+            (self.root / "collision-case" / "artifacts" / "oem-map.json").read_text()
+        )
+        self.assertEqual(3, len(oem_artifact["points"]))
+        self.assertEqual(
+            3, len({point["oem_point_id"] for point in oem_artifact["points"]})
+        )
+        collision_holds = [
+            hold
+            for hold in oem_artifact["holds"]
+            if hold["code"] == "point.generated-logical-id-collision"
+        ]
+        self.assertEqual(1, len(collision_holds))
+        self.assertEqual(2, collision_holds[0]["details"]["record_count"])
+
     def test_source_normalization_exceptions_form_one_grouped_packet(self) -> None:
         source = self.root / "missing-datatype.csv"
         source.write_text(

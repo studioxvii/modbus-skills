@@ -51,6 +51,7 @@ _HEADER_ALIASES = {
     "tag_name": "name",
     "point": "name",
     "point_name": "name",
+    "parameter_name": "name",
     "description": "description",
     "desc": "description",
     "label": "description",

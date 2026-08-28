@@ -213,7 +213,7 @@ class XlsxParserTests(unittest.TestCase):
         result = parse_xlsx(make_xlsx_with_title_row())
         self.assertEqual(1, len(result["records"]))
         record = result["records"][0]
-        self.assertEqual("Voltage", record["parameter_name"])
+        self.assertEqual("Voltage", record["name"])
         self.assertEqual(100, record["address"])
         skipped = [a for a in result["assumptions"] if a["code"] == "skipped_title_row"]
         self.assertEqual(1, len(skipped))
@@ -231,6 +231,69 @@ class XlsxParserTests(unittest.TestCase):
     def test_dispatch_uses_filename_extension(self) -> None:
         result = parse_source("Address\tArea\n0\tholding-register\n", filename="map.tsv")
         self.assertEqual("holding-register", result["records"][0]["area"])
+
+    def test_side_by_side_duplicate_title_row_is_skipped(self) -> None:
+        # Some vendor sheets (e.g. ASCO PM8000 register lists) lay out two
+        # side-by-side table blocks that repeat the worksheet title in more
+        # than one cell of row 1 ("PowerLogic PM8000 Power Quality Meter" in
+        # both column A and column I). That row must still be treated as a
+        # title, not a multi-column header, or every data row is rejected for
+        # missing an address.
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="PM8000" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1">
+                      <c r="A1" t="inlineStr"><is><t>PowerLogic PM8000 Power Quality Meter</t></is></c>
+                      <c r="I1" t="inlineStr"><is><t>PowerLogic PM8000 Power Quality Meter</t></is></c>
+                    </row>
+                    <row r="2">
+                      <c r="A2" t="inlineStr"><is><t>Parameter Name</t></is></c>
+                      <c r="B2" t="inlineStr"><is><t>Modbus Address Read</t></is></c>
+                      <c r="C2" t="inlineStr"><is><t>Modbus Data Type</t></is></c>
+                    </row>
+                    <row r="3">
+                      <c r="A3" t="inlineStr"><is><t>Year</t></is></c>
+                      <c r="B3"><v>1836</v></c>
+                      <c r="C3" t="inlineStr"><is><t>UINT16</t></is></c>
+                    </row>
+                  </sheetData>
+                </worksheet>""",
+            )
+        result = parse_xlsx(stream.getvalue())
+        self.assertEqual(1, len(result["records"]))
+        record = result["records"][0]
+        self.assertEqual("Year", record["name"])
+        self.assertEqual(1836, record["address"])
+        skipped = [a for a in result["assumptions"] if a["code"] == "skipped_title_row"]
+        self.assertEqual([1], skipped[0]["rows"])
+
+    def test_modbus_address_read_header_alias_maps_to_address(self) -> None:
+        result = parse_source(
+            "Parameter Name,Modbus Address Read\nYear,1836\n",
+            filename="map.csv",
+        )
+        self.assertEqual(1836, int(result["records"][0]["address"]))
+        self.assertEqual("Year", result["records"][0]["name"])
 
     def test_non_worksheet_relationships_may_target_outside_xl_directory(self) -> None:
         # Excel routinely emits workbook-level relationships (customXml, calcChain, ...)
