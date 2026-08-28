@@ -213,7 +213,7 @@ class XlsxParserTests(unittest.TestCase):
         result = parse_xlsx(make_xlsx_with_title_row())
         self.assertEqual(1, len(result["records"]))
         record = result["records"][0]
-        self.assertEqual("Voltage", record["parameter_name"])
+        self.assertEqual("Voltage", record["name"])
         self.assertEqual(100, record["address"])
         skipped = [a for a in result["assumptions"] if a["code"] == "skipped_title_row"]
         self.assertEqual(1, len(skipped))
