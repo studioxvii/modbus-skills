@@ -26,6 +26,9 @@ _HEADER_ALIASES = {
     "register": "address",
     "register_address": "address",
     "modbus_address": "address",
+    "modbus_address_read": "address",
+    "holding_register": "address",
+    "holding_registers": "address",
     "reference": "address",
     "ref": "address",
     "protocol_offset": "protocol_offset",
@@ -644,6 +647,38 @@ def _xlsx_rows(root: ET.Element, shared_strings: Sequence[str]) -> Iterable[tupl
         yield row_number, [values.get(index, "") for index in range(width)], has_formula
 
 
+def _skip_title_rows(non_empty_rows: Sequence[tuple[int, list[Any], bool]]) -> tuple[int, list[int]]:
+    """Return the header row index, skipping leading single-value title rows.
+
+    Vendor workbooks often place a merged worksheet title directly above the
+    real header row. Some workbooks lay out two side-by-side table blocks that
+    repeat the same title text in more than one cell of that row (e.g. a full
+    table in columns A-G and a condensed duplicate in columns I-K, both titled
+    "PowerLogic PM8000 Power Quality Meter"). Count *distinct* populated
+    values rather than populated cells so a repeated title still counts as
+    one title, not a multi-column header. Treat a leading row as a title,
+    not a header, only when it has at most one distinct populated value
+    *and* the next row is wider (more populated cells), so a single-column
+    worksheet's genuine one-cell header is never mistaken for a title.
+    """
+
+    skipped: list[int] = []
+    index = 0
+    while index < len(non_empty_rows) - 1:
+        row_number, values, _ = non_empty_rows[index]
+        populated = [value for value in values if value not in (None, "")]
+        distinct = len(set(populated))
+        if distinct > 1:
+            break
+        _, next_values, _ = non_empty_rows[index + 1]
+        next_filled = sum(1 for value in next_values if value not in (None, ""))
+        if next_filled <= len(populated):
+            break
+        skipped.append(row_number)
+        index += 1
+    return index, skipped
+
+
 def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
     """Parse basic XLSX worksheets with shared, inline, numeric, and formula cells."""
 
@@ -676,9 +711,22 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                     }
                 )
                 continue
-            header_row_number, header_values, header_formula = non_empty[0]
+            header_index, skipped_titles = _skip_title_rows(non_empty)
+            header_row_number, header_values, header_formula = non_empty[header_index]
             headers, header_warnings = _unique_headers(header_values)
             warnings.extend({**entry, "sheet": sheet_name, "row": header_row_number} for entry in header_warnings)
+            if skipped_titles:
+                assumptions.append(
+                    {
+                        "code": "skipped_title_row",
+                        "message": (
+                            f"Skipped single-cell title row(s) {skipped_titles} above the header in worksheet "
+                            f"{sheet_name!r}."
+                        ),
+                        "sheet": sheet_name,
+                        "rows": skipped_titles,
+                    }
+                )
             assumptions.append(
                 {
                     "code": "xlsx_header_row",
@@ -696,7 +744,7 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                         "row": header_row_number,
                     }
                 )
-            for row_number, row_values, has_formula in non_empty[1:]:
+            for row_number, row_values, has_formula in non_empty[header_index + 1 :]:
                 location = {"sheet": sheet_name, "row": row_number, "format": "xlsx"}
                 padded = list(row_values[: len(headers)]) + [""] * max(0, len(headers) - len(row_values))
                 record = {key: _trim_text(value) for key, value in zip(headers, padded)}
