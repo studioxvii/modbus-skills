@@ -44,6 +44,7 @@ _HEADER_ALIASES = {
     "area": "area",
     "register_area": "area",
     "register_type": "area",
+    "reg_type": "area",
     "table": "area",
     "object_type": "area",
     "name": "name",
@@ -74,7 +75,7 @@ _HEADER_ALIASES = {
     "registers": "word_count",
     "length_words": "word_count",
     "unit_id": "unit_id",
-    "unit": "unit_id",
+    "unit": "engineering_unit",
     "slave_id": "unit_id",
     "slave": "unit_id",
     "device_id": "unit_id",
@@ -107,6 +108,21 @@ _HEADER_ALIASES = {
 }
 
 _ADDRESS_KEYS = {"address", "protocol_offset", "display_address", "source_address"}
+_REGISTER_HEADER_KEYS = frozenset(
+    {
+        "address",
+        "protocol_offset",
+        "display_address",
+        "modbus_address",
+        "register_address",
+        "reference",
+        "ref",
+        "pdu_offset",
+        "zero_based_address",
+        "zero_based_offset",
+        "register",
+    }
+)
 _KNOWN_AREAS = {
     "coil",
     "coils",
@@ -236,6 +252,10 @@ def _canonicalize_mapping(record: Mapping[str, Any]) -> tuple[dict[str, Any], li
             key = replacement
         output[key] = _trim_text(value)
     return output, warnings
+
+
+def _sheet_has_register_header(headers: Sequence[str]) -> bool:
+    return any(header in _REGISTER_HEADER_KEYS for header in headers)
 
 
 def _has_address(record: Mapping[str, Any]) -> bool:
@@ -715,6 +735,19 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
             header_index, skipped_titles = _skip_title_rows(non_empty)
             header_row_number, header_values, header_formula = non_empty[header_index]
             headers, header_warnings = _unique_headers(header_values)
+            if not _sheet_has_register_header(headers):
+                warnings.append(
+                    {
+                        "code": "skipped_non_register_worksheet",
+                        "message": (
+                            f"Worksheet {sheet_name!r} has no register-map header; "
+                            "it was skipped."
+                        ),
+                        "sheet": sheet_name,
+                        "row": header_row_number,
+                    }
+                )
+                continue
             warnings.extend({**entry, "sheet": sheet_name, "row": header_row_number} for entry in header_warnings)
             if skipped_titles:
                 assumptions.append(

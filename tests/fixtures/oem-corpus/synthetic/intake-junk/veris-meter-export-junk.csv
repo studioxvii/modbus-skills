@@ -1,0 +1,6 @@
+# Veris E51C2 — integrator export 2024-11-02
+# PLC addressing: subtract 1 for RS-485 offset
+Modbus Addr,PLC Addr,Parameter,FC,Format,Scale,Units,R/W
+40001,0,Phase A Voltage,03,Float32,1,Volts,R
+40003,2,Phase B Voltage,03,Float32,1,Volts,R
+40005,4,Phase C Voltage,03,Float32,1,Volts,R

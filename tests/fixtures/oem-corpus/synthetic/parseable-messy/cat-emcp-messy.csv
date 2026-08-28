@@ -1,0 +1,9 @@
+Register,Description,datatype,Gain,Units,Access
+40001,Engine Speed,uint16,1,RPM,Read
+40002,Oil Pressure,uint16,1,psi,Read
+40003,Coolant Temp,int16,1,degF,Read
+40010,Run Hours High,uint16,1,hrs,Read
+40011,Run Hours Low,uint16,1,hrs,Read
+40020,Generator kW,uint16,0.1,kW,Read
+40025,Line Voltage L1,uint16,0.1,VAC,Read
+40100,Operating State,uint16,1,,Read

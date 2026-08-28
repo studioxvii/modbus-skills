@@ -1,0 +1,5 @@
+Cummins PowerCommand 3.3 — raw parametrics excerpt
+Document A029X159 (integrator paste)
+Modbus Ref,Parameter Name,High Reg,Low Reg,Multiplier,Units,Access
+40070,Engine Running Time,40070,40071,0.1,seconds,R
+40002,Engine Speed (RPM),40002,,1,RPM,R

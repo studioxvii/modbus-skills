@@ -232,6 +232,26 @@ class XlsxParserTests(unittest.TestCase):
         result = parse_source("Address\tArea\n0\tholding-register\n", filename="map.tsv")
         self.assertEqual("holding-register", result["records"][0]["area"])
 
+    def test_unit_header_maps_to_engineering_unit_not_slave_id(self) -> None:
+        result = parse_csv(
+            "Address,Area,Type,Unit\n256,holding-register,uint16,V\n",
+            delimiter=",",
+        )
+        record = result["records"][0]
+        self.assertEqual("V", record["engineering_unit"])
+        self.assertNotIn("unit_id", record)
+
+    def test_gotion_integrator_xlsx_skips_cover_and_alarm_sheets(self) -> None:
+        path = ROOT / "tests" / "fixtures" / "oem-corpus" / "synthetic" / "gotion-bess-integrator-messy.xlsx"
+        result = parse_xlsx(path.read_bytes())
+        self.assertEqual(9, len(result["records"]))
+        self.assertEqual(0, len(result["rejected_rows"]))
+        self.assertTrue(
+            any(warning["code"] == "skipped_non_register_worksheet" for warning in result["warnings"])
+        )
+        self.assertEqual("V", result["records"][0]["engineering_unit"])
+        self.assertEqual("4x Holding", result["records"][0]["area"])
+
     def test_side_by_side_duplicate_title_row_is_skipped(self) -> None:
         # Some vendor sheets (e.g. ASCO PM8000 register lists) lay out two
         # side-by-side table blocks that repeat the worksheet title in more

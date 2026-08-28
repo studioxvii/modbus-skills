@@ -1,0 +1,9 @@
+protocol_offset,Tag,Type,Gain,Unit,Notes
+256,Stack_Voltage,uint16,0.1,V,BMS cluster 1
+257,Stack_Current,int16,0.1,A,signed discharge +
+258,Work_State,uint16,1,,0 standby 1 dischg 2 chg
+259,SOC,uint16,1,%
+260,SOH,uint16,1,%
+262,Max_Cell_mV,uint16,1,mV
+264,Min_Cell_mV,uint16,1,mV
+278,Insulation,uint16,1,kOhm
