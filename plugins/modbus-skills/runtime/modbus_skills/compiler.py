@@ -152,9 +152,7 @@ def compile_user_map(
     )
     _store_json(root, index, "request", "control/request.json", normalized)
     _store_json(root, index, "oem_map", "artifacts/oem-map.json", oem_map)
-    if "source" in normalized and _requires_source_correction(
-        oem_map, str(normalized["source"].get("format", ""))
-    ):
+    if "source" in normalized and _requires_source_correction(oem_map):
         packet = _source_decision_packet(case_id, oem_map)
         _store_json(
             root,
@@ -681,6 +679,7 @@ def _pdf_coverage_complete(oem_map: Mapping[str, Any]) -> bool:
     )
 
 
+<<<<<<< HEAD
 _NON_SOURCE_REPLACEMENT_HOLDS = frozenset(
     {
         "point.not-readable",
@@ -712,6 +711,22 @@ def _requires_source_correction(
     ]
     if source_format != "pdf":
         return bool(holds)
+=======
+def _requires_source_correction(oem_map: Mapping[str, Any]) -> bool:
+    """Return whether the source cannot produce a useful offline map.
+
+    A source that yields zero points cannot proceed to selection at all, so
+    it pauses immediately for a corrected source. Per-point exceptions
+    (unresolved area, datatype, byte order, address convention, ...) belong
+    in the generated map's exception annex instead: ``_advance`` already
+    keeps every resolvable point, holds the affected ones, and groups the
+    remaining exceptions into one ``provide-corrected-source`` packet. Both
+    PDF and structured sources rely on that same downstream handling, so
+    holds alone are not evidence that the user must replace the source
+    document.
+    """
+
+>>>>>>> c6494e9 (fix(pstack/map/asco-381339-349): keep structured-source points instead of discarding them on any hold)
     return not bool(oem_map.get("points"))
 
 

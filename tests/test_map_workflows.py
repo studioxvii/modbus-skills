@@ -45,6 +45,56 @@ class NormalizeMapTests(unittest.TestCase):
         )
         self.assertEqual("pending", result["points"][0]["normalization_status"])
 
+    def test_area_is_derived_from_a_declared_read_function_code(self) -> None:
+        # Vendor register lists sometimes state only a Modbus function code
+        # (e.g. "Modbus Function Code" = 2) with no separate area/register
+        # type column. FC01-FC04 and the register area are the same fact in
+        # the protocol, so this is a deterministic lookup, not a guess.
+        result = normalize_map(
+            [
+                {
+                    "logical_point_id": "di0",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "protocol_offset": 0,
+                    "datatype": "bool",
+                    "function_code": 2,
+                }
+            ]
+        )
+
+        point = result["points"][0]
+        self.assertEqual("discrete-input", point["area"])
+        self.assertNotIn(
+            "point.area-unresolved",
+            {hold["code"] for hold in result["holds"]},
+        )
+        self.assertIn(
+            "area-from-function-code",
+            {assumption["code"] for assumption in result["assumptions"]},
+        )
+
+    def test_area_from_function_code_ignores_write_and_out_of_range_codes(self) -> None:
+        result = normalize_map(
+            [
+                {
+                    "logical_point_id": "coil-write",
+                    "route_id": "lab",
+                    "unit_id": 1,
+                    "protocol_offset": 0,
+                    "datatype": "bool",
+                    "function_code": 6,
+                }
+            ]
+        )
+
+        point = result["points"][0]
+        self.assertIsNone(point["area"])
+        self.assertIn(
+            "point.area-unresolved",
+            {hold["code"] for hold in result["holds"]},
+        )
+
     def test_one_register_integer_byte_order_is_not_applicable(self) -> None:
         result = normalize_map(
             [

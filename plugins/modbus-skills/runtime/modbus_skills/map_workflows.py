@@ -24,6 +24,28 @@ class MapWorkflowError(ValueError):
     """Raised when a map workflow input cannot be processed safely."""
 
 
+_AREA_BY_READ_FUNCTION_CODE: dict[int, str] = {
+    code: area.value for area, code in READ_FUNCTION_BY_AREA.items()
+}
+
+
+def _area_from_function_code(record: Mapping[str, Any], defaults: Mapping[str, Any]) -> str | None:
+    """Return the area a declared read function code (FC01-FC04) implies.
+
+    The function code and register area are the same fact in the Modbus
+    protocol (FC03 always means holding-register, and so on), so treating a
+    declared read function code as an area declaration is a deterministic
+    lookup, not a guess.
+    """
+
+    raw, _source = _get(record, defaults, "function_code", "function", "fc")
+    try:
+        code = _integer(raw, minimum=1, maximum=4)
+    except (TypeError, ValueError):
+        return None
+    return _AREA_BY_READ_FUNCTION_CODE.get(code) if code is not None else None
+
+
 _AREA_ALIASES = {
     "coil": "coil",
     "coils": "coil",
@@ -763,6 +785,19 @@ def _normalize_one(
 
     area_raw, area_source = _get(record, defaults, "area")
     area_value = _alias(area_raw, _AREA_ALIASES)
+    if area_value is None and area_raw in (None, ""):
+        inferred_area = _area_from_function_code(record, defaults)
+        if inferred_area is not None:
+            area_value = inferred_area
+            area_source = "function_code"
+            assumptions.append(
+                _assumption(
+                    "area-from-function-code",
+                    f"Used the {area_value} area implied by the declared Modbus function code.",
+                    field="area",
+                    value=area_value,
+                )
+            )
     if area_value is None:
         area_value = "unknown"
         code = "point.area-unresolved" if area_raw in (None, "") else "point.area-unrecognized"

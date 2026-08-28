@@ -40,9 +40,16 @@ class ExampleCompileTests(unittest.TestCase):
     def test_unresolved_byte_order_does_not_invent_a_layout(self) -> None:
         with tempfile.TemporaryDirectory(prefix="modbus-example-unresolved-") as tmp:
             receipt = self._compile(EXAMPLE / "request-unresolved.json", Path(tmp) / "case")
-            self.assertEqual("awaiting-source-decision", receipt["status"])
+            self.assertEqual("partial", receipt["status"])
             self.assertEqual("provide-corrected-source", receipt["next_action"]["kind"])
-            self.assertFalse((Path(tmp) / "case" / "output").exists())
+            output = Path(tmp) / "case" / "output" / "user-map.json"
+            self.assertTrue(output.is_file())
+            user_map = json.loads(output.read_text(encoding="utf-8"))
+            by_id = {point["oem_point_id"]: point for point in user_map["points"]}
+            self.assertEqual({"tank_level", "flow_rate", "energy_total"}, set(by_id))
+            for point_id in ("flow_rate", "energy_total"):
+                self.assertIsNone(by_id[point_id]["byte_order"])
+                self.assertFalse(by_id[point_id]["byte_order_confirmed"])
 
 
 if __name__ == "__main__":
