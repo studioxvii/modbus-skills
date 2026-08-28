@@ -96,6 +96,19 @@ class CsvParserTests(unittest.TestCase):
         self.assertEqual(1, len(result["records"]))
         self.assertEqual(40005, int(result["records"][0]["address"]))
 
+    def test_modbus_data_type_and_function_code_headers_are_recognized(self) -> None:
+        # ASCO-style register maps label their columns "Modbus Data Type"
+        # and "Modbus Function Code" rather than "Data Type"/"Function Code".
+        result = parse_csv(
+            "Name,Modbus Address Read,Modbus Data Type,Modbus Function Code\n"
+            "Year,1836,UINT16,3\n",
+            delimiter=",",
+        )
+        self.assertEqual(1, len(result["records"]))
+        record = result["records"][0]
+        self.assertEqual("UINT16", record["datatype"])
+        self.assertEqual(3, int(record["function_code"]))
+
     def test_common_underscore_enum_names_do_not_create_false_warnings(self) -> None:
         result = parse_csv(
             "Address,Area,Data Type,Byte Order\n"
