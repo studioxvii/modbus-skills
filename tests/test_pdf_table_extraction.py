@@ -232,6 +232,22 @@ class PdfTableExtractionTests(unittest.TestCase):
             [row["code"] for row in evidence["quarantined_records"]],
         )
 
+    def test_recognizes_modbus_address_and_contents_header_aliases(self) -> None:
+        table = [
+            ["Code", "Modbus", "Contents", "Type"],
+            [None, "Address", None, None],
+            ["3", "40001", "Status word", "uint16"],
+        ]
+
+        evidence = parse_pdf_table_evidence(table, page_number=5, table_index=0)
+
+        self.assertEqual([], evidence["quarantined_records"])
+        self.assertEqual(
+            ["40001"], [row["source_register"] for row in evidence["records"]]
+        )
+        self.assertEqual("Status word", evidence["records"][0]["name"])
+        self.assertEqual("uint16", evidence["records"][0]["format"])
+
     def test_conflicting_duplicate_semantic_columns_are_quarantined(self) -> None:
         table = [
             ["Start", "R/W", "Type", "Data Type", "Description"],
