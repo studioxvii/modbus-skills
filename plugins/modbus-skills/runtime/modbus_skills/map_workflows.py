@@ -958,7 +958,8 @@ def _normalize_one(
     datatype_value = _alias(datatype_raw, _DATATYPE_ALIASES)
     metadata_row = (
         datatype_value is None
-        and _is_placeholder_token(record.get("access"))
+        and _is_explicit_placeholder(datatype_raw)
+        and _is_explicit_placeholder(record.get("access"))
         and not _text(record.get("description"))
     )
     if datatype_value is None and not metadata_row:
