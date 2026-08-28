@@ -72,6 +72,7 @@ _HEADER_ALIASES = {
     "packed_bit_order": "bit_order",
     "word_count": "word_count",
     "register_count": "word_count",
+    "size_int16": "word_count",
     "registers": "word_count",
     "length_words": "word_count",
     "unit_id": "unit_id",
