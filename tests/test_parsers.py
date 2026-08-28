@@ -155,6 +155,65 @@ class XlsxParserTests(unittest.TestCase):
         result = parse_source("Address\tArea\n0\tholding-register\n", filename="map.tsv")
         self.assertEqual("holding-register", result["records"][0]["area"])
 
+    def test_non_worksheet_relationships_may_target_outside_xl_directory(self) -> None:
+        # Excel routinely writes workbook-level relationships (customXml, calcChain, ...)
+        # whose Target points above xl/, e.g. Target="../customXml/item1.xml". Those parts
+        # are never loaded as worksheets, so they must not trip the anti-traversal guard.
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                  <Relationship Id="rId2" Target="../customXml/item1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"/>
+                </Relationships>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1"><c r="A1" t="inlineStr"><is><t>Address</t></is></c></row>
+                    <row r="2"><c r="A2"><v>1</v></c></row>
+                  </sheetData>
+                </worksheet>""",
+            )
+        result = parse_xlsx(stream.getvalue())
+        self.assertEqual(1, len(result["records"]))
+
+    def test_worksheet_relationship_escaping_workbook_directory_is_rejected(self) -> None:
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="../../etc/passwd"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>""",
+            )
+        with self.assertRaises(ParseError):
+            parse_xlsx(stream.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

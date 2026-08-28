@@ -559,6 +559,10 @@ def _xlsx_sheet_paths(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
             raise ParseError("XLSX is missing its workbook relationships and has no worksheet parts.")
         return [(Path(path).stem, path) for path in paths]
 
+    # Real workbooks route many relationship types (customXml, calcChain, theme, ...)
+    # through xl/_rels/workbook.xml.rels, and some of those legitimately target parts
+    # outside xl/ (e.g. Target="../customXml/item1.xml"). Only worksheet relationships
+    # are ever used to load a sheet below, so only those need the anti-traversal check.
     relation_targets: dict[str, str] = {}
     for relationship in relationships.iter():
         if _local_name(relationship.tag) != "Relationship":
@@ -566,10 +570,7 @@ def _xlsx_sheet_paths(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
         relation_id = relationship.attrib.get("Id")
         target = relationship.attrib.get("Target")
         if relation_id and target:
-            path = posixpath.normpath(posixpath.join("xl", target))
-            if not path.startswith("xl/") or path.startswith("xl/../"):
-                raise ParseError("XLSX worksheet relationship leaves the workbook directory.")
-            relation_targets[relation_id] = path
+            relation_targets[relation_id] = posixpath.normpath(posixpath.join("xl", target))
 
     output: list[tuple[str, str]] = []
     for sheet in workbook.iter():
@@ -578,7 +579,10 @@ def _xlsx_sheet_paths(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
         name = sheet.attrib.get("name", f"Sheet{len(output) + 1}")
         relation_id = next((value for key, value in sheet.attrib.items() if _local_name(key) == "id"), None)
         if relation_id and relation_id in relation_targets:
-            output.append((name, relation_targets[relation_id]))
+            path = relation_targets[relation_id]
+            if not path.startswith("xl/") or path.startswith("xl/../"):
+                raise ParseError("XLSX worksheet relationship leaves the workbook directory.")
+            output.append((name, path))
     if not output:
         raise ParseError("XLSX workbook has no readable worksheets.")
     return output
