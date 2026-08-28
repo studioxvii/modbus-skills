@@ -148,6 +148,54 @@ class JsonAndXmlParserTests(unittest.TestCase):
             parse_xml(unsafe)
 
 
+def make_xlsx_with_title_row() -> bytes:
+    """Build an XLSX where a merged, single-cell title sits above the real header.
+
+    Mirrors vendor workbooks (e.g. OEM register lists) that put a worksheet
+    title in row 1 and the actual column headers in row 2.
+    """
+
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0"?>
+            <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+            </workbook>""",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+            </Relationships>""",
+        )
+        archive.writestr(
+            "xl/sharedStrings.xml",
+            """<?xml version="1.0"?>
+            <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <si><t>Vendor Register List - Title</t></si>
+              <si><t>Parameter Name</t></si><si><t>Holding Register</t></si>
+              <si><t>Voltage</t></si>
+            </sst>""",
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0"?>
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <sheetData>
+                <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                <row r="2"><c r="A2" t="s"><v>1</v></c><c r="B2" t="s"><v>2</v></c></row>
+                <row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>100</v></c></row>
+              </sheetData>
+            </worksheet>""",
+        )
+    return stream.getvalue()
+
+
 class XlsxParserTests(unittest.TestCase):
     def test_basic_xlsx_types_and_formula_cached_values(self) -> None:
         result = parse_xlsx(make_xlsx())
@@ -160,6 +208,25 @@ class XlsxParserTests(unittest.TestCase):
     def test_invalid_archive_is_rejected(self) -> None:
         with self.assertRaises(ParseError):
             parse_xlsx(b"not a workbook")
+
+    def test_single_cell_title_row_above_header_is_skipped(self) -> None:
+        result = parse_xlsx(make_xlsx_with_title_row())
+        self.assertEqual(1, len(result["records"]))
+        record = result["records"][0]
+        self.assertEqual("Voltage", record["parameter_name"])
+        self.assertEqual(100, record["address"])
+        skipped = [a for a in result["assumptions"] if a["code"] == "skipped_title_row"]
+        self.assertEqual(1, len(skipped))
+        self.assertEqual([1], skipped[0]["rows"])
+        header = [a for a in result["assumptions"] if a["code"] == "xlsx_header_row"][0]
+        self.assertEqual(2, header["row"])
+
+    def test_holding_register_header_alias_maps_to_address(self) -> None:
+        result = parse_source(
+            "Parameter Name,Holding Register\nGenerator Voltage,100\n",
+            filename="map.csv",
+        )
+        self.assertEqual(100, int(result["records"][0]["address"]))
 
     def test_dispatch_uses_filename_extension(self) -> None:
         result = parse_source("Address\tArea\n0\tholding-register\n", filename="map.tsv")
@@ -194,7 +261,7 @@ class XlsxParserTests(unittest.TestCase):
                 """<?xml version="1.0"?>
                 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
                   <sheetData>
-                    <row r="1"><c r="A1"><v>Address</v></c></row>
+                    <row r="1"><c r="A1" t="inlineStr"><is><t>Address</t></is></c></row>
                     <row r="2"><c r="A2"><v>1</v></c></row>
                   </sheetData>
                 </worksheet>""",
