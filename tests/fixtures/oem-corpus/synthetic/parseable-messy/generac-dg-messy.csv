@@ -1,0 +1,9 @@
+protocol_offset,Tag,Type,Access,Description
+15,oil_press,unsigned int,R,Oil pressure
+16,rpm,unsigned int,R,Engine RPM
+17,freq,signed int,R,Output frequency
+18,oil_temp,unsigned int,R,Oil temperature
+19,fuel_level,unsigned int,R,Fuel level pct
+22,gen_voltsA,unsigned int,R,Gen L-N volts A
+26,load_amps,unsigned int,R,Load amps
+30,Dispctrl,bitfield,R/W,Display control bits

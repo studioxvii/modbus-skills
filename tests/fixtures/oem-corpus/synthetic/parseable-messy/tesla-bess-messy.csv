@@ -1,0 +1,8 @@
+Register,Name,datatype,Range,Unit,Access
+1000,Real Power Command Mode,enum,1,,RW
+1001,Real Power Setpoint,int32,-1e9..1e9,W,RW
+1022,Heartbeat Toggle,uint16,55AA or AA55,,RW
+1023,Command Timeout,uint16,0..600,s,RW
+2000,Site Real Power,int32,,W,R
+2002,Site Reactive Power,int32,,var,R
+2010,State of Charge,uint16,0..100,%,R

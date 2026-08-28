@@ -1,0 +1,9 @@
+Register,Parameter,Size,datatype,Units,Gain,Access
+3027,Voltage L1-N,2,float32,Volts,1,R
+3009,Current L1,2,float32,Amps,1,R
+3059,Active Power Total,2,float32,Watts,1,R
+3067,Reactive Power Total,2,float32,VAR,1,R
+3083,Power Factor Total,2,float32,,1,R
+3109,Frequency,2,float32,Hz,1,R
+3203,Active Energy Delivered,4,int64,Wh,1,R
+3207,Active Energy Received,4,int64,Wh,1,R

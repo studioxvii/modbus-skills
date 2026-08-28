@@ -1,0 +1,6 @@
+Narada NPFC cluster Modbus map (BMS V1.6 excerpt)
+Hangzhou Narada — FOR COMMISSIONING USE ONLY
+Hex Addr,Decimal,名称 / Name,DataType,Resolution,Offset,Notes
+0x0100,256,Battery stack voltage,uint16,0.1 V,,
+0x0101,257,Battery circuit current,int16,0.1 A,0,signed
+0x0103,259,Battery stack SOC,uint16,1 %,,

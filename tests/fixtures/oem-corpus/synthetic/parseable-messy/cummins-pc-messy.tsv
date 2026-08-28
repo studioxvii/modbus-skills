@@ -1,0 +1,7 @@
+Register	Parameter Name	High Reg	Low Reg	Multiplier	Units	Access
+40070	Engine Running Time	40070	40071	0.1	seconds	R
+40002	Engine Speed (RPM)	40002		1	RPM	R
+40011	Coolant Temperature	40011		1	degF	R
+40020	Percent Load	40020		1	%	R
+40025	kW Total	40025	40026	0.1	kW	R
+40100	Oil Pressure	40100		1	psi	R
