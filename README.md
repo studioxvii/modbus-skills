@@ -372,7 +372,7 @@ Studio Seventeen publishes Modbus Skills.
 
 ## Release status
 
-Modbus Skills is licensed under Apache-2.0 and versioned as `0.2.1`. Node-RED
+Modbus Skills is licensed under Apache-2.0 and versioned as `0.2.2`. Node-RED
 exports have a recorded native acceptance result. Modpoll, Witte Modbus Poll, and
 ModScan exports are BETA until native application verification is complete. See
 [`docs/publication-checklist.md`](docs/publication-checklist.md).

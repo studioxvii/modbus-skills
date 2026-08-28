@@ -1,6 +1,6 @@
 {
   "name": "modbus-skills",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Read-only Modbus map, byte-order, tool-generation, and capture-analysis workflows.",
   "author": {
     "name": "Studio Seventeen"
