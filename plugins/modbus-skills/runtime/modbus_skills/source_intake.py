@@ -104,7 +104,9 @@ def compile_source_descriptor(
         raise SourceIntakeError(str(exc)) from exc
 
     source_hash = stable_input_hash(data)
-    points = [_oem_point(point, index) for index, point in enumerate(canonical["points"])]
+    points = _disambiguate_oem_point_ids(
+        [_oem_point(point, index) for index, point in enumerate(canonical["points"])]
+    )
     holds = [
         _portable_hold(hold)
         for hold in canonical.get("holds", ())
@@ -327,6 +329,30 @@ def _bind_selection_entry(
         )
     entry["oem_point_id"] = point_id
     return entry
+
+
+def _disambiguate_oem_point_ids(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Give every OEM point in this map a unique ``oem_point_id``.
+
+    ``normalize_map`` intentionally assigns two source rows the same generated
+    ``logical_point_id`` when the vendor source repeats a label (e.g. a
+    register list that names several distinct addresses "Reactive Energy
+    Received") and raises a ``point.generated-logical-id-collision`` hold so a
+    human can supply explicit unique IDs. That hold stays in the OEM map's
+    ``holds`` list, but the OEM map contract requires one distinct ID per
+    point, so append a stable, order-based suffix to every id after the first
+    in a colliding group rather than dropping points or failing the whole
+    compile.
+    """
+
+    seen: dict[str, int] = {}
+    for point in points:
+        point_id = point["oem_point_id"]
+        occurrence = seen.get(point_id, 0)
+        seen[point_id] = occurrence + 1
+        if occurrence:
+            point["oem_point_id"] = f"{point_id}-dup{occurrence + 1}"
+    return points
 
 
 def _oem_point(point: Mapping[str, Any], index: int) -> dict[str, Any]:
