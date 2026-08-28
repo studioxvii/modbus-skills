@@ -372,6 +372,13 @@ def _is_placeholder_token(value: Any) -> bool:
     return text is not None and text.casefold() in _PLACEHOLDER_TOKENS
 
 
+def _is_explicit_placeholder(value: Any) -> bool:
+    """True only for concrete placeholder tokens such as ``---``, not missing fields."""
+
+    text = _text(value)
+    return text is not None and text.casefold() in _PLACEHOLDER_TOKENS
+
+
 def _alias(value: Any, aliases: Mapping[str, str]) -> str | None:
     text = _text(value)
     if text is None:
