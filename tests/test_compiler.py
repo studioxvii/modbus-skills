@@ -409,6 +409,49 @@ class CompilerTests(unittest.TestCase):
         user_map = json.loads((self.root / "source-case" / "output" / "user-map.json").read_text())
         self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
 
+    def test_duplicate_vendor_labels_do_not_crash_the_whole_compile(self) -> None:
+        # Real vendor register maps repeat labels (e.g. two rows both named
+        # "Reserved") across different addresses. normalize-map intentionally
+        # gives those rows the same generated logical_point_id and raises a
+        # collision hold instead of guessing which one is which. The compiler
+        # must still produce one OEM point per source row instead of raising
+        # an uncaught contract error for the whole 258-row map.
+        source = self.root / "duplicate-labels.csv"
+        source.write_text(
+            "name,protocol_offset,area,datatype,access\n"
+            "Reserved,10,holding-register,uint16,read-only\n"
+            "Reserved,11,holding-register,uint16,read-only\n"
+            "Temperature,12,holding-register,uint16,read-only\n",
+            encoding="utf-8",
+        )
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {
+                "schema_version": "modbus-user-selection-template/v1",
+                "requested_measurements": ["all documented Modbus read points"],
+                "mode": "all-readable",
+            },
+            "targets": [],
+            "target_options": {},
+        }
+
+        result = compile_user_map(compile_request, self.root / "duplicate-label-case")
+
+        self.assertIn(result["state"], {"partial", "awaiting-source-decision"})
+        oem_map = json.loads(
+            (self.root / "duplicate-label-case" / "artifacts" / "oem-map.json").read_text()
+        )
+        point_ids = [point["oem_point_id"] for point in oem_map["points"]]
+        self.assertEqual(3, len(point_ids))
+        self.assertEqual(len(set(point_ids)), len(point_ids))
+        self.assertTrue(
+            any(
+                hold.get("code") == "point.generated-logical-id-collision"
+                for hold in oem_map.get("holds", ())
+            )
+        )
+
     def test_complete_map_intent_selects_every_readable_source_point(self) -> None:
         source = self.root / "complete.csv"
         source.write_text(

@@ -27,6 +27,8 @@ _HEADER_ALIASES = {
     "register_address": "address",
     "modbus_address": "address",
     "modbus_address_read": "address",
+    "holding_register": "address",
+    "holding_registers": "address",
     "reference": "address",
     "ref": "address",
     "protocol_offset": "protocol_offset",
