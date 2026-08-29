@@ -267,6 +267,14 @@ class ToolPackTests(unittest.TestCase):
         pack = build_tool_pack(canonical_map, candidate_plan, targets=("modscan",))
         self.assertTrue(pack.artifacts)
 
+    def test_oem_slash_names_are_not_treated_as_unix_paths(self) -> None:
+        canonical_map, read_plan = inputs()
+        candidate_map = json.loads(json.dumps(canonical_map))
+        candidate_map["points"][0]["name"] = "Gen L1 lead /lag"
+        candidate_map["points"][0]["description"] = "Gen L1 lead /lag"
+        pack = build_tool_pack(candidate_map, read_plan, targets=("modpoll",))
+        self.assertTrue(pack.artifacts)
+
     def test_portable_map_excludes_review_audit_and_source_evidence(self) -> None:
         secret = "bearer-eyJhbGciOiJIUzI1NiJ9-private"
         local_path = "/" + "Users/operator/Private/customer-map.csv"

@@ -19,7 +19,9 @@ from .pdf_table_extraction import prepare_pdf_records
 
 SELECTION_TEMPLATE_SCHEMA_VERSION = "modbus-user-selection-template/v1"
 _SOURCE_FORMATS = frozenset({"pdf", "csv", "tsv", "psv", "json", "xml", "xlsx"})
-_SOURCE_FIELDS = frozenset({"path", "format", "pages", "delimiter", "defaults"})
+_SOURCE_FIELDS = frozenset(
+    {"path", "format", "pages", "delimiter", "defaults", "ocr_evidence"}
+)
 _DEPLOYMENT_ONLY_HOLDS = frozenset(
     {"point.route-id-unresolved", "point.unit-id-unresolved"}
 )
@@ -87,15 +89,39 @@ def compile_source_descriptor(
     pages = descriptor.get("pages")
     if pages is not None and not isinstance(pages, str):
         raise SourceIntakeError("source.pages must be text")
+    ocr_evidence_path = descriptor.get("ocr_evidence")
+    if ocr_evidence_path is not None and not isinstance(ocr_evidence_path, str):
+        raise SourceIntakeError("source.ocr_evidence must be text")
 
     try:
         if source_format == "pdf":
             page_range = parse_page_range(pages)
-            parsed = extract_pdf(path, data, page_range=page_range)
+            ocr_evidence = None
+            if ocr_evidence_path is not None:
+                evidence_path = Path(ocr_evidence_path).expanduser()
+                try:
+                    ocr_evidence = json.loads(
+                        evidence_path.read_text(encoding="utf-8")
+                    )
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise SourceIntakeError(
+                        f"source.ocr_evidence could not be read: {exc}"
+                    ) from exc
+                if not isinstance(ocr_evidence, Mapping):
+                    raise SourceIntakeError(
+                        "source.ocr_evidence must contain a JSON object"
+                    )
+            parsed = extract_pdf(
+                path, data, page_range=page_range, ocr_evidence=ocr_evidence
+            )
             parsed = prepare_pdf_records(parsed)
         else:
             if pages is not None:
                 raise SourceIntakeError("source.pages is valid only for PDF input")
+            if ocr_evidence_path is not None:
+                raise SourceIntakeError(
+                    "source.ocr_evidence is valid only for PDF input"
+                )
             parsed = _parse_structured_source(
                 data, source_format=source_format, filename=path.name, delimiter=delimiter
             )
@@ -150,6 +176,11 @@ def compile_source_descriptor(
         **({"pages": pages} if pages is not None else {}),
         **({"delimiter": delimiter} if delimiter is not None else {}),
         **({"defaults": dict(defaults)} if defaults else {}),
+        **(
+            {"ocr_evidence": str(Path(ocr_evidence_path).expanduser())}
+            if ocr_evidence_path is not None
+            else {}
+        ),
     }
     return oem_map, normalized_descriptor
 

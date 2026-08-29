@@ -30,6 +30,8 @@ PDF_HEADER_ALIASES = {
     "register address": "address",
     "register address (decimal)": "address",
     "register number": "address",
+    "holding address": "address",
+    "holding register address": "address",
     "reg no": "address",
     "reg no.": "address",
     "reg addr": "address",
@@ -38,11 +40,14 @@ PDF_HEADER_ALIASES = {
     "start address": "address",
     "reg": "address",
     "reg.": "address",
+    "e50xxa reg": "address",
+    "e50xxa reg.": "address",
     "modbus address": "address",
     "modbus register": "address",
     "protocol offset": "protocol_offset",
     "display address": "display_address",
     "r/w": "access",
+    "read/": "access",
     "access": "access",
     "nv": "nonvolatile",
     "format": "format",
@@ -58,11 +63,15 @@ PDF_HEADER_ALIASES = {
     "range": "range",
     "description": "description",
     "meaning": "description",
+    "semantics": "description",
+    "parameter details": "description",
     "contents": "name",
     "name": "name",
     "tag": "name",
+    "item": "name",
     "symbolic register name": "name",
     "parameter": "name",
+    "parameter name": "name",
     "variable": "name",
     "modbus register type": "area",
     "area": "area",
@@ -75,7 +84,12 @@ _HEADER_NAMES = PDF_HEADER_ALIASES
 _INHERITED_FIELDS = frozenset(
     {"access", "nonvolatile", "format", "units", "scale", "range"}
 )
-_AREA_BY_PREFIX = {"3": "input-register", "4": "holding-register"}
+_AREA_BY_PREFIX = {
+    "0": "coil",
+    "1": "discrete-input",
+    "3": "input-register",
+    "4": "holding-register",
+}
 _PREFIX_BY_AREA = {value: key for key, value in _AREA_BY_PREFIX.items()}
 _MAX_GRID_PAGES = 256
 _MAX_GRID_RECORDS = 50_000
@@ -527,7 +541,33 @@ def _prepare_pdf_record(raw: Mapping[str, Any]) -> dict[str, Any]:
         except ValueError:
             record["source_scale"] = scale
             record.pop("scale", None)
+    _lift_pdf_source_address(record)
     return record
+
+
+def _lift_pdf_source_address(record: dict[str, Any]) -> None:
+    """Expose PDF address evidence on the fields normalize already understands.
+
+    Prefer leaving structured ``source_address`` alone — normalize already reads
+    it. Only lift a bare ``address_number`` / ``source_register`` when those
+    nested fields are missing so the row is not dropped as address-less.
+    """
+
+    if any(
+        record.get(key) not in (None, "")
+        for key in ("address", "protocol_offset", "display_address")
+    ):
+        return
+    if isinstance(record.get("source_address"), Mapping) and record["source_address"].get(
+        "raw"
+    ) not in (None, ""):
+        return
+    number = record.get("address_number")
+    if not isinstance(number, int):
+        number = _source_register_number(record.get("source_register"))
+    if not isinstance(number, int):
+        return
+    record["address"] = number
 
 
 def _source_point_id(record: Mapping[str, Any]) -> str:
