@@ -42,7 +42,20 @@ LOG="artifacts/pstack/map-matrix/improve-${MAP_ID}-${STAMP}.log"
 PLAYBOOK="$ROOT/scripts/pstack/map_matrix/IMPROVER.md"
 
 set +e
-agent --trust --force -p --workspace "$ROOT" --model claude-sonnet-5-thinking-high "$(cat <<EOF
+export PATH="${HOME}/.local/bin:${PATH}"
+AGENT_BIN="${PSTACK_AGENT_BIN:-}"
+if [[ -z "$AGENT_BIN" ]]; then
+  AGENT_BIN="$(command -v agent || true)"
+fi
+if [[ -z "$AGENT_BIN" && -x "${HOME}/.local/bin/agent" ]]; then
+  AGENT_BIN="${HOME}/.local/bin/agent"
+fi
+if [[ -z "$AGENT_BIN" ]]; then
+  echo "agent CLI not found on PATH (exit 127 previously); set PSTACK_AGENT_BIN" >&2
+  exit 127
+fi
+
+"$AGENT_BIN" --trust --force -p --workspace "$ROOT" --model claude-sonnet-5-thinking-high "$(cat <<EOF
 You are the map-matrix IMPROVER for modbus-skills.
 
 Read and follow: $PLAYBOOK

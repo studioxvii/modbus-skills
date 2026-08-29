@@ -24,17 +24,27 @@ class ParseError(ValueError):
 _HEADER_ALIASES = {
     "address": "address",
     "register": "address",
+    "register_s": "protocol_offset",
     "register_address": "address",
     "modbus_address": "address",
     "modbus_address_read": "address",
+    "modbus_register": "address",
     "holding_register": "address",
     "holding_registers": "address",
+    "holding_register_1_indexed": "display_address",
+    "mb_address": "display_address",
+    "acquisuite_mb_address": "display_address",
     "reference": "address",
     "ref": "address",
     "protocol_offset": "protocol_offset",
     "pdu_offset": "protocol_offset",
     "zero_based_address": "protocol_offset",
     "zero_based_offset": "protocol_offset",
+    "address_0_indexed": "protocol_offset",
+    "register_number": "protocol_offset",
+    "register_s_decimal_0_based": "protocol_offset",
+    "register_s_decimal_1_based": "display_address",
+    "offset": "protocol_offset",
     "display_address": "display_address",
     "reference_number": "display_address",
     "modicon_reference": "display_address",
@@ -117,13 +127,17 @@ _REGISTER_HEADER_KEYS = frozenset(
         "protocol_offset",
         "display_address",
         "modbus_address",
+        "modbus_register",
         "register_address",
+        "mb_address",
         "reference",
         "ref",
         "pdu_offset",
         "zero_based_address",
         "zero_based_offset",
         "register",
+        "offset",
+        "register_number",
     }
 )
 _KNOWN_AREAS = {
@@ -196,11 +210,46 @@ def _result(
 
 def _header_key(value: Any, column_index: int) -> str:
     text = "" if value is None else str(value).strip()
+    lower = text.casefold()
+    zero_based = bool(
+        re.search(r"\(0\s*indexed\)|0[-\s]?based|zero[-\s]?based", lower)
+    )
+    one_based = bool(
+        re.search(r"\(1\s*indexed\)|1[-\s]?based|one[-\s]?based", lower)
+    )
+    # Drop parenthetical notes: "Holding Register # (1 indexed)" → holding_register
+    text = re.sub(r"\([^)]*\)", " ", text)
+    # Drop common trailing basis tokens after the primary label.
+    text = re.sub(
+        r"\b(?:0|1|zero|one)[-\s]?based\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\bdecimal\b", " ", text, flags=re.IGNORECASE)
     snake_text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", text)
     normalized = re.sub(r"[^a-z0-9]+", "_", snake_text.lower()).strip("_")
     if not normalized:
         return f"column_{column_index + 1}"
-    return _HEADER_ALIASES.get(normalized, normalized)
+    if normalized in _HEADER_ALIASES:
+        aliased = _HEADER_ALIASES[normalized]
+    else:
+        # Retry without trailing indexed/basis crumbs: holding_register_1_indexed
+        stripped = re.sub(
+            r"_(?:1|0|one|zero)_indexed$",
+            "",
+            normalized,
+        )
+        stripped = re.sub(r"_indexed$", "", stripped)
+        aliased = _HEADER_ALIASES.get(stripped, normalized)
+    # Preserve 0-based vs 1-based address semantics when both columns alias
+    # to the same generic address field.
+    if aliased in {"address", "display_address", "protocol_offset", "register"}:
+        if zero_based and not one_based:
+            return "protocol_offset"
+        if one_based and not zero_based and aliased == "address":
+            return "display_address"
+    return aliased
 
 
 def _unique_headers(values: Sequence[Any]) -> tuple[list[str], list[dict[str, Any]]]:
@@ -672,19 +721,23 @@ def _xlsx_rows(root: ET.Element, shared_strings: Sequence[str]) -> Iterable[tupl
 
 
 def _skip_title_rows(non_empty_rows: Sequence[tuple[int, list[Any], bool]]) -> tuple[int, list[int]]:
-    """Return the header row index, skipping leading single-value title rows.
+    """Return the header row index, skipping leading title / metadata rows.
 
-    Vendor workbooks often place a merged worksheet title directly above the
-    real header row. Some workbooks lay out two side-by-side table blocks that
-    repeat the same title text in more than one cell of that row (e.g. a full
-    table in columns A-G and a condensed duplicate in columns I-K, both titled
-    "PowerLogic PM8000 Power Quality Meter"). Count *distinct* populated
-    values rather than populated cells so a repeated title still counts as
-    one title, not a multi-column header. Treat a leading row as a title,
-    not a header, only when it has at most one distinct populated value
-    *and* the next row is wider (more populated cells), so a single-column
-    worksheet's genuine one-cell header is never mistaken for a title.
+    Vendor workbooks often place a merged worksheet title, a 2-column
+    label/value preamble, or a group banner directly above the real header
+    row. Prefer the first row whose normalized headers look like a register
+    map (address / offset / display address). Fall back to the legacy
+    single-distinct-value title skip when no register header is found in the
+    first several rows.
     """
+
+    look_ahead = min(len(non_empty_rows), 16)
+    for index in range(look_ahead):
+        _, values, _ = non_empty_rows[index]
+        headers, _ = _unique_headers(values)
+        if _sheet_has_register_header(headers):
+            skipped = [non_empty_rows[i][0] for i in range(index)]
+            return index, skipped
 
     skipped: list[int] = []
     index = 0
@@ -696,8 +749,17 @@ def _skip_title_rows(non_empty_rows: Sequence[tuple[int, list[Any], bool]]) -> t
             break
         _, next_values, _ = non_empty_rows[index + 1]
         next_filled = sum(1 for value in next_values if value not in (None, ""))
-        if next_filled <= len(populated):
+        # Allow equal-width single-value title chains (stacked sheet titles).
+        if next_filled < len(populated):
             break
+        if next_filled == len(populated) and distinct == 1:
+            # Only keep skipping when the next row is also a single-value title
+            # candidate; a same-width multi-value row is treated as the header.
+            next_distinct = len({v for v in next_values if v not in (None, "")})
+            if next_distinct > 1:
+                skipped.append(row_number)
+                index += 1
+                break
         skipped.append(row_number)
         index += 1
     return index, skipped

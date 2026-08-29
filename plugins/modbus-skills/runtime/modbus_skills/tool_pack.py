@@ -715,10 +715,25 @@ def _find_sensitive_value_paths(value: Any, *, path: str) -> list[str]:
     return findings
 
 
+_EVIDENCE_TEXT_KEYS = frozenset(
+    {
+        "excerpt",
+        "source_excerpt",
+        "message",
+        "detail",
+        "notes",
+    }
+)
+
+
 def _find_absolute_local_path_fields(value: Any, *, path: str) -> list[str]:
     findings: list[str] = []
     if isinstance(value, Mapping):
         for raw_key, child in value.items():
+            # PDF/table evidence excerpts often start with '/' or embed path-like
+            # tokens from manuals; they are not filesystem path fields.
+            if str(raw_key).casefold() in _EVIDENCE_TEXT_KEYS:
+                continue
             findings.extend(
                 _find_absolute_local_path_fields(
                     child,
@@ -746,6 +761,8 @@ def _find_embedded_local_path_fields(value: Any, *, path: str) -> list[str]:
     findings: list[str] = []
     if isinstance(value, Mapping):
         for raw_key, child in value.items():
+            if str(raw_key).casefold() in _EVIDENCE_TEXT_KEYS:
+                continue
             findings.extend(
                 _find_embedded_local_path_fields(
                     child, path=f"{path}.{raw_key}"
