@@ -51,8 +51,10 @@ _EMBEDDED_WINDOWS_PATH = re.compile(
 )
 _EMBEDDED_WINDOWS_UNC = re.compile(r"(?:^|[\s'\"`(=\[,])\\\\[^\\\s]+\\")
 _EMBEDDED_FORWARD_UNC = re.compile(r"(?:^|[\s'\"`(=\[,])//[^/\s]+/[^\s,;\"'`)\]}]+")
+# Require at least two path segments (``/var/tmp/...``) so OEM names like
+# ``lead /lag`` are not treated as embedded filesystem paths.
 _EMBEDDED_UNIX_PATH = re.compile(
-    r"(?:^|[\s'\"`(=:\[,])/(?!/)[^\s,;\"'`)\]}]+"
+    r"(?:^|[\s'\"`(=:\[,])/(?!/)[^\s,;\"'`)\]}]+/[^\s,;\"'`)\]}]+"
 )
 _EMBEDDED_TILDE_PATH = re.compile(r"(?:^|[\s'\"`(=:\[,])~[\\/][^\s,;\"'`)\]}]+")
 _EMBEDDED_HTTP_ROUTE = re.compile(

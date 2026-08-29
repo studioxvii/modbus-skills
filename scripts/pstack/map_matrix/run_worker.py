@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -17,6 +19,18 @@ ROOT = Path(__file__).resolve().parents[3]
 RUNTIME = ROOT / "plugins" / "modbus-skills" / "runtime"
 sys.path.insert(0, str(RUNTIME))
 sys.path.insert(0, str(ROOT / "scripts" / "pstack"))
+
+# Prefer the lab venv site-packages when present so pdfplumber grid recovery
+# works under the same interpreter the matrix worker already uses.
+_VENV_SITE = ROOT / ".venv-lab" / "lib" / "python3.14" / "site-packages"
+if _VENV_SITE.is_dir():
+    site = str(_VENV_SITE)
+    if site not in sys.path:
+        sys.path.insert(0, site)
+    existing = os.environ.get("PYTHONPATH", "")
+    parts = [part for part in existing.split(os.pathsep) if part]
+    if site not in parts:
+        os.environ["PYTHONPATH"] = os.pathsep.join([site, *parts])
 
 from modbus_skills.cli import run_cli  # noqa: E402
 from modbus_skills.parsers import parse_source  # noqa: E402
@@ -171,13 +185,123 @@ def score_receipt(receipt: dict[str, Any], evals: dict[str, Any]) -> dict[str, A
     }
 
 
-def build_request(source: Path, fmt: str, work: Path) -> Path:
+def build_local_ocr_evidence(
+    source: Path, *, first_page: int, last_page: int, work: Path
+) -> Path | None:
+    """Build bounded modbus-ocr-evidence/v1 via local pdftoppm + tesseract.
+
+    Used only by the map-matrix harness when pdftotext finds no text. The skill
+    itself still refuses to install or invoke OCR; this supplies the evidence
+    artifact the skill already accepts.
+    """
+
+    if shutil.which("pdftoppm") is None or shutil.which("tesseract") is None:
+        return None
+    if last_page < first_page or last_page - first_page + 1 > 40:
+        return None
+    ocr_dir = work / "ocr-render"
+    if ocr_dir.exists():
+        shutil.rmtree(ocr_dir)
+    ocr_dir.mkdir(parents=True)
+    prefix = ocr_dir / "page"
+    try:
+        render = subprocess.run(
+            [
+                "pdftoppm",
+                "-png",
+                "-r",
+                "300",
+                "-f",
+                str(first_page),
+                "-l",
+                str(last_page),
+                str(source),
+                str(prefix),
+            ],
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if render.returncode != 0:
+        return None
+    rendered = sorted(ocr_dir.glob("page*.png"))
+    if not rendered:
+        return None
+    # PDFs shorter than the requested window still succeed; use what rendered.
+    effective_last = first_page + len(rendered) - 1
+    try:
+        version = subprocess.run(
+            ["tesseract", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        tool_version = (version.stderr or version.stdout or "unknown").splitlines()[0].strip()
+    except (OSError, subprocess.TimeoutExpired):
+        tool_version = "unknown"
+    pages: list[dict[str, Any]] = []
+    for page in range(first_page, effective_last + 1):
+        image = rendered[page - first_page]
+        try:
+            ocr = subprocess.run(
+                ["tesseract", str(image), "stdout", "--psm", "6"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        text = (ocr.stdout or "").replace("\f", "\n").strip()
+        if not text:
+            text = f"(empty OCR page {page})"
+        pages.append({"page_index": page, "text": text[:200_000]})
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    evidence = {
+        "schema_version": "modbus-ocr-evidence/v1",
+        "artifact_type": "modbus-ocr-evidence",
+        "input_hashes": {"source_pdf": digest},
+        "assumptions": [],
+        "findings": [],
+        "holds": [],
+        "source_sha256": digest,
+        "tool": {"name": "tesseract", "version": tool_version[:100]},
+        "pages": pages,
+    }
+    path = work / "ocr-evidence.json"
+    save_json(path, evidence)
+    return path
+
+
+def build_request(
+    source: Path,
+    fmt: str,
+    work: Path,
+    *,
+    pages: str | None = None,
+    ocr_evidence: Path | None = None,
+) -> Path:
+    source_obj: dict[str, Any] = {"path": str(source.resolve()), "format": fmt}
+    if pages:
+        source_obj["pages"] = pages
+    if ocr_evidence is not None:
+        source_obj["ocr_evidence"] = str(ocr_evidence.resolve())
     request = {
         "schema_version": "modbus-compile-request/v1",
-        "source": {"path": str(source.resolve()), "format": fmt},
+        "source": source_obj,
         "selection_template": {
             "schema_version": "modbus-user-selection-template/v1",
-            "requested_measurements": ["voltage", "current", "power", "energy", "status", "temperature"],
+            "requested_measurements": [
+                "voltage",
+                "current",
+                "power",
+                "energy",
+                "status",
+                "temperature",
+            ],
             "mode": "all-readable",
         },
         "targets": [],
@@ -186,6 +310,7 @@ def build_request(source: Path, fmt: str, work: Path) -> Path:
     path = work / "request.json"
     save_json(path, request)
     return path
+
 
 
 def run_map(map_entry: dict[str, Any], evals: dict[str, Any]) -> dict[str, Any]:
@@ -229,6 +354,8 @@ def run_map(map_entry: dict[str, Any], evals: dict[str, Any]) -> dict[str, Any]:
             return receipt
 
         candidate_path: Path | None = None
+        compile_pages: str | None = None
+        compile_ocr_evidence: Path | None = None
         # intake
         if fmt == "xlsx":
             t0 = time.monotonic()
@@ -311,6 +438,47 @@ def run_map(map_entry: dict[str, Any], evals: dict[str, Any]) -> dict[str, Any]:
                     code, text = code_full, text_full
                     candidate_path, records = candidate_path_full, records_full
                     pages_used = "uncapped-retry"
+                    compile_pages = None
+            # Scanned manuals: build local OCR evidence and retry once.
+            if code == 0 and records == 0:
+                ocr_last = min(page_cap, 20)
+                ocr_path = build_local_ocr_evidence(
+                    source, first_page=1, last_page=ocr_last, work=work
+                )
+                if ocr_path is not None:
+                    evidence = load_json(ocr_path)
+                    page_indexes = [
+                        int(page["page_index"])
+                        for page in evidence.get("pages", [])
+                        if isinstance(page, dict) and isinstance(page.get("page_index"), int)
+                    ]
+                    if page_indexes:
+                        ocr_pages = f"{min(page_indexes)}-{max(page_indexes)}"
+                        out_dir_ocr = work / "pdf-extract-ocr"
+                        out_dir_ocr.mkdir(parents=True, exist_ok=True)
+                        code_ocr, text_ocr = run_cli_capture(
+                            "extract-pdf-map",
+                            [
+                                "--input",
+                                str(source),
+                                "--output",
+                                str(out_dir_ocr),
+                                "--pages",
+                                ocr_pages,
+                                "--ocr-evidence",
+                                str(ocr_path),
+                            ],
+                        )
+                        candidate_path_ocr, records_ocr = _load_records(out_dir_ocr)
+                        if code_ocr == 0 and records_ocr > records:
+                            code, text = code_ocr, text_ocr
+                            candidate_path, records = candidate_path_ocr, records_ocr
+                            pages_used = f"ocr-{ocr_pages}"
+                            compile_pages = ocr_pages
+                            compile_ocr_evidence = ocr_path
+            elif code == 0 and records > 0 and pages_used.startswith("1-"):
+                # Bound compile re-extract to the same successful intake window.
+                compile_pages = pages_used
             # PDF intake can legally yield 0 with a hold — pass if CLI succeeded
             receipt["steps"].append(
                 step(
@@ -361,7 +529,13 @@ def run_map(map_entry: dict[str, Any], evals: dict[str, Any]) -> dict[str, Any]:
 
         # compile-user-map always
         t0 = time.monotonic()
-        request = build_request(source, fmt, work)
+        request = build_request(
+            source,
+            fmt,
+            work,
+            pages=compile_pages,
+            ocr_evidence=compile_ocr_evidence,
+        )
         compile_out = work / "compile"
         code, text = run_cli_capture(
             "compile-user-map",

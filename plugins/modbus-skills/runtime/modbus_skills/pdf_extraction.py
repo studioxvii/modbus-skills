@@ -246,7 +246,17 @@ def parse_layout_rows(
             if candidate is not None:
                 header_end, header = candidate
                 continue
-            if header is None or not line.strip():
+            if not line.strip():
+                continue
+            if header is None:
+                headerless = _headerless_layout_row(
+                    line,
+                    page_number=page_number,
+                    line_number=line_number,
+                    parser_id=parser_id,
+                )
+                if headerless is not None:
+                    records.append(headerless)
                 continue
             cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
             segments = _layout_segments(line)
@@ -338,6 +348,189 @@ def parse_layout_rows(
             }
             records.append(record)
     return records, rejected
+
+
+def _headerless_tokens(line: str) -> list[str]:
+    """Tokenize a layout or OCR line into candidate register-row cells."""
+
+    segments = [value for _x, value in _layout_segments(line) if value not in {"•", "·", "●"}]
+    if len(segments) >= 2:
+        return segments
+    # OCR evidence is often single-spaced with ``|`` column markers.
+    pipe_parts = [part.strip() for part in re.split(r"\s*\|\s*", line) if part.strip()]
+    if len(pipe_parts) >= 2:
+        tokens: list[str] = []
+        for part in pipe_parts:
+            tokens.extend(token for token in re.split(r"\s+", part) if token)
+        return [token for token in tokens if token not in {"•", "·", "●"}]
+    return [token for token in re.split(r"\s+", line.strip()) if token and token not in {"•", "·", "●"}]
+
+
+def _headerless_address_token(token: str) -> dict[str, Any] | None:
+    """Parse one layout token that may embed Modicon/hex forms."""
+
+    cleaned = token.strip().rstrip(":;,.")
+    if not cleaned or cleaned in {"•", "·", "*", "-"}:
+        return None
+    # ``(register=414)`` virtual-register forms used by some HMI manuals.
+    register_eq = re.fullmatch(r"\(register\s*=\s*(\d+)\)", cleaned, re.IGNORECASE)
+    if register_eq is not None:
+        return _parse_pdf_address(register_eq.group(1))
+    # Require a clean address atom (optional nested ``40059(0x003A)`` form).
+    atom = re.fullmatch(
+        r"([0-4]\d{4,5}|0[xX][0-9A-Fa-f]+|(?:[34][xX])\d+|\d{3,6})(?:\([^)]*\))?",
+        cleaned,
+    )
+    if atom is None:
+        return None
+    parsed = _parse_pdf_address(atom.group(1))
+    if parsed is not None and parsed.get("status") == "single":
+        return parsed
+    return None
+
+
+def _headerless_layout_row(
+    line: str,
+    *,
+    page_number: int,
+    line_number: int,
+    parser_id: str,
+) -> dict[str, Any] | None:
+    """Accept obvious register rows even when no table header locked on the page.
+
+    OEM manuals often list ``40056  16-bit int  Flow rate`` style lines without a
+    formal header row. Discovery already flagged the page; recover the row.
+    """
+
+    # TOC / section leaders are not register rows.
+    if re.search(r"[.…·]{3,}|\.{2,}\s*\d+\s*$", line):
+        return None
+    # Enum/bit legends like ``0: Off`` / ``1: Check mode active``.
+    if re.match(r"^\s*\d+\s*:", line):
+        return None
+    segments = _headerless_tokens(line)
+    if len(segments) < 2:
+        return None
+    address_indexes: list[int] = []
+    parsed_by_index: dict[int, dict[str, Any]] = {}
+    for index, token in enumerate(segments):
+        parsed = _headerless_address_token(token)
+        if parsed is not None and parsed.get("status") == "single":
+            address_indexes.append(index)
+            parsed_by_index[index] = parsed
+    if not address_indexes:
+        return None
+    # Prefer Modicon/display forms over bare menu numbers when both appear.
+    def _address_rank(parsed: Mapping[str, Any]) -> tuple[int, int]:
+        convention = str(parsed.get("convention") or "")
+        number = int(parsed.get("number") or 0)
+        if convention == "modicon-reference":
+            return (3, number)
+        if convention == "protocol-offset":
+            return (2, number)
+        display = str(parsed.get("display_address") or "")
+        if display.startswith(("3", "4")):
+            return (3, number)
+        return (1, number)
+
+    address_index = max(
+        address_indexes, key=lambda index: _address_rank(parsed_by_index[index])
+    )
+    parsed_address = parsed_by_index[address_index]
+    names = [
+        token
+        for index, token in enumerate(segments)
+        if index not in address_indexes
+        and re.search(r"[A-Za-z]", token)
+        and not re.fullmatch(
+            r"(?:r/?w|ro|rw|r|w|[34]x|signed|unsigned|\d+)",
+            token,
+            re.IGNORECASE,
+        )
+    ]
+    name_token = next(
+        (
+            token
+            for token in names
+            if not re.fullmatch(
+                r"(?i)(?:u?int(?:16|32|64)?|float(?:32|64)?|bool(?:ean)?|bit|word|dword|ulong|real|string|ascii|signed|unsigned)",
+                token,
+            )
+        ),
+        names[0] if names else None,
+    )
+    if not names or name_token is None:
+        return None
+    if re.match(
+        r"(?i)^(?:manual|appendix|page|table|contents|copyright|revision)\b",
+        name_token,
+    ):
+        return None
+    label_parts = [
+        token
+        for token in names
+        if not re.fullmatch(
+            r"(?i)(?:u?int(?:16|32|64)?|float(?:32|64)?|bool(?:ean)?|bit|word|dword|ulong|real|string|ascii|signed|unsigned)",
+            token,
+        )
+    ]
+    point_name = " ".join(label_parts) if label_parts else name_token
+    datatype_token = next(
+        (
+            token
+            for token in segments
+            if re.search(
+                r"(?i)\b(?:u?int(?:16|32|64)?|float(?:32|64)?|bool(?:ean)?|bit|word|dword|ulong|real|string|ascii|signed|unsigned)\b",
+                token,
+            )
+        ),
+        None,
+    )
+    # Require a datatype cue so enum/bit legend lines (``0 No / 1 Yes``) are not
+    # promoted into register rows when no table header is locked.
+    if datatype_token is None and len(segments) < 3:
+        return None
+    if datatype_token is None and not re.search(
+        r"(?i)\b(?:register|modbus|holding|input|coil|status|value|rate|temp|volt|amp|power|flow|energy|control|sync|load|mode|state)\b",
+        " ".join(names),
+    ):
+        # Two address columns (Modbus + Modicon) plus a name is enough evidence.
+        if len(address_indexes) < 2:
+            return None
+    # Prefer an explicit nested Modicon display form when present on the line.
+    for token in segments:
+        nested = re.search(r"\b([0-4]\d{4,5})\(", token)
+        if nested:
+            nested_parsed = _parse_pdf_address(nested.group(1))
+            if nested_parsed is not None and nested_parsed.get("status") == "single":
+                parsed_address = nested_parsed
+                break
+    record = _address_record_fields(parsed_address)
+    record["name"] = point_name
+    record["description"] = " ".join(names)
+    if datatype_token:
+        record["datatype"] = datatype_token
+        record["format"] = datatype_token
+    locator = {
+        "page": page_number,
+        "line": line_number,
+        "region": f"p{page_number}:l{line_number}",
+    }
+    record["_claims"] = [
+        _claim(parser_id, field, str(value), locator)
+        for field, value in record.items()
+        if not field.startswith("_")
+    ]
+    record["_source"] = {
+        "format": "pdf",
+        "page": page_number,
+        "line": line_number,
+        "region": locator["region"],
+        "parser_id": parser_id,
+        "method": "exact" if parser_id == "pdftotext-layout/v1" else "ocr-derived",
+        "excerpt": line.strip()[:300],
+    }
+    return record
 
 
 def discover_register_pages(text: str, *, first_page: int = 1) -> list[int]:
@@ -1021,18 +1214,50 @@ def extract_pdf(
         bbox_result = _call([*bbox_base, "-bbox-layout", str(path), "-"], timeout=60)
     except subprocess.TimeoutExpired:
         fallback = _hold_result(path, source, "pdf-coordinate-extraction-timeout", "Coordinate extraction exceeded the 60 second limit.", page_range=page_range, capability=capability)
-        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
+        return _recover_grid_or(
+            path,
+            source,
+            page_range=page_range,
+            fallback=fallback,
+            capability=capability,
+            keep_rows=strict,
+            keep_rejected=rejected,
+        )
     except (OSError, PdfExtractionError) as exc:
         fallback = _hold_result(path, source, "pdf-coordinate-extraction-resource-limit", str(exc), page_range=page_range, capability=capability)
-        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
+        return _recover_grid_or(
+            path,
+            source,
+            page_range=page_range,
+            fallback=fallback,
+            capability=capability,
+            keep_rows=strict,
+            keep_rejected=rejected,
+        )
     if bbox_result.returncode != 0:
         fallback = _hold_result(path, source, "pdf-coordinate-extraction-failed", "pdftotext coordinate extraction failed.", page_range=page_range, capability=capability)
-        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
+        return _recover_grid_or(
+            path,
+            source,
+            page_range=page_range,
+            fallback=fallback,
+            capability=capability,
+            keep_rows=strict,
+            keep_rejected=rejected,
+        )
     try:
         coordinate = parse_bbox_rows(bbox_result.stdout.decode("utf-8", errors="replace"), first_page=min(discovered))
     except PdfExtractionError:
         fallback = _hold_result(path, source, "pdf-coordinate-output-malformed", "pdftotext coordinate output was malformed and could not be reconciled safely.", page_range=page_range, capability=capability)
-        return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
+        return _recover_grid_or(
+            path,
+            source,
+            page_range=page_range,
+            fallback=fallback,
+            capability=capability,
+            keep_rows=strict,
+            keep_rejected=rejected,
+        )
     coordinate = [record for record in coordinate if record["_source"]["page"] in page_filter]
     if not coordinate and not strict:
         try:
@@ -1271,16 +1496,68 @@ def _recover_grid_or(
     page_range: tuple[int, int] | None,
     fallback: dict[str, Any],
     capability: Mapping[str, Any] | None = None,
+    keep_rows: Sequence[Mapping[str, Any]] | None = None,
+    keep_rejected: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Prefer grid recovery; if that fails, keep any already-parsed layout rows.
+
+    Coordinate/bbox failures used to discard successful strict layout rows by
+    falling through to an empty hold. Preserve those rows so manuals that parse
+    under ``-layout`` still produce candidates when ``-bbox-layout`` blows up.
+    """
+
     pages = (
         list(range(page_range[0], page_range[1] + 1))
         if page_range is not None
         else None
     )
+    kept_pages = sorted(
+        {
+            int(record["_source"]["page"])
+            for record in (keep_rows or ())
+            if isinstance(record.get("_source"), Mapping)
+            and isinstance(record["_source"].get("page"), int)
+        }
+    ) or None
+    keep_finding = {
+        "code": "pdf-coordinate-fallback-kept-layout",
+        "severity": "info",
+        "blocking": False,
+        "message": (
+            "Coordinate/grid recovery failed; kept strict layout "
+            "rows that already parsed successfully."
+        ),
+    }
     try:
         grid, quarantined, discovered = _recover_grid_rows(path, pages=pages)
     except PdfTableExtractionError:
+        if keep_rows:
+            return _envelope(
+                path,
+                source,
+                list(keep_rows),
+                list(keep_rejected or []),
+                [keep_finding],
+                [],
+                page_range,
+                capability=capability,
+                discovered_pages=kept_pages,
+            )
         return fallback
+    # Empty accepted grid with only quarantines must not discard layout rows.
+    if not grid and keep_rows:
+        return _envelope(
+            path,
+            source,
+            list(keep_rows),
+            list(keep_rejected or []),
+            [keep_finding, _GRID_RECOVERY_FINDING],
+            [],
+            page_range,
+            capability=capability,
+            discovered_pages=kept_pages or discovered,
+            quarantined=quarantined,
+        )
     return _envelope(
         path,
         source,
