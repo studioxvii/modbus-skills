@@ -847,6 +847,11 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(2, collision_holds[0]["details"]["record_count"])
 
     def test_source_normalization_exceptions_form_one_grouped_packet(self) -> None:
+        # A per-point hold (missing datatype here) must not discard an
+        # otherwise-usable point. The compiler keeps the resolvable point,
+        # flags the unresolved field, and groups every remaining exception
+        # into one provide-corrected-source request instead of pausing with
+        # no output at all.
         source = self.root / "missing-datatype.csv"
         source.write_text(
             "logical_point_id,name,protocol_offset,area,access\n"
@@ -875,14 +880,15 @@ class CompilerTests(unittest.TestCase):
 
         result = compile_user_map(compile_request, self.root / "held-source-case")
 
-        self.assertEqual("awaiting-source-decision", result["state"])
+        self.assertEqual("partial", result["state"])
         self.assertEqual("provide-corrected-source", result["next_action"]["kind"])
-        packet = json.loads(
-            (self.root / "held-source-case" / "control" / "source-packet.json").read_text()
+        issue_codes = {issue["code"] for issue in result["next_action"]["issues"]}
+        self.assertEqual({"point.datatype-unresolved"}, issue_codes)
+        user_map = json.loads(
+            (self.root / "held-source-case" / "output" / "user-map.json").read_text()
         )
-        self.assertEqual("source", packet["phase"])
-        self.assertEqual(1, len(packet["decisions"]))
-        self.assertFalse((self.root / "held-source-case" / "output" / "user-map.json").exists())
+        self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
+        self.assertIsNone(user_map["points"][0]["datatype"])
 
     def test_target_waits_for_one_binding_resume_without_losing_offline_map(self) -> None:
         case_root = self.root / "case"

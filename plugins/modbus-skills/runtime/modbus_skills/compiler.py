@@ -152,9 +152,7 @@ def compile_user_map(
     )
     _store_json(root, index, "request", "control/request.json", normalized)
     _store_json(root, index, "oem_map", "artifacts/oem-map.json", oem_map)
-    if "source" in normalized and _requires_source_correction(
-        oem_map, str(normalized["source"].get("format", ""))
-    ):
+    if "source" in normalized and _requires_source_correction(oem_map):
         packet = _source_decision_packet(case_id, oem_map)
         _store_json(
             root,
@@ -681,37 +679,20 @@ def _pdf_coverage_complete(oem_map: Mapping[str, Any]) -> bool:
     )
 
 
-_NON_SOURCE_REPLACEMENT_HOLDS = frozenset(
-    {
-        "point.not-readable",
-        "point.write-only-not-readable",
-        "point.datatype-span-mismatch",
-        "point.byte-order-unrecognized",
-        "point.datatype-unrecognized",
-        "point.span-invalid",
-        "source.rejected-rows-unresolved",
-    }
-)
-
-
-def _requires_source_correction(
-    oem_map: Mapping[str, Any], source_format: str
-) -> bool:
+def _requires_source_correction(oem_map: Mapping[str, Any]) -> bool:
     """Return whether the source cannot produce a useful offline map.
 
-    PDF semantic uncertainty belongs in the generated map's exception annex;
-    it is not evidence that the user must replace the source document.
-    Point-level normalization holds on tabular sources are reviewed in the
-    generated user map, not treated as a broken source file.
+    A source that yields zero points cannot proceed to selection at all, so
+    it pauses immediately for a corrected source. Per-point exceptions
+    (unresolved area, datatype, byte order, address convention, ...) belong
+    in the generated map's exception annex instead: ``_advance`` already
+    keeps every resolvable point, holds the affected ones, and groups the
+    remaining exceptions into one ``provide-corrected-source`` packet. Both
+    PDF and structured sources rely on that same downstream handling, so
+    holds alone are not evidence that the user must replace the source
+    document.
     """
 
-    holds = [
-        hold
-        for hold in _blocking_holds(oem_map)
-        if str(hold.get("code", "")) not in _NON_SOURCE_REPLACEMENT_HOLDS
-    ]
-    if source_format != "pdf":
-        return bool(holds)
     return not bool(oem_map.get("points"))
 
 

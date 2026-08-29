@@ -96,6 +96,19 @@ class CsvParserTests(unittest.TestCase):
         self.assertEqual(1, len(result["records"]))
         self.assertEqual(40005, int(result["records"][0]["address"]))
 
+    def test_modbus_data_type_and_function_code_headers_are_recognized(self) -> None:
+        # ASCO-style register maps label their columns "Modbus Data Type"
+        # and "Modbus Function Code" rather than "Data Type"/"Function Code".
+        result = parse_csv(
+            "Name,Modbus Address Read,Modbus Data Type,Modbus Function Code\n"
+            "Year,1836,UINT16,3\n",
+            delimiter=",",
+        )
+        self.assertEqual(1, len(result["records"]))
+        record = result["records"][0]
+        self.assertEqual("UINT16", record["datatype"])
+        self.assertEqual(3, int(record["function_code"]))
+
     def test_common_underscore_enum_names_do_not_create_false_warnings(self) -> None:
         result = parse_csv(
             "Address,Area,Data Type,Byte Order\n"
@@ -460,6 +473,80 @@ class XlsxParserTests(unittest.TestCase):
         self.assertEqual(1, len(result["records"]))
         self.assertEqual(40001, result["records"][0]["address"])
         self.assertFalse(any(a["code"] == "skipped_title_row" for a in result["assumptions"]))
+
+    def test_mb_address_and_offset_headers_are_register_keys(self) -> None:
+        result = parse_source(
+            "Description,MB Address,Access\nATS Status,40104,R\n",
+            filename="map.csv",
+        )
+        self.assertEqual(1, len(result["records"]))
+        self.assertEqual("40104", str(result["records"][0]["display_address"]))
+
+        offset_result = parse_source(
+            "Description,Access,Offset\nReady,R,12\n",
+            filename="map.csv",
+        )
+        self.assertEqual(12, int(offset_result["records"][0]["protocol_offset"]))
+
+    def test_parenthetical_indexed_headers_alias_to_address(self) -> None:
+        result = parse_source(
+            "Holding Register # (1 indexed),Address (0 indexed),Description\n40001,0,Voltage\n",
+            filename="map.csv",
+        )
+        record = result["records"][0]
+        self.assertEqual(40001, int(record["display_address"]))
+        self.assertEqual(0, int(record["protocol_offset"]))
+
+    def test_label_value_preamble_rows_are_skipped_until_register_header(self) -> None:
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                  <sheets><sheet name="Map" sheetId="1" r:id="rId1"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0"?>
+                <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                  <Relationship Id="rId1" Target="worksheets/sheet1.xml"
+                    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>
+                </Relationships>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData>
+                    <row r="1">
+                      <c r="A1" t="inlineStr"><is><t>Connection:</t></is></c>
+                      <c r="B1" t="inlineStr"><is><t>Lab bus</t></is></c>
+                    </row>
+                    <row r="2">
+                      <c r="A2" t="inlineStr"><is><t>Protocol:</t></is></c>
+                      <c r="B2" t="inlineStr"><is><t>Modbus TCP</t></is></c>
+                    </row>
+                    <row r="3">
+                      <c r="A3" t="inlineStr"><is><t>Modbus Address</t></is></c>
+                      <c r="B3" t="inlineStr"><is><t>Description</t></is></c>
+                    </row>
+                    <row r="4">
+                      <c r="A4"><v>40010</v></c>
+                      <c r="B4" t="inlineStr"><is><t>Bus voltage</t></is></c>
+                    </row>
+                  </sheetData>
+                </worksheet>""",
+            )
+        result = parse_xlsx(stream.getvalue())
+        self.assertEqual(1, len(result["records"]))
+        self.assertEqual(40010, int(result["records"][0]["address"]))
+        self.assertEqual("Bus voltage", result["records"][0]["description"])
+        skipped = [a for a in result["assumptions"] if a["code"] == "skipped_title_row"]
+        self.assertEqual(1, len(skipped))
+        self.assertEqual([1, 2], skipped[0]["rows"])
 
 
 if __name__ == "__main__":

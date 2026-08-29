@@ -255,6 +255,18 @@ class ToolPackTests(unittest.TestCase):
                 self.assertIn("absolute local path", str(caught.exception))
                 self.assertNotIn(unsafe_value, str(caught.exception))
 
+    def test_pdf_evidence_excerpts_are_not_treated_as_path_fields(self) -> None:
+        canonical_map, read_plan = inputs()
+        candidate_plan = json.loads(json.dumps(read_plan))
+        candidate_plan["holds"] = [
+            {
+                "code": "pdf-field-evidence-unconfirmed",
+                "source": {"excerpt": "/Status word | 40001 | UINT16"},
+            }
+        ]
+        pack = build_tool_pack(canonical_map, candidate_plan, targets=("modscan",))
+        self.assertTrue(pack.artifacts)
+
     def test_portable_map_excludes_review_audit_and_source_evidence(self) -> None:
         secret = "bearer-eyJhbGciOiJIUzI1NiJ9-private"
         local_path = "/" + "Users/operator/Private/customer-map.csv"
