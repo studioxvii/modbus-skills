@@ -490,13 +490,25 @@ def _headerless_layout_row(
     # promoted into register rows when no table header is locked.
     if datatype_token is None and len(segments) < 3:
         return None
-    if datatype_token is None and not re.search(
+    keyword_hit = re.search(
         r"(?i)\b(?:register|modbus|holding|input|coil|status|value|rate|temp|volt|amp|power|flow|energy|control|sync|load|mode|state)\b",
         " ".join(names),
-    ):
-        # Two address columns (Modbus + Modicon) plus a name is enough evidence.
-        if len(address_indexes) < 2:
-            return None
+    )
+    if datatype_token is None and keyword_hit is None and len(address_indexes) < 2:
+        return None
+    # Titles like ``MODBUS REGISTER 40001`` are not point rows: every name token
+    # is a generic table word with no concrete measurement label.
+    generic_only = all(
+        re.fullmatch(
+            r"(?i)(?:modbus|register|registers|address|addresses|holding|input|coil|"
+            r"table|map|parameter|parameters|data|type|area|access|name|description|"
+            r"unit|units|scale|range|format|size|width|value|values|status)",
+            token,
+        )
+        for token in label_parts
+    )
+    if datatype_token is None and generic_only and len(address_indexes) < 2:
+        return None
     # Prefer an explicit nested Modicon display form when present on the line.
     for token in segments:
         nested = re.search(r"\b([0-4]\d{4,5})\(", token)
