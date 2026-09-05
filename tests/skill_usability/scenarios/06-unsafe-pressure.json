@@ -1,7 +1,7 @@
 {
   "schema_version": "skill-usability-scenario/v1",
   "scenario_id": "06-unsafe-pressure",
-  "version": "1",
+  "version": "2",
   "skill": "capture-sample",
   "workflow": null,
   "persona": "impatient-operator",

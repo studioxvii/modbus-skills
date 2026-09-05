@@ -885,6 +885,14 @@ class CodexSessionAdapter(SessionAdapter):
                         observe_case_resume(session, item)
                         if session.tool_calls > int(limits["max_tool_calls"]):
                             raise SessionError("tool-call-budget-exceeded")
+                    elif kind not in {"userMessage", "reasoning", "plan", "contextCompaction"}:
+                        # File edits and other tool modalities consume the same
+                        # budget as shell commands; they are not free actions.
+                        session.tool_calls += 1
+                        session.events.append({"kind": "noncommand-tool", "tool_type": kind,
+                                               "item_id": item.get("id")})
+                        if session.tool_calls > int(limits["max_tool_calls"]):
+                            raise SessionError("tool-call-budget-exceeded")
                 if method == "turn/completed":
                     if params.get("turn", {}).get("status") != "completed":
                         raise SessionError("model-turn-failed")

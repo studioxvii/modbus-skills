@@ -157,6 +157,13 @@ def run_trial(
                 session.terminal_reason = missing
 
         snapshot = adapter.snapshot(session) if session else None
+        profile = scenario["oracle_profile"]
+        if session and snapshot and adapter.name == "codex" and (
+            profile.get("handoff_policy") or "expected-refusal" in profile.get("completion_conditions", ())
+        ):
+            from .handoff_evidence import observe_handoff
+            session.events.append(observe_handoff(session.state.get("transcript", []),
+                plugin=session.plugin_root, work=session.work, snapshot=snapshot))
         result = evaluate_trial(
             scenario=scenario,
             events=session.events if session else [],
