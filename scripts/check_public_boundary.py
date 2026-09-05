@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import re
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,6 +27,21 @@ FORBIDDEN = {
 
 
 def iter_files() -> list[Path]:
+    # Git's candidate public surface includes tracked files even when a later
+    # ignore rule matches them, and untracked files that could be added normally.
+    # Do not traverse ignored local corpora, environments, or nested worktrees.
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=ROOT, capture_output=True, check=False,
+        )
+    except OSError:
+        listing = None
+    if listing is not None and listing.returncode == 0:
+        paths = {ROOT / os.fsdecode(name) for name in listing.stdout.split(b"\0") if name}
+        return sorted(path for path in paths if path.is_symlink() or path.is_file())
+
+    # Source archives have no Git index; retain a conservative filesystem check.
     result: list[Path] = []
     for path in ROOT.rglob("*"):
         if any(part in SKIP_DIRS for part in path.parts):

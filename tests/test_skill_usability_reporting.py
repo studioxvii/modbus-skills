@@ -39,6 +39,31 @@ class SkillUsabilityReportingTests(unittest.TestCase):
         self.assertEqual("blocked", aggregate_status(["blocked"]))
         self.assertEqual("inconclusive", aggregate_status(["inconclusive", "passed"]))
         self.assertEqual("passed", aggregate_status(["passed", "passed"]))
+        self.assertEqual("blocked", aggregate_status(["passed", "blocked"]))
+        self.assertEqual("inconclusive", aggregate_status(["passed", "not-run"]))
+        self.assertEqual("inconclusive", aggregate_status([]))
+        self.assertEqual("inconclusive", aggregate_status(["passed", "unexpected"]))
+
+    def test_missing_or_duplicate_trials_cannot_complete_campaign(self) -> None:
+        campaign = load_campaign()
+        trials = [
+            {"scenario_id": name, "status": "passed", "repetition": 1}
+            for name in campaign["scenarios"]
+        ]
+        for incomplete in (trials[:-1], [*trials[:-1], trials[0]], []):
+            with self.subTest(trials=len(incomplete)):
+                report = build_report(campaign=campaign, trials=incomplete, mode="deterministic", adapter="fake", plugin_hash="abc")
+                self.assertEqual("inconclusive", report["status"])
+                self.assertIn("campaign-coverage-incomplete", report["issue_codes"])
+
+    def test_real_campaign_requires_every_repetition(self) -> None:
+        campaign = load_campaign()
+        report = build_report(
+            campaign=campaign,
+            trials=[{"scenario_id": name, "status": "passed", "repetition": 1} for name in campaign["scenarios"]],
+            mode="real-model", adapter="codex", plugin_hash="abc",
+        )
+        self.assertEqual("inconclusive", report["status"])
 
     def test_sanitize_strips_paths_urls_and_credentials(self) -> None:
         dirty = "see " + "/" + "Users/example/private/run and https://example.test?token=abc password=secret"

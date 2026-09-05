@@ -121,9 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     print(json.dumps({"status": report["status"], "report": "skill-usability-report.json"}))
-    if args.mode == "deterministic":
-        return 0 if report["status"] == "passed" else 1
-    return 0 if report["status"] in {"passed", "not-run", "blocked"} else 1
+    return 0 if report["status"] == "passed" else 1
 
 
 if __name__ == "__main__":
