@@ -16,6 +16,8 @@ Follow `../../references/interaction-contract.md`.
 2. Validate all deterministic conversions automatically.
 3. Group remaining assumptions and holds by shared root cause and affected scope.
 4. Ask once for all independent blocking engineering choices, then rerun once.
+   An explicitly confirmed `--defaults` address convention fills absent or blank
+   conventions across that scope; it does not override a nonblank source claim.
 
 ## Output files
 

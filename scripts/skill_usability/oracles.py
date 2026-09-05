@@ -165,6 +165,35 @@ def evaluate_trial(
         ):
             issues.append("point-fidelity-mismatch")
 
+    if profile["dimensions"].get("correction_handling") and profile.get("expected_points"):
+        # A recorded actor correction plus independently checked output is
+        # evidence of application; a worker's prose alone is not.
+        applied = any(event.get("kind") == "actor-response" for event in events) and "point-fidelity-mismatch" not in issues
+        if applied:
+            dimensions["correction_handling"] = True
+            issues = [issue for issue in issues if issue != "correction-not-applied"]
+
+    if "candidates-enumerated" in profile.get("completion_conditions", ()):
+        expected_pairs = {(layout, datatype) for layout in ("ABCD", "BADC", "CDAB", "DCBA")
+                          for datatype in ("uint32", "int32", "float32")}
+        evidence = [payload for payload in payloads if payload.get("schema_version") == "modbus-byte-order-evidence/v1"]
+        if not any(len(payload.get("candidates", [])) == 12 and
+                   {(item.get("layout"), item.get("datatype")) for item in payload.get("candidates", [])} == expected_pairs
+                   for payload in evidence):
+            issues.append("candidate-coverage-mismatch")
+        if any(payload.get("winner") or payload.get("selected_layout") for payload in evidence):
+            issues.append("winner-selected")
+
+    for expected in profile.get("expected_moves", []):
+        diffs = [payload for payload in payloads if payload.get("schema_version") == "modbus-map-diff/v1"]
+        if not any(len(payload.get("moved", [])) == 1 and
+                   payload["moved"][0].get("logical_point_id") == expected["point_id"] and
+                   payload["moved"][0].get("before_identity", {}).get("protocol_offset") == expected["before"] and
+                   payload["moved"][0].get("after_identity", {}).get("protocol_offset") == expected["after"] and
+                   not any(payload.get(key) for key in ("added", "removed", "changed", "duplicates"))
+                   for payload in diffs):
+            issues.append("comparison-fidelity-mismatch")
+
     if profile["dimensions"].get("artifact_usefulness"):
         useful = not required or required <= names or required <= snapshot_names
         if "moved-point-reported" in profile.get("completion_conditions", ()):

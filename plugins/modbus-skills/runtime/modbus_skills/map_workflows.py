@@ -814,7 +814,9 @@ def _normalize_one(
         )
     evidence.append({"field": "area", "source_field": area_source, "source_value": area_raw, "value": area_value})
 
-    top_convention = record.get("address_convention", defaults.get("address_convention"))
+    top_convention = record.get("address_convention")
+    if top_convention in (None, ""):
+        top_convention = defaults.get("address_convention")
     top_convention_source = (
         "address_convention"
         if record.get("address_convention") not in (None, "")
@@ -845,7 +847,9 @@ def _normalize_one(
         nested_source = record.get("source_address")
         if isinstance(nested_source, Mapping):
             nested_raw = nested_source.get("raw")
-            nested_convention = nested_source.get("convention", top_convention)
+            nested_convention = nested_source.get("convention")
+            if nested_convention in (None, ""):
+                nested_convention = top_convention
             nested_convention_source = (
                 "source_address.convention"
                 if nested_source.get("convention") not in (None, "")

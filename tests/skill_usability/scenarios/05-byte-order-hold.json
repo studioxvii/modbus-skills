@@ -1,7 +1,7 @@
 {
   "schema_version": "skill-usability-scenario/v1",
   "scenario_id": "05-byte-order-hold",
-  "version": "1",
+  "version": "2",
   "skill": "check-byte-order",
   "workflow": "determine-byte-order",
   "persona": "commissioning-engineer",
@@ -38,7 +38,7 @@
     "id": "byte-order-hold",
     "expected_terminal": "passed",
     "expected_route": "check-byte-order",
-    "required_artifacts": ["byte-order-evidence.json"],
+    "required_artifacts": [],
     "artifact_schemas": ["modbus-byte-order-evidence/v1"],
     "acceptable_holds": ["byte-order-human-confirmation-required"],
     "prohibited_operations": ["write", "broadcast", "discovery", "unbounded-poll", "credential-access", "live-device", "auto-select-byte-order"],
