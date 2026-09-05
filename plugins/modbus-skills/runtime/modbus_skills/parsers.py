@@ -107,6 +107,7 @@ _HEADER_ALIASES = {
     "units": "engineering_unit",
     "eu": "engineering_unit",
     "access": "access",
+    "r_w": "access",
     "read_write": "access",
     "function_code": "function_code",
     "modbus_function_code": "function_code",
@@ -468,6 +469,12 @@ def parse_json(source: str | bytes | Sequence[Any] | Mapping[str, Any]) -> dict[
     elif isinstance(value, Mapping) and isinstance(value.get("data"), list):
         items = value["data"]
         collection = "data"
+    elif isinstance(value, Mapping) and isinstance(value.get("records"), list):
+        items = value["records"]
+        collection = "records"
+    elif isinstance(value, Mapping) and isinstance(value.get("points"), list):
+        items = value["points"]
+        collection = "points"
     elif (
         isinstance(value, Mapping)
         and isinstance(value.get("data"), Mapping)
@@ -476,7 +483,7 @@ def parse_json(source: str | bytes | Sequence[Any] | Mapping[str, Any]) -> dict[
         items = value["data"]["registers"]
         collection = "data.registers"
     else:
-        raise ParseError("JSON root must be an array or contain a registers or data array.")
+        raise ParseError("JSON root must be an array or contain a registers, data, records, or points array.")
     if collection != "$":
         assumptions.append(
             {
@@ -729,24 +736,93 @@ def _xlsx_rows(root: ET.Element, shared_strings: Sequence[str]) -> Iterable[tupl
         yield row_number, [values.get(index, "") for index in range(width)], has_formula
 
 
+def _xlsx_headers(
+    values: Sequence[Any], preceding_rows: Sequence[tuple[int, list[Any], bool]]
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Resolve narrowly contextual column labels without inventing address basis."""
+
+    headers, warnings = _unique_headers(values)
+    keys = set(headers)
+    if _sheet_has_register_header(headers):
+        return headers, warnings
+
+    # Dec/Hex alone also occurs in non-map number tables. Require the surrounding
+    # point-table roles before treating Dec as a generic source address. Hex stays
+    # raw evidence; neither radix establishes zero/one-based protocol semantics.
+    decimal_table = (
+        {"dec", "hex", "name", "datatype"}.issubset(keys)
+        and bool(keys & {"count", "word_count", "size"})
+    )
+    register_context = False
+    for _, previous_values, _ in reversed(preceding_rows):
+        populated = [str(value).strip() for value in previous_values if value not in (None, "")]
+        if any(re.search(r"\bDNP3\b", value, re.IGNORECASE) for value in populated):
+            break
+        if len(populated) <= 2 and any(
+            re.match(r"^(?:(?:holding|input)\s+registers?\b|modbus\s+registers?\b)", value, re.IGNORECASE)
+            for value in populated
+        ):
+            register_context = True
+            break
+    indexed_table = (
+        register_context
+        and {"index", "name", "datatype", "function_code"}.issubset(keys)
+    )
+    if decimal_table or indexed_table:
+        source_key = "dec" if decimal_table else "index"
+        headers[headers.index(source_key)] = "address"
+        warnings.append(
+            {
+                "code": "contextual_xlsx_address_header",
+                "column": headers.index("address") + 1,
+                "message": (
+                    f"Used {source_key!r} as a source address from the surrounding register-table columns; "
+                    "address area and zero/one-based convention remain unresolved."
+                ),
+                "requires_review": True,
+            }
+        )
+    return headers, warnings
+
+
 def _skip_title_rows(non_empty_rows: Sequence[tuple[int, list[Any], bool]]) -> tuple[int, list[int]]:
     """Return the header row index, skipping leading title / metadata rows.
 
     Vendor workbooks often place a merged worksheet title, a 2-column
     label/value preamble, or a group banner directly above the real header
-    row. Prefer the first row whose normalized headers look like a register
-    map (address / offset / display address). Fall back to the legacy
+    row. Prefer coherent register-table columns over a banner that merely
+    contains a register word. Fall back to the legacy
     single-distinct-value title skip when no register header is found in the
     first several rows.
     """
 
     look_ahead = min(len(non_empty_rows), 16)
+    fallback_index: int | None = None
+    fallback_address_columns: list[int] = []
+    semantic_columns = {"name", "description", "datatype", "function_code", "access", "area", "word_count", "scale"}
     for index in range(look_ahead):
         _, values, _ = non_empty_rows[index]
-        headers, _ = _unique_headers(values)
+        if fallback_index is not None and any(
+            column < len(values)
+            and re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)", str(values[column]).strip())
+            for column in fallback_address_columns
+        ):
+            # Numeric rows prove that an address-only header was a real table,
+            # not a banner. Do not jump over its data to a later richer table.
+            return fallback_index, [non_empty_rows[i][0] for i in range(fallback_index)]
+        headers, _ = _xlsx_headers(values, non_empty_rows[:index])
         if _sheet_has_register_header(headers):
-            skipped = [non_empty_rows[i][0] for i in range(index)]
-            return index, skipped
+            if fallback_index is None:
+                fallback_index = index
+                fallback_address_columns = [i for i, header in enumerate(headers) if header in _ADDRESS_KEYS]
+            if set(headers) & semantic_columns:
+                # A later, denser table must not displace an earlier real header
+                # and silently drop its data. Only bypass address-only banners.
+                return index, [non_empty_rows[i][0] for i in range(index)]
+    if fallback_index is not None:
+        index = fallback_index
+        skipped = [non_empty_rows[i][0] for i in range(index)]
+        return index, skipped
 
     skipped: list[int] = []
     index = 0
@@ -808,7 +884,7 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                 continue
             header_index, skipped_titles = _skip_title_rows(non_empty)
             header_row_number, header_values, header_formula = non_empty[header_index]
-            headers, header_warnings = _unique_headers(header_values)
+            headers, header_warnings = _xlsx_headers(header_values, non_empty[:header_index])
             if not _sheet_has_register_header(headers):
                 warnings.append(
                     {
