@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 import csv
+import html
 import io
 import re
 from typing import Any
@@ -258,6 +259,7 @@ def compile_user_map_bundle(
             selection,
             points=rendered_points,
             exception_annex=annex,
+            assumptions=_source_datatype_notes(oem_map, included_ids),
             holds=selected_holds,
         )
     except CompilerContractError as exc:
@@ -310,6 +312,20 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
                 point.get("description"), point["oem_point_id"],
             )
             lines.append(f"- `{point['oem_point_id']}`{alias} — {label} ({address})")
+    notes = [note for note in user_map.get("assumptions", ())
+             if note.get("code") == "source-datatype-definition"]
+    if notes:
+        lines.extend(["", "## Source datatype definitions", "",
+                      "Source context only; these definitions do not configure decoding. "
+                      "Distinct definitions are retained without resolving conflicts.", ""])
+        for note in notes:
+            location = note["source_location"]
+            evidence = f"{location['sheet']}!{location['datatype_cell']}, {location['definition_cell']}"
+            lines.append(
+                f"- {_note_markdown(note['source_datatype'])}: {_note_markdown(note['definition'])} "
+                f"({_note_markdown(evidence)}; "
+                f"{len(note['matching_datatype_evidence'])} included datatype evidence records)"
+            )
     lines.extend(["", "## Suggestions"])
     if selection["suggested"]:
         for entry in selection["suggested"]:
@@ -352,6 +368,94 @@ def render_user_map_csv(user_map: Mapping[str, Any]) -> str:
             values.append(value)
         write_csv_row(writer, values)
     return stream.getvalue()
+
+
+def _note_markdown(value: str) -> str:
+    """Keep literal source context from becoming Markdown or HTML instructions."""
+    text = html.escape(" ".join(value.split()), quote=True)
+    return re.sub(r"([\\`*_{}\[\]()#+.!|>~-])", r"\\\1", text)
+
+
+def _source_datatype_notes(
+    oem_map: Mapping[str, Any], included_ids: set[str]
+) -> list[dict[str, Any]]:
+    """Retain explicit XLSX dictionary context, never infer executable enums.
+
+    Only the parser's literal, non-formula datatype dictionary assumptions qualify.
+    Matching uses included points' raw datatype evidence, not names or normalized
+    aliases. A workbook may contain conflicting dictionaries: all matching source
+    contexts survive, with no inferred worksheet precedence or label selection.
+    """
+    if oem_map.get("source_reference", {}).get("format") != "xlsx":
+        return []
+    matches: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for point in oem_map["points"]:
+        if point["oem_point_id"] not in included_ids:
+            continue
+        for evidence in point.get("source_field_evidence", ()):
+            raw = evidence.get("raw_value")
+            if (evidence.get("field") == "datatype" and evidence.get("status") == "confirmed"
+                    and evidence.get("normalized_value") == point.get("datatype")
+                    and isinstance(raw, str) and raw.strip()):
+                match = {"oem_point_id": point["oem_point_id"], **evidence}
+                if match not in matches[raw.strip().casefold()]:
+                    matches[raw.strip().casefold()].append(match)
+
+    def cell(column: int, row: int) -> str:
+        letters = ""
+        column += 1
+        while column:
+            column, remainder = divmod(column - 1, 26)
+            letters = chr(65 + remainder) + letters
+        return f"{letters}{row}"
+
+    notes: list[dict[str, Any]] = []
+    for assumption in oem_map.get("assumptions", ()):
+        if assumption.get("code") != "excluded_xlsx_datatype_legend":
+            continue
+        rows = assumption.get("source_rows")
+        sheet = assumption.get("sheet")
+        if not isinstance(rows, list) or len(rows) < 3 or not isinstance(sheet, str):
+            continue
+        headers = rows[1].get("values") if isinstance(rows[1], Mapping) else None
+        if not isinstance(headers, list):
+            continue
+        normalized = [re.sub(r"[^a-z]", "", value.lower()) if isinstance(value, str) else ""
+                      for value in headers]
+        datatype_columns = [i for i, value in enumerate(normalized)
+                            if value in {"datatype", "modbusdatatype"}]
+        description_columns = [i for i, value in enumerate(normalized) if value == "description"]
+        if len(datatype_columns) != 1 or len(description_columns) != 1:
+            continue
+        datatype_column, description_column = datatype_columns[0], description_columns[0]
+        for record in rows[2:]:
+            if not isinstance(record, Mapping):
+                continue
+            values, row = record.get("values"), record.get("row")
+            if (not isinstance(values, list) or type(row) is not int or row < 1
+                    or len(values) <= max(datatype_column, description_column)):
+                continue
+            datatype, definition = values[datatype_column], values[description_column]
+            if not isinstance(datatype, str) or not isinstance(definition, str) or not definition.strip():
+                continue
+            evidence = matches.get(datatype.strip().casefold())
+            if not evidence:
+                continue
+            note = {
+                "code": "source-datatype-definition",
+                "interpretation": "source-context-only; not executable decoding or resolved enum labels",
+                "source_datatype": datatype,
+                "definition": definition,
+                "source_location": {"format": "xlsx", "sheet": sheet, "row": row,
+                                    "datatype_cell": cell(datatype_column, row),
+                                    "definition_cell": cell(description_column, row)},
+                "source_headers": {"datatype": headers[datatype_column],
+                                   "definition": headers[description_column]},
+                "matching_datatype_evidence": evidence,
+            }
+            if note not in notes:
+                notes.append(note)
+    return notes
 
 
 def _selection_entry(
