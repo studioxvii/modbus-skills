@@ -474,7 +474,7 @@ class XlsxParserTests(unittest.TestCase):
         self.assertEqual(40001, result["records"][0]["address"])
         self.assertFalse(any(a["code"] == "skipped_title_row" for a in result["assumptions"]))
 
-    def test_mb_address_and_offset_headers_are_register_keys(self) -> None:
+    def test_mb_address_is_explicit_but_generic_offset_is_ambiguous(self) -> None:
         result = parse_source(
             "Description,MB Address,Access\nATS Status,40104,R\n",
             filename="map.csv",
@@ -486,7 +486,14 @@ class XlsxParserTests(unittest.TestCase):
             "Description,Access,Offset\nReady,R,12\n",
             filename="map.csv",
         )
-        self.assertEqual(12, int(offset_result["records"][0]["protocol_offset"]))
+        self.assertEqual([], offset_result["records"])
+        rejected = offset_result["rejected_rows"][0]["record"]
+        self.assertNotIn("protocol_offset", rejected)
+        self.assertEqual("12", rejected["source_offset"])
+        self.assertIn("ambiguous_offset_header", {item["code"] for item in offset_result["warnings"]})
+        explicit = parse_source("Name,Zero-based Offset,Engineering Offset\nReady,12,-10\n", filename="map.csv")
+        self.assertEqual("12", explicit["records"][0]["protocol_offset"])
+        self.assertEqual("-10", explicit["records"][0]["engineering_offset"])
 
     def test_parenthetical_indexed_headers_alias_to_address(self) -> None:
         result = parse_source(

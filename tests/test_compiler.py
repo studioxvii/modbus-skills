@@ -409,6 +409,33 @@ class CompilerTests(unittest.TestCase):
         user_map = json.loads((self.root / "source-case" / "output" / "user-map.json").read_text())
         self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
 
+    def test_numeric_addresses_never_invent_area_basis_or_confirmed_byte_order(self):
+        source = self.root / "ambiguous.csv"
+        source.write_text("Address,Name,Data Type,Access,Offset\n201,Pressure,float32,read-only,-10 kPa\n")
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {"schema_version": "modbus-user-selection-template/v1",
+                                   "requested_measurements": ["all documented Modbus read points"], "mode": "all-readable"},
+            "targets": [], "target_options": {},
+        }
+        case = self.root / "unconfirmed-case"
+        result = compile_user_map(compile_request, case)
+        self.assertNotEqual("offline-complete", result["state"])
+        point = json.loads((case / "output/user-map.json").read_text())["points"][0]
+        self.assertIn(point["area"], (None, "unknown"))
+        self.assertIsNone(point["protocol_offset"])
+        self.assertIsNone(point["byte_order"])
+        self.assertIsNot(point["byte_order_confirmed"], True)
+        self.assertIsNone(point["engineering_offset"])
+        compile_request["source"]["defaults"] = {"area": "holding-register", "address_convention": "protocol-offset", "byte_order": "CDAB"}
+        confirmed = self.root / "explicit-case"
+        compile_user_map(compile_request, confirmed)
+        point = json.loads((confirmed / "output/user-map.json").read_text())["points"][0]
+        self.assertEqual("holding-register", point["area"])
+        self.assertEqual(201, point["protocol_offset"])
+        self.assertEqual("CDAB", point["byte_order"])
+
     def test_duplicate_vendor_labels_do_not_crash_the_whole_compile(self) -> None:
         # Real vendor register maps repeat labels (e.g. two rows both named
         # "Reserved") across different addresses. normalize-map intentionally
