@@ -29,6 +29,7 @@ _SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _POINT_FIELDS = (
     "oem_point_id",
     "name",
+    "description",
     "area",
     "protocol_offset",
     "source_register",
@@ -59,6 +60,8 @@ _CSV_FIELDS = (
     "confidence",
     "reason",
     "evidence_refs",
+    "description",
+    "display_name",
 )
 
 
@@ -302,7 +305,11 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
         for point in groups[measurement]:
             alias = f" as `{point['alias']}`" if point.get("alias") else ""
             address = _address_label(point)
-            lines.append(f"- `{point['oem_point_id']}`{alias} — {point.get('name', point['oem_point_id'])} ({address})")
+            label = _display_label(
+                point.get("display_name"), point.get("alias"), point.get("name"),
+                point.get("description"), point["oem_point_id"],
+            )
+            lines.append(f"- `{point['oem_point_id']}`{alias} — {label} ({address})")
     lines.extend(["", "## Suggestions"])
     if selection["suggested"]:
         for entry in selection["suggested"]:
@@ -390,11 +397,19 @@ def _selection_entry(
     return entry
 
 
+def _display_label(*values: Any) -> str:
+    """Choose a nonblank display label without changing source field values."""
+    return next((value for value in values if isinstance(value, str) and value.strip()), "")
+
+
 def _render_point(oem_point: Mapping[str, Any], entry: Mapping[str, Any]) -> dict[str, Any]:
     result = {field: oem_point[field] for field in _POINT_FIELDS if field in oem_point}
     result.update(
         {
-            "display_name": entry.get("alias") or oem_point.get("name") or oem_point["oem_point_id"],
+            "display_name": _display_label(
+                entry.get("alias"), oem_point.get("name"),
+                oem_point.get("description"), oem_point["oem_point_id"],
+            ),
             "alias": entry.get("alias"),
             "group": entry.get("group") or entry.get("matched_intent") or "Other",
             "requested_measurement": entry.get("matched_intent") or "Other",
