@@ -45,6 +45,7 @@ PDF_HEADER_ALIASES = {
     "modbus address": "address",
     "modbus register": "address",
     "protocol offset": "protocol_offset",
+    "offset": "source_offset",
     "display address": "display_address",
     "r/w": "access",
     "read/": "access",
@@ -275,7 +276,11 @@ def parse_pdf_table_evidence(
             )
             continue
         address_text = resolved.get("address", "")
-        parsed_address = _parse_pdf_address(address_text)
+        parsed_address = (
+            _parse_source_offset(address_text)
+            if any(_header_text(raw) == "offset" for _column, raw in columns["address"])
+            else _parse_pdf_address(address_text)
+        )
         if parsed_address is None:
             continue
         values: dict[str, str] = {}
@@ -648,6 +653,8 @@ def _find_header(
                         name = "address"
                     columns.setdefault(name, []).append((column, header))
             has_name = "name" in columns or "description" in columns
+            if "address" not in columns and "source_offset" in columns:
+                columns["address"] = columns.pop("source_offset")
             if "address" not in columns or not has_name:
                 continue
             confident = bool({"access", "format", "area"} & set(columns))
@@ -818,6 +825,12 @@ def _parse_register_area(value: Any) -> tuple[str | None, str | None]:
 
 def _address_with_area(parsed: Mapping[str, Any], area: str) -> dict[str, Any]:
     result = dict(parsed)
+    if parsed.get("source_offset"):
+        # An area does not establish whether an unqualified Offset is zero-based,
+        # one-based, a reference number, or an engineering bias.
+        result["area"] = area
+        result["first"] = {**parsed["first"], "area": area}
+        return result
     raw_number = str(parsed["first"]["raw"])
     if not raw_number.isdigit() or area not in _PREFIX_BY_AREA:
         return result
@@ -891,6 +904,8 @@ def _address_record_fields(parsed: Mapping[str, Any]) -> dict[str, Any]:
     }
     if parsed.get("area") is not None:
         fields["area"] = parsed["area"]
+    if parsed.get("source_offset"):
+        fields["source_offset"] = parsed["raw"]
     if parsed.get("display_address") is not None:
         fields["display_address"] = parsed["display_address"]
     else:
@@ -899,6 +914,32 @@ def _address_record_fields(parsed: Mapping[str, Any]) -> dict[str, Any]:
             "convention": parsed["convention"],
         }
     return fields
+
+
+def _parse_source_offset(value: Any) -> dict[str, Any] | None:
+    """Preserve a bare Offset column without assigning an address convention."""
+    parsed = _parse_pdf_address(value)
+    if parsed is None or parsed.get("status") != "single":
+        return parsed
+    raw = str(parsed["raw"])
+    number = int(raw) if raw.isdigit() else parsed["number"]
+    first = {
+        **parsed["first"],
+        "raw": raw,
+        "number": number,
+        "convention": "unknown",
+        "area": None,
+        "display_address": None,
+    }
+    return {
+        **parsed,
+        "first": first,
+        "number": number,
+        "convention": "unknown",
+        "area": None,
+        "display_address": None,
+        "source_offset": True,
+    }
 
 
 def _clean_values(values: Iterable[Any]) -> list[str]:
