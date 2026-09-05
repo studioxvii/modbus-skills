@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from .exporters import (
     Artifact,
     ExportResult,
+    Finding,
     block_area,
     block_function_code,
     block_id,
@@ -44,7 +45,7 @@ from .pymodbus_fallback import (
 )
 
 
-ADAPTER_VERSION = "1.0.0"
+ADAPTER_VERSION = "1.1.0"
 TARGET = "modscan"
 _REFERENCE_BASE = {
     "coil": 1,
@@ -72,6 +73,12 @@ def export_modscan(
     mode = normalize_mode(mode)
     options = dict(options or {})
     findings = list(preflight_common(canonical_map, read_plan, mode=mode))
+    blocks = tuple(blocks_from_plan(read_plan))
+    for index, block in enumerate(blocks):
+        if block_start(block) == 65535:
+            findings.append(Finding("error", "MODSCAN_POINT_ADDRESS_UNSUPPORTED",
+                "Protocol offset 65535 requires Point Address 65536, which the tested ModScan64 6.0.0.4 entry field rejects. No alternative native entry path is verified.",
+                f"requests[{index}].start_offset"))
     if has_errors(findings):
         return held_result(
             TARGET,
@@ -82,7 +89,6 @@ def export_modscan(
             findings=findings,
         )
 
-    blocks = tuple(blocks_from_plan(read_plan))
     routes = sorted({block_route_id(block) for block in blocks})
     multiple_routes = len(routes) > 1
     route_setup = []
@@ -102,6 +108,8 @@ def export_modscan(
         "mode": mode,
         "routes": route_setup,
         "protocol_address_base": 0,
+        "point_address_base": 1,
+        "point_address_mapping_tested_version": "ModScan64 6.0.0.4",
         "opaque_native_files_bundled": False,
         "native_import_claim": False,
         "operator_entry_required": True,
@@ -195,6 +203,7 @@ def _read_plan_csv(blocks: tuple[Mapping[str, Any], ...]) -> str:
             "area",
             "protocol_offset_base_0",
             "common_reference_base_1",
+            "modscan_point_address_base_1",
             "quantity",
             "poll_interval_ms",
             "point_ids",
@@ -217,6 +226,7 @@ def _read_plan_csv(blocks: tuple[Mapping[str, Any], ...]) -> str:
                 area,
                 start,
                 _REFERENCE_BASE[area] + start,
+                start + 1,
                 block_quantity(block),
                 block_interval_ms(block),
                 "|".join(block_point_ids(block)),
@@ -353,10 +363,20 @@ one explicit request. It requires `--request`, `--host`, `--port`, the matching
 `--unit`, and `--confirm-read READ`.
 
 Use `read-plan.csv` to create read documents with functions 01 through 04.
-Protocol offsets are base zero. The common reference column is present only as
-a cross-check. Use `test-message-plan.csv` when you configure a documented
+For ModScan64 6.0.0.4, enter `modscan_point_address_base_1` in the **Point Address**
+field: protocol offset 0 becomes Point Address 1. The CSV performs this conversion
+for you. Keep `protocol_offset_base_0` unchanged in raw protocol messages; do not
+enter the common reference (such as 40001) as Point Address. The tested Point
+Address range is 1 through 65535; a request starting at protocol offset 65535 is
+held because this entry path cannot express it. Other versions need their own
+mapping verification. The common reference column is only a cross-check.
+Use `test-message-plan.csv` when you configure a documented
 ModScan test message. Enter expected data only when a reviewed test specifies
 it.
+
+These planning files do not control native polling or retries. A finite simulator
+does not prove a single-attempt native probe; verify the application's actual
+request count separately before describing a probe as read-once.
 
 The generated PDU rows contain read requests only. They do not include a serial
 CRC or a Modbus TCP MBAP header because ModScan supplies the transport framing.

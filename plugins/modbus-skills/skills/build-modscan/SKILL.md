@@ -6,8 +6,8 @@ license: Apache-2.0
 
 # Build ModScan (BETA)
 
-Generate documented, version-neutral setup files. Native application
-verification has not been run, so this target is BETA.
+Generate documented setup files. This target remains BETA; generation does not
+verify the user's installed application or native polling behavior.
 
 Follow `../../references/interaction-contract.md`.
 
@@ -22,8 +22,9 @@ Follow `../../references/interaction-contract.md`.
 6. Configure ModScan from the plan when available; these CSVs are operator-entry
    instructions, not native import files. Otherwise report native verification as
    unavailable and use the fallback only for one reviewed request.
-7. Enter `read-plan.csv` and `test-message-plan.csv` rows directly in ModScan.
-   Do not reformat function codes, protocol offsets, or unit IDs.
+7. Use the generated Point Address column for the tested ModScan UI; raw protocol
+   messages retain zero-based offsets. Follow the generated README and
+   `references/native-verification.md` for the version-specific mapping.
 
 ## Output files
 
