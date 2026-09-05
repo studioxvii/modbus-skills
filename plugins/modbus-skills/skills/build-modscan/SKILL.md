@@ -19,8 +19,9 @@ Follow `../../references/interaction-contract.md`.
 3. Require a canonical map, read plan, and `probe` or `final` mode.
 4. Run `python3 <skill-dir>/scripts/run.py --map <map.json> --plan <read-plan.json> --mode <mode> --output <directory>`.
 5. Inspect the setup manifest and generated CSV files.
-6. Load them through ModScan when available. Otherwise report native verification
-   as unavailable and use the fallback only for one reviewed request.
+6. Configure ModScan from the plan when available; these CSVs are operator-entry
+   instructions, not native import files. Otherwise report native verification as
+   unavailable and use the fallback only for one reviewed request.
 7. Enter `read-plan.csv` and `test-message-plan.csv` rows directly in ModScan.
    Do not reformat function codes, protocol offsets, or unit IDs.
 
@@ -38,11 +39,8 @@ Completion requires a generated or held status with visible native-verification 
 
 ## Windows lab verification
 
-When native ModScan verification runs in the Windows lab, save the receipt under
-`artifacts/windows-lab/<asset-id>/modscan/` (git-ignored). Follow the field list in
-`tests/windows-lab/campaign.json` (`receipt_schema`) and the matrix in
-`docs/windows-lab-setup.md`. Bootstrap example receipt:
-`artifacts/windows-lab/synthetic/receipts/modscan.json`.
+For native application checks, follow `references/native-verification.md`.
+Keep receipts in a local diagnostic directory, separate from the user deliverables.
 
 ## Stop
 
