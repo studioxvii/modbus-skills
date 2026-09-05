@@ -205,13 +205,14 @@ class ModpollExporterTests(unittest.TestCase):
             {1, 2}, {request["function_code"] for request in read_plan["requests"]}
         )
         result = export_modpoll(canonical_map, read_plan, profile="gavinying-cli")
-        self.assertEqual("generated", result.status)
+        self.assertEqual("held", result.status)
+        self.assertIn("MODPOLL_SCALAR_BITS_UNSUPPORTED", {finding.code for finding in result.findings})
+        result = export_modpoll(canonical_map, read_plan, profile="gavinying-cli", mode="probe")
         config = text(result, "lab.csv")
         # Both tables use PDU offsets; the area is a separate CSV field.
         self.assertIn("poll,coil,0,1,BE_BE", config)
-        self.assertIn("ref,pump_run,0,bool,r,,", config)
         self.assertIn("poll,discrete_input,5,1,BE_BE", config)
-        self.assertIn("ref,alarm_bit,5,bool,r,,", config)
+        self.assertIn(",bool8,r,,", config)
         # Read-only: no writable references are emitted.
         self.assertNotIn(",rw,", config)
 
@@ -262,7 +263,7 @@ class ModpollExporterTests(unittest.TestCase):
             discrete = area in {"coil", "discrete-input"}
             canonical_map, read_plan = inputs(point(area=area, protocol_offset=0,
                 datatype="bool" if discrete else "uint16", word_span=1, scale=None))
-            csv_rows = list(csv.reader(StringIO(text(export_modpoll(canonical_map, read_plan, profile="gavinying-cli"), "default.csv"))))
+            csv_rows = list(csv.reader(StringIO(text(export_modpoll(canonical_map, read_plan, profile="gavinying-cli", mode="probe" if discrete else "final"), "default.csv"))))
             self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "poll"))
             self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "ref"))
             command = text(export_modpoll(canonical_map, read_plan, profile="proconx-cli"), "commands.txt")

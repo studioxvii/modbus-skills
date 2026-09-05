@@ -6,6 +6,9 @@ Generate the documented open-source `device`, `poll`, and `ref` CSV collections.
 Use with the gavinying/modpoll CLI, not proconX FieldTalk modpoll.
 Both `poll` and `ref` addresses are zero-based PDU offsets. Do not add a
 30000/40000 register-area prefix; the CSV area field already selects the table.
+Final scalar coil/discrete-input values are unsupported by this profile's
+byte-group decoder. Keep those targets held; raw probe mode emits `bool8` groups.
+Do not present these groups as individual Boolean point values.
 
 ## `proconx-cli`
 

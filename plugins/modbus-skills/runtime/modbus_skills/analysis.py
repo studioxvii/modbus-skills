@@ -857,6 +857,36 @@ def analyze_capture(
         if byte_order_evidence is not None:
             point_result["byte_order_evidence"] = byte_order_evidence
             findings.extend(byte_order_findings)
+        # Absence of a configured test is not a passing test. Preserve exact
+        # thresholds and distinguish insufficient evidence from no finding.
+        checks = {}
+        def record_check(name, enabled, enough, found, thresholds=None):
+            checks[name] = {
+                "status": "skipped" if not enabled or not enough else "finding" if found else "passed",
+                "reason": "not configured or not applicable" if not enabled else "insufficient samples or metadata" if not enough else None,
+                "thresholds": thresholds or {},
+            }
+        numeric_count = sum(_number(sample["value"]) is not None for sample in value_samples)
+        record_check("communications", True, bool(point_samples), error_count)
+        record_check("response_time", True, bool(responses), False)
+        record_check("missing_intervals", interval is not None, len(point_samples) >= 2,
+            point_result["missing_intervals"]["count"], {"expected_seconds": interval})
+        record_check("stale", stale_limit is not None, stale_basis is not None and analysis_time is not None,
+            point_result["stale"], {"after_seconds": stale_limit})
+        record_check("flatline", True, len(value_samples) >= flatline_min_samples,
+            point_result["flatline"], {"minimum_samples": flatline_min_samples})
+        record_check("range", minimum is not None or maximum is not None, numeric_count > 0,
+            range_count, {"minimum": minimum, "maximum": maximum})
+        record_check("rate_of_change", rate_limit is not None, numeric_count >= 2,
+            rate_count, {"maximum_per_second": rate_limit})
+        record_check("counter", bool(counter_config), numeric_count >= 2,
+            point_result["counter"]["resets"] or point_result["counter"]["wraps"], dict(counter_config))
+        record_check("discrete_transitions", _is_discrete(config), len(value_samples) >= 2,
+            point_result["discrete_transitions"]["count"])
+        record_check("byte_order_stability", byte_order_evidence is not None, bool(successful), bool(byte_order_findings))
+        point_result["checks"] = checks
+        if checks["stale"]["status"] == "skipped":
+            point_result["stale"] = None
         point_results[identifier] = point_result
 
     if global_error_count:

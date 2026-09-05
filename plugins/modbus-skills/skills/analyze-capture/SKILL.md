@@ -18,6 +18,8 @@ Follow `../../references/interaction-contract.md`.
 4. Separate communication findings from signal findings.
 5. When the capture names expected request IDs, report missing planned reads as a campaign error.
 6. Report the sample window, thresholds, skipped checks, and missing metadata.
+   Read each point's `checks` inventory. A missing threshold is a skipped test,
+   not proof that the signal is healthy; `stale: null` means it was not evaluated.
 
 ## Output files
 
