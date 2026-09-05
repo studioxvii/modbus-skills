@@ -326,6 +326,38 @@ def _non_register_context_mask(lines: Sequence[str]) -> list[bool]:
     return masked
 
 
+def _overview_context_mask(lines: Sequence[str]) -> list[bool]:
+    """Keep paired-area overview diagrams out of headerless point recovery.
+
+    Require explicit overview prose, distinct area headings and repeated function
+    columns together. A keyword or numeric address alone is never an exclusion.
+    Scope ends at a real table/section heading or the physical page boundary.
+    """
+    labels = [re.sub(r"\s+", " ", line.strip()).casefold() for line in lines]
+    masked: list[bool] = []
+    active = False
+    area_pattern = r"\b(?:holding registers?|input registers?|discrete inputs?|coils?)\b"
+    for index, label in enumerate(labels):
+        areas = {area.rstrip("s") for area in re.findall(area_pattern, label)}
+        starts_overview = (
+            len(areas) >= 2
+            and any(re.search(r"\boverview\b", text) for text in labels[max(0, index - 8):index])
+            and any(len(re.findall(r"\b(?:modbus )?function code\b", text)) >= 2
+                    for text in labels[index + 1:index + 4])
+        )
+        if starts_overview:
+            active = True
+        elif active:
+            heading = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", label).rstrip(":")
+            if _layout_header_at(lines, index) is not None or re.fullmatch(
+                r"(?:(?:modbus|holding|input) )?registers?(?: map| table)?|coils?|discrete inputs?",
+                heading,
+            ):
+                active = False
+        masked.append(active)
+    return masked
+
+
 def parse_layout_rows(
     text: str, *, first_page: int = 1, pages: set[int] | None = None, parser_id: str = "pdftotext-layout/v1"
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -338,9 +370,31 @@ def parse_layout_rows(
         header_end = -1
         lines = page.splitlines()
         function_mask = _non_register_context_mask(lines)
-        header_lines = ["" if masked else line for line, masked in zip(lines, function_mask)]
+        overview_mask = _overview_context_mask(lines)
+        header_lines = [
+            "" if masked or overview else line
+            for line, masked, overview in zip(lines, function_mask, overview_mask)
+        ]
         for line_index, line in enumerate(lines):
             line_number = line_index + 1
+            if overview_mask[line_index]:
+                header = None
+                header_end = -1
+                if _unresolved_tabular_row(line) or _headerless_layout_row(
+                    line, page_number=page_number, line_number=line_number, parser_id=parser_id
+                ) is not None:
+                    rejected.append({
+                        "code": "pdf-overview-declaration",
+                        "page": page_number,
+                        "line": line_number,
+                        "parser_id": parser_id,
+                        "_source": {
+                            "format": "pdf", "page": page_number, "line": line_number,
+                            "region": f"p{page_number}:l{line_number}",
+                            "parser_id": parser_id, "excerpt": line.strip()[:300],
+                        },
+                    })
+                continue
             if function_mask[line_index]:
                 header = None
                 header_end = -1
@@ -771,9 +825,12 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
             lines.setdefault(key, []).append((x_min, x_max, y_max, word.text.strip()))
 
         line_items = [(y_min, sorted(lines[y_min])) for y_min in sorted(lines)]
-        function_mask = _non_register_context_mask(
-            [" ".join(word[3] for word in words) for _y, words in line_items]
-        )
+        line_labels = [" ".join(word[3] for word in words) for _y, words in line_items]
+        function_mask = [
+            masked or overview for masked, overview in zip(
+                _non_register_context_mask(line_labels), _overview_context_mask(line_labels)
+            )
+        ]
         header_items = [
             (y, [] if masked else words)
             for (y, words), masked in zip(line_items, function_mask)
