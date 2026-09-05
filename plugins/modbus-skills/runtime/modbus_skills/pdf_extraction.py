@@ -153,6 +153,44 @@ def _layout_segments(line: str) -> list[tuple[int, str]]:
     return segments
 
 
+def _split_boolean_columns(
+    segments: list[tuple[int, str]], header: Sequence[tuple[int, str, str]]
+) -> list[tuple[int, str]]:
+    """Split scalar tokens only where explicit header anchors prove the cells."""
+    fields = [field for _x, field, _raw in header]
+    if (
+        len(fields) != 7
+        or fields[:5] != ["name", "description", "access", "_extra:input", "_extra:output"]
+        or fields[5] not in {"_extra:config", "_extra:settings"}
+        or fields[6] not in _ADDRESS_FIELDS
+    ):
+        return segments
+    result: list[tuple[int, str]] = []
+    for x, value in segments:
+        words = list(re.finditer(r"\S+", value))
+        indexes = []
+        valid = len(words) >= 2
+        for word in words:
+            distances = [abs(anchor - (x + word.start())) for anchor, _field, _raw in header]
+            index = min(
+                range(len(header)),
+                key=lambda i: (distances[i], -header[i][0]),
+            )
+            indexes.append(index)
+            allowed = (
+                {"R", "RW", "W", "RO", "WO", "R/W"} if index == 2
+                else {"TRUE", "FALSE"} if 3 <= index <= 5 else set()
+            )
+            valid = valid and distances.count(distances[index]) == 1 and word.group() in allowed
+        # A free-text/enum cell, ambiguous token location or skipped column is
+        # not a proven split. In particular, never split Name/Description here.
+        if valid and indexes == list(range(indexes[0], indexes[0] + len(indexes))):
+            result.extend((x + word.start(), word.group()) for word in words)
+        else:
+            result.append((x, value))
+    return result
+
+
 def _layout_header_at(
     lines: Sequence[str], start: int
 ) -> tuple[int, list[tuple[int, str, str]]] | None:
@@ -438,7 +476,7 @@ def parse_layout_rows(
                     )
                 continue
             cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
-            segments = _layout_segments(line)
+            segments = _split_boolean_columns(_layout_segments(line), header)
             if len(segments) < 2 and len(header) > 1:
                 continue
             if len(segments) == len(header):
@@ -515,6 +553,12 @@ def parse_layout_rows(
                 record["_extra"] = extra
             locator = {"page": page_number, "line": line_number, "region": f"p{page_number}:l{line_number}"}
             record["_claims"] = [_claim(parser_id, field, str(value), locator) for field, value in record.items() if not field.startswith("_") and field != "code"]
+            record["_claims"].extend(
+                {**_claim(parser_id, field, values[field], locator),
+                 "raw_header": raw_header, "raw_value": values[field], "column_index": index}
+                for index, (_anchor, field, raw_header) in enumerate(header)
+                if field.startswith("_extra:") and field in values
+            )
             record["_source"] = {
                 "format": "pdf",
                 "page": page_number,
@@ -928,6 +972,13 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
                 for field, value in values.items()
                 if not field.startswith("_extra:") and field in cell_regions
             ]
+            record["_claims"].extend(
+                {**_claim("pdftotext-bbox-layout/v1", field, values[field],
+                          {"page": page_number, "region": region, "bbox": cell_regions[field]}),
+                 "raw_header": raw_header, "raw_value": values[field], "column_index": index}
+                for index, (_anchor, field, raw_header) in enumerate(columns)
+                if field.startswith("_extra:") and field in values and field in cell_regions
+            )
             if "description" not in values and values.get("name") and "name" in cell_regions:
                 record["_claims"].append(
                     _claim(
@@ -1297,6 +1348,21 @@ def _reconcile(
             if not field.startswith("_") and field not in merged:
                 merged[field] = value
         merged["_claims"] = [*left.get("_claims", []), *right.get("_claims", [])]
+        left_extra, right_extra = left.get("_extra", {}), right.get("_extra", {})
+        if isinstance(left_extra, Mapping) and isinstance(right_extra, Mapping) and (left_extra or right_extra):
+            extras = dict(left_extra)
+            by_header: dict[str, list[Any]] = {}
+            for raw_header, value in [*left_extra.items(), *right_extra.items()]:
+                key = re.sub(r"[^a-z0-9]+", "_", str(raw_header).casefold()).strip("_")
+                previous = by_header.setdefault(key, [])
+                if previous and any(
+                    re.sub(r"\s+", " ", str(old).strip()) != re.sub(r"\s+", " ", str(value).strip())
+                    for old in previous
+                ):
+                    row_conflicts.append({"field": f"_extra:{key}", "claims": [*previous, value]})
+                previous.append(value)
+                extras.setdefault(raw_header, value)
+            merged["_extra"] = extras
         if row_conflicts or left_index < held_count:
             quarantined.append(merged)
             if row_conflicts:
