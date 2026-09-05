@@ -55,6 +55,14 @@ def bbox(*rows: tuple[str, str, str]) -> bytes:
 
 
 class PdfExtractionTests(unittest.TestCase):
+    def test_discovery_keeps_early_and_late_tables(self):
+        pages = ["Installation instructions"] * 45
+        pages[1] = "Address  Name  Data Type\n40001  Early Point  uint16\n"
+        pages[44] = "Address  Name  Data Type\n40002  Late Point  uint16\n"
+        found = discover_register_pages("\f".join(pages))
+        self.assertIn(2, found)
+        self.assertIn(45, found)
+
     def extract(
         self,
         effects,

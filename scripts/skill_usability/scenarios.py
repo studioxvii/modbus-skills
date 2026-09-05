@@ -160,27 +160,32 @@ def run_trial(
     except PreflightUnavailable as exc:
         execution_status = "blocked"
         missing = exc.capability
-    except (SessionError, ContractError) as exc:
+    except (SessionError, ContractError, OSError, ValueError, TypeError) as exc:
         execution_status = "blocked"
         missing = str(exc)
 
-    snapshot = adapter.snapshot(session) if session else None
-    result = evaluate_trial(
-        scenario=scenario,
-        events=session.events if session else [],
-        artifacts=session.artifacts if session else [],
-        snapshot=snapshot,
-        terminal_reason=session.terminal_reason if session else "blocked",
-        execution_status=execution_status,
-        missing_capability=missing,
-    )
-    if session and evidence_root:
-        trial_dir = evidence_root / f"{scenario['scenario_id']}-{repetition}"
-        trial_dir.mkdir(parents=True, exist_ok=False)
-        (trial_dir / "transcript.json").write_text(json.dumps(session.state.get("transcript", session.events), indent=2) + "\n", encoding="utf-8")
-        if snapshot:
-            shutil.copytree(snapshot, trial_dir / "output")
-    cleanup = adapter.cleanup(session) if session else {"cleaned": True}
+    try:
+        snapshot = adapter.snapshot(session) if session else None
+        result = evaluate_trial(
+            scenario=scenario,
+            events=session.events if session else [],
+            artifacts=session.artifacts if session else [],
+            snapshot=snapshot,
+            terminal_reason=session.terminal_reason if session else "blocked",
+            execution_status=execution_status,
+            missing_capability=missing,
+        )
+        if session and evidence_root:
+            trial_dir = evidence_root / f"{scenario['scenario_id']}-{repetition}"
+            trial_dir.mkdir(parents=True, exist_ok=False)
+            (trial_dir / "transcript.json").write_text(json.dumps(session.state.get("transcript", session.events), indent=2) + "\n", encoding="utf-8")
+            if snapshot:
+                shutil.copytree(snapshot, trial_dir / "output")
+    except (OSError, ValueError, TypeError) as exc:
+        result = {"status": "blocked", "issue_codes": ["evidence-evaluation-error:" + type(exc).__name__],
+                  "dimensions": {}, "terminal_reason": "blocked"}
+    finally:
+        cleanup = adapter.cleanup(session) if session else {"cleaned": True}
     if cleanup.get("cleaned") is False:
         result["status"] = "failed"
         result["issue_codes"] = sorted(set(result.get("issue_codes", ()) ) | {"cleanup-failed"})

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest import mock
 
 import sys
 import tempfile
@@ -56,6 +57,14 @@ class SkillUsabilityScenarioTests(unittest.TestCase):
                 parent=Path(temporary),
                 budget=campaign["budget"],
             )
+
+    def test_snapshot_failure_still_cleans_trial_workspace(self):
+        adapter = FakeSessionAdapter()
+        with mock.patch.object(adapter, "snapshot", side_effect=OSError("snapshot unavailable")), mock.patch.object(adapter, "cleanup", wraps=adapter.cleanup) as cleanup:
+            result = self._run("01-novice-routing", adapter)
+            self.assertEqual("blocked", result["status"])
+            cleanup.assert_called_once()
+            self.assertFalse(cleanup.call_args.args[0].workspace.exists())
 
     def test_novice_routing_recommends_compile_user_map(self) -> None:
         result = self._run("01-novice-routing")
