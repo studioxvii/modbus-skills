@@ -33,7 +33,9 @@ Follow `../../references/interaction-contract.md`.
    On resume, run `scripts/inspect_case.py <case-directory>` first. It verifies the
    checkpoint and every indexed artifact without changing files, and returns the
    current case hash and packet. Use the resume example in `references/request.md`;
-   implementation-code inspection is unnecessary for a normal supported request.
+   its selection preparation helper copies verified bindings while requiring the
+   actual chosen IDs, then the normal wrapper applies the reply.
+   Implementation-code inspection is unnecessary for a normal supported request.
 7. Continue this skill automatically for safe internal stages. When a typed decision,
    physical read, or target choice is required, recommend continuing this skill with
    the exact case and input. Do not expose internal specialist-stage choreography.
