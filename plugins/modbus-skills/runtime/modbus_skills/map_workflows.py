@@ -1074,6 +1074,19 @@ def _normalize_one(
                 severity="error",
             )
         )
+    if protocol_offset is not None and word_span is not None and protocol_offset + word_span - 1 > 65_535:
+        holds.append(
+            {
+                **_hold(
+                    "point.range-out-of-bounds",
+                    "The point range extends beyond protocol offset 65535.",
+                    "word_span",
+                    source=source,
+                    severity="error",
+                ),
+                "details": {"end_offset": protocol_offset + word_span - 1},
+            }
+        )
     evidence.append({"field": "word_span", "source_field": word_source, "source_value": word_raw, "value": word_span})
 
     byte_raw, byte_source, byte_status_raw, byte_confirmed_raw = _byte_order_input(
