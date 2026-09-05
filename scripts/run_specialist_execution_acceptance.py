@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+import sys
+import platform
 
 from run_direct_skill_acceptance import (
     CONTRACTS, SKILLS, command_arguments, fixtures, prepare_plans, tree_hash, write_json,
@@ -16,6 +18,18 @@ from run_direct_skill_acceptance import (
 from run_skill_usability_tests import run_campaign, validate_output_path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def environment_preflight(*, require_pdf):
+    try:
+        import pdfplumber
+        pdf_version = pdfplumber.__version__
+    except ImportError:
+        pdf_version = None
+    return {"schema_version": "specialist-environment/v1", "python_executable": sys.executable,
+            "python_version": platform.python_version(), "pdfplumber_version": pdf_version,
+            "pdf_required": require_pdf, "status": "unavailable" if require_pdf and pdf_version is None else "ready",
+            "scope": "Existing interpreter and dependencies only; no installation or host PATH changes."}
 
 
 def create_inputs(output):
@@ -34,7 +48,10 @@ def create_inputs(output):
         if isinstance(value, dict): return {key: portable(item) for key, item in value.items()}
         if isinstance(value, list): return [portable(item) for item in value]
         if isinstance(value, str) and value.startswith(str(all_inputs) + "/"):
-            return Path(value).name
+            # CLI request paths are relative to the caller's work directory,
+            # not the JSON request's own directory. Supply usable inputs instead
+            # of requiring the worker to discover and repair a harness mistake.
+            return str(Path("../fixtures") / Path(value).name)
         return value
     for path in all_inputs.glob("*.json"):
         try: payload = json.loads(path.read_text())
@@ -85,6 +102,11 @@ def main():
     parser.add_argument("--case", action="append")
     args = parser.parse_args()
     output = validate_output_path(args.output)
+    preflight = environment_preflight(require_pdf=not args.case or "execute-extract-pdf-map-positive" in args.case)
+    write_json(output / "environment-preflight.json", preflight)
+    if preflight["status"] != "ready":
+        print(json.dumps({"status": "unavailable", "reason": "selected-interpreter-missing-pdfplumber"}))
+        return 2
     campaign = create_inputs(output)
     report = run_campaign(mode="real-model", output=output / "results", campaign_path=campaign,
                           scenario_ids=args.case, repetitions_override=args.repetitions, model=args.model)

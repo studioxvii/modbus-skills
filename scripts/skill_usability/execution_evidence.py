@@ -22,19 +22,39 @@ def wrapper_tokens(item, session):
     if len(tokens) != 3 or Path(tokens[0]).name not in {"bash", "sh"} or tokens[1] not in {"-lc", "-c"}:
         return []
     script = tokens[2]
-    if any(marker in script for marker in ("$", "`", "\n", "<", ">", "(", ")", "&", "|")):
+    if any(marker in script for marker in ("$", "`", "\n", "<", ">", "(", ")")):
         return []
-    lexer = shlex.shlex(script, posix=True, punctuation_chars=";")
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|")
     lexer.whitespace_split = True
     groups = [[]]
+    separators = []
     for token in lexer:
-        if token == ";": groups.append([])
+        if token in {";", "&&"}:
+            groups.append([])
+            separators.append(token)
+        elif token and all(value in ";&|" for value in token): return []
         else: groups[-1].append(token)
     if len(groups) < 2 or any(not group for group in groups): return []
+    # In an AND-list, overall exit zero proves that every group ran and
+    # succeeded. A nonzero suffix cannot reveal the wrapper's own exit status.
+    if "&&" in separators and item.get("exitCode") != 0: return []
+    candidates = [(index, _python_command({"command": shlex.join(group)}))
+                  for index, group in enumerate(groups)]
+    candidates = [(index, command) for index, command in candidates if command]
+    if len(candidates) != 1: return []
+    index, command = candidates[0]
     if not all(_documentation_read(shlex.join(group), plugin=session.plugin_root,
-                                  work=session.work, cwd=item.get("cwd")) for group in groups[:-1]):
+                                  work=session.work, cwd=item.get("cwd")) for group in groups[:index]):
         return []
-    return _python_command({"command": shlex.join(groups[-1])})
+    if groups[index + 1:]:
+        if any(separator != "&&" for separator in separators[index:]): return []
+        # Post-wrapper artifact inspection is scoped separately from instruction
+        # reads; it cannot execute code or change generated output.
+        for group in groups[index + 1:]:
+            if not _documentation_read(shlex.join(group), plugin=session.work,
+                                       work=session.work, cwd=item.get("cwd")):
+                return []
+    return command
 
 
 def observe_execution(session, snapshot):
