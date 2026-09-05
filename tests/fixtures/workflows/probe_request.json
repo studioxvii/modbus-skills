@@ -4,7 +4,7 @@
     "modpoll",
     "modscan"
   ],
-  "profile": "gavinying-cli",
+  "profile": "proconx-cli",
   "points": [
     {
       "logical_point_id": "unknown_value_probe",

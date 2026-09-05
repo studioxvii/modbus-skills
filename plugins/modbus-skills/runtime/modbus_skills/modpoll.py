@@ -447,6 +447,9 @@ def _proconx_preflight(
                 datatype = point_datatype(point)
                 area = block_area(block)
                 assert area is not None
+                if point.get("scale") not in (None, "", 1, 1.0, "1", "1.0"):
+                    findings.append(Finding("error", "MODPOLL_SCALE_UNSUPPORTED",
+                        "proconX modpoll does not apply engineering multipliers. Use a scaling-capable target, or probe raw values without presenting them as engineering values.", f"{point_path}.scale"))
                 if area in {"holding-register", "input-register"} and datatype:
                     suffix = _PROCONX_FINAL_TYPE_SUFFIX.get(
                         (datatype or "").strip().lower()
@@ -626,10 +629,13 @@ def _gavinying_preflight(
     mode: str,
 ) -> tuple[Finding, ...]:
     findings: list[Finding] = []
+    if mode == "probe":
+        findings.append(Finding("error", "MODPOLL_SINGLE_ATTEMPT_UNSUPPORTED",
+            "gavinying --once bounds polling passes but retries a timed-out read internally. This profile cannot provide a single-attempt probe; use proconx-cli or Node-RED.", "mode"))
     for block_index, block in enumerate(blocks):
         if mode == "final" and block_area(block) in {"coil", "discrete-input"}:
             findings.append(Finding("error", "MODPOLL_SCALAR_BITS_UNSUPPORTED",
-                "gavinying decodes discrete references as byte groups, not individual point values. Use raw probe mode or a scalar-capable profile.",
+                "gavinying decodes discrete references as byte groups with incompatible bit ordering, not individual point values. Use a scalar-capable profile.",
                 f"requests[{block_index}]"))
         block_path = f"requests[{block_index}]"
         unit = block_unit_id(block)
@@ -648,6 +654,13 @@ def _gavinying_preflight(
             point_path = f"{block_path}.points[{point_index}]"
             if mode == "final":
                 datatype = point_datatype(point)
+                scale = point.get("scale")
+                if scale in (0, 0.0, "0", "0.0"):
+                    findings.append(Finding("error", "MODPOLL_ZERO_SCALE_UNSUPPORTED",
+                        "gavinying ignores a zero multiplier; it cannot produce the documented zero-valued engineering transform.", f"{point_path}.scale"))
+                elif datatype in {"int64", "uint64"} and scale not in (None, "", 1, 1.0, "1", "1.0"):
+                    findings.append(Finding("error", "MODPOLL_INT64_SCALE_PRECISION_UNSUPPORTED",
+                        "gavinying multiplies through floating point and cannot preserve full 64-bit integer precision for this scale.", f"{point_path}.scale"))
                 if datatype is None or _gavinying_dtype(
                     datatype, point_word_count(point)
                 ) is None:
@@ -782,7 +795,7 @@ def _gavinying_csv(
                             datatype,
                             "r",
                             "" if unit_text is None else unit_text,
-                            "" if scale is None else scale,
+                            "" if scale in (None, 1, 1.0, "1", "1.0") else scale,
                         ]
                     )
     return buffer.getvalue()
@@ -896,6 +909,7 @@ def _export_witte(
                     route_blocks,
                     env_prefix=prefix,
                     live_read_seconds=live_read_seconds,
+                    mode=mode,
                 ),
                 "witte-read-automation",
             )
@@ -1394,6 +1408,7 @@ def _witte_script(
     *,
     env_prefix: str,
     live_read_seconds: int,
+    mode: str,
 ) -> str:
     ordered_blocks = sorted(blocks, key=lambda item: block_id(item[1], item[0]))
     scan_intervals = [block_interval_ms(block) for _, block in ordered_blocks]
@@ -1417,7 +1432,8 @@ def _witte_script(
         "$application = $null",
         "$connectionOpened = $false",
         "$documents = @()",
-        "$liveReadStopwatch = [System.Diagnostics.Stopwatch]::StartNew()",
+        "$liveReadStopwatch = [System.Diagnostics.Stopwatch]::new()",
+        "if (Get-Process -Name mbpoll -ErrorAction SilentlyContinue) { throw \"Close existing Modbus Poll windows before this isolated read session; their requests are outside this plan.\" }",
         "try {",
         "  $application = New-Object -ComObject \"Mbpoll.Application\"",
         "  $application.Connection = 1",
@@ -1426,9 +1442,6 @@ def _witte_script(
         "  $application.ResponseTimeout = 1000",
         "  $application.ConnectTimeout = 500",
         "  $application.DelayBetweenPolls = 20",
-        "  $connectionResult = $application.OpenConnection()",
-        "  if ($connectionResult -ne 0) { throw \"Modbus Poll connection failed with result $connectionResult.\" }",
-        "  $connectionOpened = $true",
         "  $outputDirectory = Join-Path $PSScriptRoot \"app-created\"",
         "  New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null",
     ]
@@ -1451,8 +1464,10 @@ def _witte_script(
                 "  if ($liveReadStopwatch.Elapsed.TotalSeconds -ge $maximumLiveReadSeconds) { throw \"The bounded live-read duration expired.\" }",
                 f"  {variable} = New-Object -ComObject \"Mbpoll.Document\"",
                 f"  $documents += {variable}",
+                f"  {variable}.ReadWriteDisabled = $true",
                 f"  $readResult = {variable}.{method}({unit}, {start}, {quantity}, {scan_rate})",
                 f"  if (-not $readResult) {{ throw \"Could not create read document for {filename}.\" }}",
+                f"  {variable}.ReadWriteDisabled = $true",
                 f"  {variable}.ShowWindow()",
                 f"  $savePath = Join-Path $outputDirectory \"{filename}\"",
                 f"  $saveResult = {variable}.Save($savePath)",
@@ -1461,8 +1476,29 @@ def _witte_script(
         )
     lines.extend(
         [
+            "  $liveReadStopwatch.Start()",
+            "  $connectionResult = $application.OpenConnection()",
+            "  if ($connectionResult -ne 0) { throw \"Modbus Poll connection failed with result $connectionResult.\" }",
+            "  $connectionOpened = $true",
+        ]
+    )
+    if mode == "probe":
+        lines.extend([
+            "  foreach ($document in $documents) {",
+            "    if ($liveReadStopwatch.Elapsed.TotalSeconds -ge $maximumLiveReadSeconds) { throw \"The bounded live-read duration expired.\" }",
+            "    $document.ReadWriteOnce()",
+            "    while (($document.GetTxCount() -lt 1 -or $document.ReadResult() -eq 10) -and $liveReadStopwatch.Elapsed.TotalSeconds -lt $maximumLiveReadSeconds) { Start-Sleep -Milliseconds 20 }",
+            "    if ($document.GetTxCount() -lt 1 -or $document.ReadResult() -ne 0) { throw \"The one-attempt read failed (result $($document.ReadResult()), requests $($document.GetTxCount())); do not retry automatically.\" }",
+            "  }",
+        ])
+    else:
+        lines.append("  foreach ($document in $documents) { $document.ReadWriteDisabled = $false }")
+        lines.extend([
             "  $remainingMilliseconds = [Math]::Max(0, [Math]::Floor(($maximumLiveReadSeconds - $liveReadStopwatch.Elapsed.TotalSeconds) * 1000))",
             "  if ($remainingMilliseconds -gt 0) { Start-Sleep -Milliseconds $remainingMilliseconds }",
+        ])
+    lines.extend(
+        [
             "}",
             "finally {",
             "  $liveReadStopwatch.Stop()",
@@ -1563,8 +1599,9 @@ one explicit request. It requires `--request`, `--host`, `--port`, the matching
 Review the route environment variables and every CSV row before use. Run each
 route command from the directory that contains its CSV file.
 
-Probe configurations expose raw 16-bit words or raw Boolean bytes. They do not
-claim that an unknown datatype or byte order is correct.
+Single-attempt probe mode is unsupported: `--once` still permits internal retry
+requests on timeout. Final scalar Boolean values, zero multipliers, and scaled
+64-bit integer values are held when this client cannot preserve their semantics.
 """
 
 

@@ -343,7 +343,7 @@ def _pack_request(map_path: Path, plan_path: Path, *, mode: str) -> dict[str, An
         "canonical_map": map_path.name,
         "read_plan": plan_path.name,
         "mode": mode,
-        "targets": ["node-red", {"id": "modpoll", "profile": "gavinying-cli"}, "modscan"],
+        "targets": ["node-red", {"id": "modpoll", "profile": "proconx-cli" if mode == "probe" else "gavinying-cli"}, "modscan"],
     }
 
 

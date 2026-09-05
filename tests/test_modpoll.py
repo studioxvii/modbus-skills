@@ -68,7 +68,7 @@ def text(result: object, suffix: str) -> str:
 
 class ModpollExporterTests(unittest.TestCase):
     def test_every_profile_includes_the_same_bounded_pymodbus_fallback(self) -> None:
-        canonical_map, read_plan = inputs()
+        canonical_map, read_plan = inputs(point(scale=1))
         scripts = []
         for profile in ("gavinying-cli", "proconx-cli", "witte-desktop", "witte-v12-xml"):
             with self.subTest(profile=profile):
@@ -127,7 +127,7 @@ class ModpollExporterTests(unittest.TestCase):
             with self.subTest(endian=expected):
                 self.assertIn(f",{expected}\n", config)
 
-    def test_probe_csv_exposes_raw_words_without_guessing(self) -> None:
+    def test_gavinying_probe_is_held_because_once_still_retries(self) -> None:
         raw = point(
             datatype=None,
             byte_order=None,
@@ -138,11 +138,10 @@ class ModpollExporterTests(unittest.TestCase):
         result = export_modpoll(
             canonical_map, read_plan, profile="gavinying-cli", mode="probe"
         )
-        self.assertEqual("generated", result.status)
-        config = text(result, "default.csv")
-        self.assertIn("raw_read_0001_word_000", config)
-        self.assertIn("raw_read_0001_word_001", config)
-        self.assertNotIn("float32", config)
+        self.assertEqual("held", result.status)
+        self.assertIn("MODPOLL_SINGLE_ATTEMPT_UNSUPPORTED", {finding.code for finding in result.findings})
+        self.assertFalse(result.artifacts)
+        self.assertEqual("generated", export_modpoll(canonical_map, read_plan, profile="proconx-cli", mode="probe").status)
 
     def test_gavinying_maps_fixed_length_strings_from_word_count(self) -> None:
         string_point = point(
@@ -208,13 +207,46 @@ class ModpollExporterTests(unittest.TestCase):
         self.assertEqual("held", result.status)
         self.assertIn("MODPOLL_SCALAR_BITS_UNSUPPORTED", {finding.code for finding in result.findings})
         result = export_modpoll(canonical_map, read_plan, profile="gavinying-cli", mode="probe")
-        config = text(result, "lab.csv")
-        # Both tables use PDU offsets; the area is a separate CSV field.
-        self.assertIn("poll,coil,0,1,BE_BE", config)
-        self.assertIn("poll,discrete_input,5,1,BE_BE", config)
-        self.assertIn(",bool8,r,,", config)
-        # Read-only: no writable references are emitted.
-        self.assertNotIn(",rw,", config)
+        self.assertEqual("held", result.status)
+        self.assertIn("MODPOLL_SINGLE_ATTEMPT_UNSUPPORTED", {finding.code for finding in result.findings})
+        self.assertFalse(result.artifacts)
+
+    def test_gavinying_scaling_preserves_large_identity_values_and_holds_bad_transforms(self):
+        for scale in (None, 1, 1.0, "1", "1.0"):
+            canonical, plan = inputs(point(datatype="uint64", word_span=4, byte_order="ABCDEFGH", scale=scale))
+            result = export_modpoll(canonical, plan, profile="gavinying-cli")
+            rows = list(csv.reader(StringIO(text(result, "default.csv"))))
+            self.assertEqual("", next(row[6] for row in rows if row[0] == "ref"))
+        for datatype, scale, code in (("uint16", 0, "MODPOLL_ZERO_SCALE_UNSUPPORTED"),
+                                      ("uint64", 0.1, "MODPOLL_INT64_SCALE_PRECISION_UNSUPPORTED")):
+            canonical, plan = inputs(point(datatype=datatype, word_span=4 if datatype == "uint64" else 1,
+                                           byte_order="ABCDEFGH" if datatype == "uint64" else None, scale=scale))
+            result = export_modpoll(canonical, plan, profile="gavinying-cli")
+            self.assertEqual("held", result.status)
+            self.assertIn(code, {finding.code for finding in result.findings})
+
+    def test_witte_probe_disables_document_before_connection_and_triggers_once(self):
+        canonical, plan = inputs()
+        script = text(export_modpoll(canonical, plan, profile="witte-desktop", mode="probe"), ".ps1")
+        self.assertLess(script.index("ReadWriteDisabled = $true"), script.index("OpenConnection()"))
+        self.assertLess(script.index("ReadHoldingRegisters"), script.index("OpenConnection()"))
+        self.assertEqual(1, script.count("$document.ReadWriteOnce()"))
+        self.assertIn("$document.GetTxCount() -lt 1", script)
+        self.assertIn("$document.ReadResult() -ne 0", script)
+        self.assertNotIn("$remainingMilliseconds", script)
+        self.assertNotIn("ReadWriteDisabled = $false", script)
+        self.assertIn("Get-Process -Name mbpoll", script)
+        fallback = text(export_modpoll(canonical, plan, profile="proconx-cli", mode="probe"), "pymodbus-read-once.py")
+        self.assertIn("timeout=3, retries=0", fallback)
+
+    def test_proconx_nonidentity_scale_is_held_but_raw_probe_is_available(self):
+        for scale in (0, 0.1, 2):
+            canonical, plan = inputs(point(scale=scale))
+            result = export_modpoll(canonical, plan, profile="proconx-cli", mode="final")
+            self.assertEqual("held", result.status)
+            self.assertFalse(result.artifacts)
+            self.assertIn("MODPOLL_SCALE_UNSUPPORTED", {finding.code for finding in result.findings})
+            self.assertEqual("generated", export_modpoll(canonical, plan, profile="proconx-cli", mode="probe").status)
 
     def test_proconx_cli_emits_fieldtalk_commands_for_coil_and_holding(self) -> None:
         coil = point(
@@ -263,9 +295,13 @@ class ModpollExporterTests(unittest.TestCase):
             discrete = area in {"coil", "discrete-input"}
             canonical_map, read_plan = inputs(point(area=area, protocol_offset=0,
                 datatype="bool" if discrete else "uint16", word_span=1, scale=None))
-            csv_rows = list(csv.reader(StringIO(text(export_modpoll(canonical_map, read_plan, profile="gavinying-cli", mode="probe" if discrete else "final"), "default.csv"))))
-            self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "poll"))
-            self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "ref"))
+            result = export_modpoll(canonical_map, read_plan, profile="gavinying-cli")
+            if discrete:
+                self.assertEqual("held", result.status)
+            else:
+                csv_rows = list(csv.reader(StringIO(text(result, "default.csv"))))
+                self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "poll"))
+                self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "ref"))
             command = text(export_modpoll(canonical_map, read_plan, profile="proconx-cli"), "commands.txt")
             self.assertIn("-0 -r 0 -c 1", command)
             self.assertNotIn(":uint16", command)
@@ -281,7 +317,7 @@ class ModpollExporterTests(unittest.TestCase):
             self.assertFalse(any(artifact.path.endswith("commands.txt") for artifact in result.artifacts))
 
     def test_canonical_64_bit_layout_is_supported(self) -> None:
-        canonical, plan = inputs(point(datatype="float64", word_span=4, byte_order="ABCDEFGH"))
+        canonical, plan = inputs(point(datatype="float64", word_span=4, byte_order="ABCDEFGH", scale=1))
         for profile in ("gavinying-cli", "proconx-cli"):
             self.assertEqual("generated", export_modpoll(canonical, plan, profile=profile).status)
 
@@ -307,6 +343,8 @@ class ModpollExporterTests(unittest.TestCase):
         self.assertNotIn("Press Enter to close", script)
         self.assertLess(script.index("$configuredReadsPerSecond"), script.index("Read-Host"))
         self.assertLess(script.index("Read-Host"), script.index("OpenConnection()"))
+        self.assertLess(script.index("ReadHoldingRegisters"), script.index("OpenConnection()"))
+        self.assertLess(script.index("ReadWriteDisabled = $true"), script.index("ReadHoldingRegisters"))
         expected = (FIXTURES / "witte-read-plan.csv").read_text(encoding="utf-8")
         self.assertEqual(expected, text(result, "read-plan.csv"))
         setup = json.loads(text(result, "setup-manifest.json"))

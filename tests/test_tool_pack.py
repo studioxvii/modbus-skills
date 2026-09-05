@@ -89,7 +89,10 @@ class ToolPackTests(unittest.TestCase):
             targets=("node-red", "modpoll", "modscan"),
             mode="probe",
         )
-        self.assertEqual("generated", pack.status)
+        self.assertEqual("partial", pack.status)
+        gavinying = next(result for result in pack.target_results if result.target == "modpoll")
+        self.assertEqual("held", gavinying.status)
+        self.assertIn("MODPOLL_SINGLE_ATTEMPT_UNSUPPORTED", {finding.code for finding in gavinying.findings})
         flow = json.loads(pack.files()["node-red/flow.json"])
         reads = [node for node in flow if node["type"] == "modbus-flex-getter"]
         injects = [node for node in flow if node["type"] == "inject"]
