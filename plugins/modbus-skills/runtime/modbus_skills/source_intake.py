@@ -522,6 +522,26 @@ def _source_field_evidence(
     for target in sorted(set(raw_claims) | set(normalized_evidence)):
         item = normalized_evidence.get(target, {})
         source_field = str(item.get("source_field", target))
+        if target == "engineering_unit" and source_field == "workflow_default":
+            # A caller's fill-only metadata is not text from the OEM row.
+            # Blank source claims remain in the normalized source evidence;
+            # they must not replace the applied default's value or provenance.
+            normalized_value = point.get(target)
+            result.append(
+                {
+                    "field": target,
+                    "raw_header": "workflow_default",
+                    "raw_value": item.get("source_value"),
+                    "normalized_value": normalized_value,
+                    "source_ref": "workflow-default:engineering_unit",
+                    "status": (
+                        "confirmed"
+                        if item.get("value") == normalized_value
+                        else "contradiction"
+                    ),
+                }
+            )
+            continue
         raw_claim = raw_claims.get(target, {})
         raw_value = raw_claim.get(
             "raw_value", raw_claim.get("value", item.get("source_value"))
