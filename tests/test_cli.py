@@ -207,7 +207,7 @@ class CliIntegrationTests(unittest.TestCase):
             self.root / "witte-v12",
         )
         self.assertEqual("generated", witte["status"])
-        self.assertTrue(any((self.root / "witte-v12" / "modpoll" / "witte-v12-xml").glob("*.xml")))
+        self.assertTrue(any((self.root / "witte-v12" / "modpoll" / "witte-v12-xml").glob("*.mbp")))
 
     def test_review_evidence_accepts_source_codes_before_normalization(self) -> None:
         candidate = self.root / "coordinate-candidate.json"

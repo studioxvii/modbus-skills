@@ -6,8 +6,8 @@ license: Apache-2.0
 
 # Build Modpoll (BETA)
 
-Generate artifacts for one explicit Modpoll product profile. Native application
-verification has not been run, so this target is BETA.
+Generate artifacts for one explicit Modpoll product profile. This target remains
+BETA; generation does not verify the user's exact native application or artifact.
 
 Follow `../../references/interaction-contract.md`.
 

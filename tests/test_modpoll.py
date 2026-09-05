@@ -428,13 +428,18 @@ class ModpollExporterTests(unittest.TestCase):
         canonical_map, read_plan = inputs()
         result = export_modpoll(canonical_map, read_plan, profile="witte-v12-xml")
         self.assertEqual("generated", result.status)
-        xml_artifacts = [artifact for artifact in result.artifacts if artifact.path.endswith(".xml")]
+        xml_artifacts = [artifact for artifact in result.artifacts if artifact.path.endswith(".mbp")]
         self.assertEqual(1, len(xml_artifacts))
+        self.assertFalse(any(artifact.path.endswith(".xml") for artifact in result.artifacts))
         xml_text = xml_artifacts[0].as_text()
         self.assertEqual((), validate_witte_v12_xml(xml_text))
         self.assertIn("<Enable>0</Enable>", xml_text)
         self.assertIn("<Function>3</Function>", xml_text)
         self.assertIn("<Address>100</Address>", xml_text)
+        setup = json.loads(text(result, "setup-manifest.json"))
+        self.assertEqual(xml_artifacts[0].path, setup["documents"][0]["path"])
+        self.assertFalse(setup["opaque_native_files_bundled"])
+        self.assertEqual("not-run", setup["native_verification"]["status"])
 
     def test_unit_zero_is_held_for_every_modpoll_profile(self) -> None:
         invalid = point(unit_id=0)
