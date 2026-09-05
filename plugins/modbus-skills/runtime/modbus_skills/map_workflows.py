@@ -127,6 +127,7 @@ _DATATYPE_ALIASES = {
     "signed 32-bit": "int32",
     "float": "float32",
     "float32": "float32",
+    "f32": "float32",
     "real": "float32",
     "ieee754 float": "float32",
     "uint64": "uint64",
