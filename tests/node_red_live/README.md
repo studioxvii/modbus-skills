@@ -13,8 +13,10 @@ The same read-only journey is run at exactly two profiles:
 
 For each profile, the agent checks simulator readiness, binds the canonical-map,
 read-plan, flow, manifest, and simulator-configuration SHA-256 values, imports the
-flow while disabled, and records one scoped human authorization for this named local
-campaign. The authorization covers the campaign; it is not repeated for each read.
+flow while disabled, and records scoped authorization for this named local
+campaign. Explicit standing user scope may authorize an unattended synthetic run;
+record its actor as `test-harness`, not as a human approval. The authorization
+covers the campaign; it is not repeated for each read.
 
 The correctness pass triggers compiled blocks manually. The bounded stress pass uses
 three rounds (sequential), a one-second cadence, one read in flight, at most 180
@@ -80,3 +82,11 @@ every planned request,
 checks raw words against the simulator API, and restores the original Node-RED
 flows. If any required input is missing, it returns `blocked` or `not-run` instead
 of claiming a live pass.
+
+Endpoint placeholders on Modbus client configuration nodes are resolved directly
+in the disposable deployment copy from the verified loopback simulator binding.
+This includes global configuration nodes, which cannot see flow-tab environment
+variables. No process-level `MODBUS_*_HOST` or `MODBUS_*_PORT` variables are needed.
+Missing or unsafe bindings stop before deployment. The generated evidence files
+remain unchanged, and the original runtime flows are restored on exit, including
+when a trigger or capture fails.

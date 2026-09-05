@@ -25,6 +25,31 @@ class SimulatorError(RuntimeError):
 
 
 _HOST_PLACEHOLDER = re.compile(r"^\$\{MODBUS(?:_[A-Z0-9_]+)?_HOST\}$")
+_ENDPOINT_PLACEHOLDER = re.compile(r"^\$\{(MODBUS(?:_[A-Z0-9_]+)?_(?:HOST|PORT))\}$")
+
+
+def _bind_client_endpoints(
+    flow: list[dict[str, Any]], environment: Mapping[str, str]
+) -> None:
+    """Bind only the deployment copy: global config nodes cannot see tab env."""
+    for node in flow:
+        if str(node.get("type", "")).lower() != "modbus-client":
+            continue
+        for field in ("tcpHost", "tcpPort"):
+            value = node.get(field)
+            placeholder = _ENDPOINT_PLACEHOLDER.fullmatch(str(value))
+            if placeholder is not None:
+                name = placeholder.group(1)
+                if name not in environment:
+                    raise CampaignError(f"Node-RED Modbus endpoint binding is missing: {name}")
+                value = str(environment[name])
+                node[field] = value
+            if field == "tcpHost" and value is not None:
+                if value not in {"127.0.0.1", "localhost", "::1"}:
+                    raise CampaignError("Node-RED Modbus target must be loopback")
+            if field == "tcpPort" and value is not None:
+                if not re.fullmatch(r"[0-9]+", str(value)) or not 1 <= int(value) <= 65535:
+                    raise CampaignError("Node-RED Modbus TCP port must be an integer from 1 to 65535")
 
 
 def _loopback_http_url(value: str, label: str) -> str:
@@ -300,8 +325,8 @@ class NodeRedAdminClient:
         """Deploy once, run bounded rounds, and restore the prior flow once."""
 
         validate_flow(flow)
-        original = self.flows()
         deployed = copy.deepcopy([dict(node) for node in flow])
+        _bind_client_endpoints(deployed, environment)
         tabs = [node for node in deployed if node.get("type") == "tab"]
         injects = [node for node in deployed if node.get("type") == "inject"]
         if len(tabs) != 1 or len(injects) != 1:
@@ -318,6 +343,7 @@ class NodeRedAdminClient:
             {"name": name, "value": str(value), "type": "str"}
             for name, value in sorted(environment.items())
         ]
+        original = self.flows()
 
         def run_round(timeout_seconds: float) -> dict[str, Any]:
             deadline = self._clock() + timeout_seconds
