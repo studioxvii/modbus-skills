@@ -46,9 +46,9 @@ def aggregate_status(statuses: Sequence[str]) -> str:
         return "inconclusive"
     if values and all(item == "not-run" for item in values):
         return "not-run"
-    if any(item == "blocked" for item in values) and not any(item == "passed" for item in values):
+    if any(item == "blocked" for item in values):
         return "blocked"
-    if any(item == "passed" for item in values) and not any(item == "failed" for item in values):
+    if values and all(item == "passed" for item in values):
         return "passed"
     return "inconclusive"
 
@@ -62,6 +62,14 @@ def build_report(
     plugin_hash: str | None,
 ) -> dict[str, Any]:
     statuses = [str(trial.get("status")) for trial in trials]
+    repetitions = int(campaign.get("real_model_repetitions") or campaign.get("repetitions") or 1) if mode == "real-model" else 1
+    expected = {
+        (name, repetition)
+        for name in campaign["scenarios"]
+        for repetition in range(1, repetitions + 1)
+    }
+    observed = [(trial.get("scenario_id"), trial.get("repetition", 1)) for trial in trials]
+    complete = len(observed) == len(expected) and set(observed) == expected
     issue_codes = sorted(
         {
             str(code)
@@ -69,6 +77,8 @@ def build_report(
             for code in trial.get("issue_codes", ())
         }
     )
+    if not complete:
+        issue_codes.append("campaign-coverage-incomplete")
     public_trials = [
         {
             "scenario_id": trial.get("scenario_id"),
@@ -88,7 +98,7 @@ def build_report(
         "mode": mode,
         "adapter": adapter,
         "worker_model": "fake" if mode == "deterministic" else campaign["worker_model"],
-        "status": aggregate_status(statuses),
+        "status": aggregate_status(statuses if complete else [*statuses, "inconclusive"]),
         "evidence_class": "simulated-user" if mode == "deterministic" else "deterministic",
         "issue_codes": issue_codes,
         "trials": public_trials,
