@@ -54,11 +54,18 @@ def _documentation_read(command: str, *, plugin: Path, work: Path) -> bool:
             if not group:
                 return False
             executable, *args = group
-            allowed = {"cat", "sed", "pwd", "ls", "rg"}
+            allowed = {"cat", "sed", "pwd", "ls", "rg", "head"}
             if executable not in allowed | {f"/usr/bin/{name}" for name in allowed}:
                 return False
             if Path(executable).name == "pwd":
                 if args:
+                    return False
+                continue
+            if Path(executable).name == "head":
+                # Output truncation only: no filename can escape the read roots.
+                count = (args[0][1:] if len(args) == 1 and re.fullmatch(r"-[0-9]+", args[0])
+                         else args[1] if len(args) == 2 and args[0] == "-n" else "")
+                if not count.isdigit() or not 1 <= int(count) <= 1_000_000:
                     return False
                 continue
             if Path(executable).name in {"ls", "rg"}:
@@ -131,10 +138,19 @@ def observe_handoff(transcript: Sequence[Mapping[str, Any]], *, plugin: Path,
             issues.add("handoff-operation-identity-missing")
             continue
         (started if method == "item/started" else completed)[identifier] = item
-        if item.get("type") != "commandExecution" or not _documentation_read(str(item.get("command", "")), plugin=plugin, work=work):
+        duration = item.get("durationMs")
+        bounded_sleep = (item.get("type") == "sleep" and type(duration) is int
+                         and 0 <= duration <= 60_000)
+        if not bounded_sleep and (item.get("type") != "commandExecution" or not _documentation_read(str(item.get("command", "")), plugin=plugin, work=work)):
             issues.add("handoff-operation-unproven")
     if set(started) != set(completed):
         issues.add("handoff-operation-incomplete")
+    for identifier in set(started) & set(completed):
+        if started[identifier].get("type") == "sleep" and (
+            completed[identifier].get("type") != "sleep"
+            or started[identifier].get("durationMs") != completed[identifier].get("durationMs")
+        ):
+            issues.add("handoff-operation-unproven")
     # Symlinks and directories are changes too; empty files are not harmless proof.
     before = dict(baseline or {})
     after = tree_state(work)

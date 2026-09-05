@@ -322,8 +322,15 @@ def validate_campaign(campaign: Mapping[str, Any], *, campaign_dir: Path | None 
     names = value.get("scenarios")
     if not isinstance(names, Sequence) or isinstance(names, (str, bytes, bytearray)):
         raise ContractError("campaign scenarios must be an array")
-    if len(names) != REPRESENTATIVE_COUNT:
-        raise ContractError(f"representative campaign must contain exactly {REPRESENTATIVE_COUNT} scenarios")
+    kind = value.get("campaign_kind", "representative")
+    if kind == "representative":
+        if len(names) != REPRESENTATIVE_COUNT:
+            raise ContractError(f"representative campaign must contain exactly {REPRESENTATIVE_COUNT} scenarios")
+    elif kind == "extended":
+        if not 1 <= len(names) <= 100:
+            raise ContractError("extended campaign must contain 1 through 100 scenarios")
+    else:
+        raise ContractError("unsupported campaign kind")
     loaded: list[dict[str, Any]] = []
     seen: set[str] = set()
     for name in names:

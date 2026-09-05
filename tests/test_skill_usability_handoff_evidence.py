@@ -37,7 +37,8 @@ class HandoffEvidenceTests(unittest.TestCase):
         for command in ("cat ../plugin/SKILL.md", "sed -n '1,120p' ../plugin/SKILL.md",
                         "pwd && cat ../plugin/SKILL.md", "/bin/bash -lc 'cat ../plugin/SKILL.md'",
                         "pwd; rg --files -g 'AGENTS.md' -g '*' .", "ls -la ../plugin", "rg --files ../plugin",
-                        "rg -n 'reads|writes' ../plugin/SKILL.md"):
+                        "rg -n 'reads|writes' ../plugin/SKILL.md",
+                        "rg --files ../plugin | head -100", "rg --files ../plugin | head -n 100"):
             with self.subTest(command=command):
                 self.assertTrue(self.observe(self.rpc(command))["proven"])
         self.assertTrue(self.observe([])["proven"])
@@ -47,7 +48,8 @@ class HandoffEvidenceTests(unittest.TestCase):
                         "sed -i '1p' ../plugin/SKILL.md", "sed -n '1e touch output.txt' ../plugin/SKILL.md",
                         "python3 -c 'print(1)'", "cat /etc/passwd", "cat ../plugin/SKILL.md; touch output.txt",
                         "curl localhost", "nmap localhost", "cat `pwd`", "cat ../plugin/SKILL.md &",
-                        "rg --files --pre malicious ../plugin", "ls -L /etc", "rg --files /etc", "rg --files -g"):
+                        "rg --files --pre malicious ../plugin", "ls -L /etc", "rg --files /etc", "rg --files -g",
+                        "head -100 /etc/passwd", "head -c 100 /etc/passwd", "head -0"):
             with self.subTest(command=command):
                 self.assertFalse(self.observe(self.rpc(command))["proven"])
 
@@ -68,6 +70,19 @@ class HandoffEvidenceTests(unittest.TestCase):
                 path.symlink_to(self.plugin / "SKILL.md")
             self.assertIn("handoff-created-output", self.observe([])["issue_codes"])
             path.rmdir() if kind == "directory" else path.unlink()
+
+    def test_native_bounded_sleep_is_nonmutating_but_still_an_operation(self):
+        transcript = self.rpc(kind="sleep")
+        for message in transcript:
+            message["params"]["item"]["durationMs"] = 20_000
+        observation = self.observe(transcript)
+        self.assertTrue(observation["proven"])
+        self.assertEqual(1, observation["operation_count"])
+        for duration in (None, True, -1, 60_001, "1000"):
+            transcript[1]["params"]["item"]["durationMs"] = duration
+            self.assertFalse(self.observe(transcript)["proven"])
+        transcript[1]["params"]["item"]["durationMs"] = 1000
+        self.assertFalse(self.observe(transcript)["proven"])
 
     def test_initial_host_directories_are_not_worker_output_but_changes_are(self):
         for name in (".git", ".agents", ".codex"):

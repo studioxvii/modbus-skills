@@ -32,7 +32,7 @@ and its existing output folders.
 Keep OEM and broad-setup routes on `compile-user-map` and explicit-stage routes
 direct. Offer one alternate only when the goal is materially ambiguous.
 
-Use this format:
+For a supported goal, use this format:
 
 ```text
 Recommended next: skill-name
@@ -44,13 +44,17 @@ Other options: zero or one alternative when materially useful
 Reply `proceed` to continue.
 ```
 
-For writes, broadcasts, discovery, or unbounded polling, explain the read-only boundary and stop.
+For writes, broadcasts, discovery, or unbounded polling, explain the read-only boundary
+and stop. Do not turn the refusal into a different task, ask for device details, or
+append a recommendation/proceed prompt. For an unrelated goal, say no Modbus skill
+applies; no recommendation format is needed.
 
 ## Output files
 
 - None. This skill only names the next skill, the input it needs, and the result it will produce.
 
-Completion requires one verified route with its required input and observable output.
+Completion requires one verified route with its required input and observable output,
+or a concise explanation that the requested goal has no supported route.
 
 ## Stop
 
@@ -61,6 +65,6 @@ Completion requires one verified route with its required input and observable ou
 
 ## Finish
 
-End with the recommendation format above. Do not perform the recommended skill here.
+For supported goals, end with the recommendation format above. Do not perform the recommended skill here.
 When the user replies `proceed`, that authorizes only the named safe next skill; live-device
 and native-app gates remain explicit.
