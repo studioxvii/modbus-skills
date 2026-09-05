@@ -342,12 +342,32 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
         lines.append("- None")
     lines.extend(["", "## Exclusions and evidence annex"])
     if user_map["exception_annex"]:
+        annex_groups: list[tuple[Mapping[str, Any], int]] = []
+        group_indexes: dict[str, int] = {}
         for item in user_map["exception_annex"]:
+            # Only repeated unselected holds are presentation groups. Preserve
+            # semantic differences and every original record in the JSON map.
+            key = None
+            if item.get("kind") == "unselected-hold":
+                key = stable_input_hash({k: v for k, v in item.items()
+                                         if k not in {"source", "point_ids", "subject_ids"}})
+            if key is not None and key in group_indexes:
+                index = group_indexes[key]
+                first, count = annex_groups[index]
+                annex_groups[index] = (first, count + 1)
+            else:
+                if key is not None:
+                    group_indexes[key] = len(annex_groups)
+                annex_groups.append((item, 1))
+        for item, count in annex_groups:
             point_id = item.get("oem_point_id")
             code = item.get("code")
             label = " / ".join(str(value) for value in (point_id, code) if value) or "unselected evidence"
             reason = item.get("reason", item.get("message", "Retained outside selected output"))
-            lines.append(f"- {label}: {reason}")
+            suffix = f" ({count} unselected source records)" if count > 1 else ""
+            lines.append(f"- {label}: {reason}{suffix}")
+        if any(count > 1 for _item, count in annex_groups):
+            lines.extend(["", "Individual records and source locations remain in [the JSON map](user-map.json)."])
     else:
         lines.append("- None")
     return "\n".join(lines) + "\n"
