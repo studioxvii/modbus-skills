@@ -20,6 +20,14 @@ class PdfTableExtractionError(ValueError):
     """Raised when the optional grid extractor cannot run safely."""
 
 
+class PdfTableEvidenceBudgetError(PdfTableExtractionError):
+    """A localized proof/index budget exhausted before claim association."""
+
+    def __init__(self, message: str, *, page: int, table_index: int, stage: str):
+        super().__init__(message)
+        self.page, self.table_index, self.stage = page, table_index, stage
+
+
 _ADDRESS_TOKEN = r"(?:0[xX][0-9A-Fa-f]+|(?:[34][xX]){1,2}\d+|\d+)"
 _ADDRESS = re.compile(
     rf"^(?P<first>{_ADDRESS_TOKEN})(?:(?P<separator>[/\-])(?P<second>{_ADDRESS_TOKEN}))?(?P<footnote>\*)?$"
@@ -165,6 +173,20 @@ def _run_grid_worker(
             error_text = stderr.read(4_096).decode("utf-8", errors="replace").strip()
     except OSError as exc:
         raise PdfTableExtractionError("grid extraction worker could not start") from exc
+    if returncode == 3:
+        try:
+            error = json.loads(error_text)
+            if (not isinstance(error, dict) or error.get("error_type") != "pdf-grid-evidence-budget/v1"
+                    or type(error.get("page")) is not int or error["page"] < 1
+                    or type(error.get("table_index")) is not int or error["table_index"] < 0
+                    or error.get("stage") not in {"indexing", "claim-association"}
+                    or not isinstance(error.get("message"), str) or not error["message"]):
+                raise ValueError("invalid budget error")
+        except (ValueError, TypeError) as exc:
+            raise PdfTableExtractionError("grid worker returned invalid budget-error evidence") from exc
+        raise PdfTableEvidenceBudgetError(
+            error["message"], page=error["page"], table_index=error["table_index"], stage=error["stage"]
+        )
     if returncode != 0:
         raise PdfTableExtractionError(error_text or "grid extraction worker failed")
     try:
@@ -383,7 +405,10 @@ def _proved_common_cells(
                 for column in range(bisect_left(xends, box[0]), bisect_right(xstarts, box[2])):
                     incidences += 1
                     if incidences > _MAX_MERGED_INDEX_INCIDENCES:
-                        raise PdfTableExtractionError("merged-cell evidence budget exceeded while indexing geometry")
+                        raise PdfTableEvidenceBudgetError(
+                            "merged-cell evidence budget exceeded while indexing geometry",
+                            page=page_number, table_index=table_index, stage="indexing",
+                        )
                     index.setdefault((row, column), []).append(number)
 
     def glyphs_for(box: Any, column: int, start: int, end: int, literal: str):
@@ -438,7 +463,10 @@ def _proved_common_cells(
                           for g in (*glyphs, *header_glyphs)))
             required = size * (end-start-1)
             if budget[0] + required > _MAX_MERGED_PROOF_BYTES:
-                raise PdfTableExtractionError("merged-cell evidence budget exceeded before claim association")
+                raise PdfTableEvidenceBudgetError(
+                    "merged-cell evidence budget exceeded before claim association",
+                    page=page_number, table_index=table_index, stage="claim-association",
+                )
             budget[0] += required
             base = {"method": "same-source-spanning-cell/v1", "source_sha256": source_sha256,
                     "source_locator": locator(start), "source_cell_bbox": list(box),
@@ -1420,6 +1448,7 @@ def _clean(value: Any) -> str:
 
 __all__ = [
     "PdfTableExtractionError",
+    "PdfTableEvidenceBudgetError",
     "extract_pdf_table_evidence",
     "extract_pdf_table_rows",
     "parse_pdf_table",
@@ -1439,6 +1468,11 @@ def _worker_main(argv: Sequence[str]) -> int:
             raise PdfTableExtractionError(
                 f"grid extraction output exceeds {_MAX_GRID_OUTPUT_BYTES} bytes"
             )
+    except PdfTableEvidenceBudgetError as exc:
+        print(json.dumps({"error_type": "pdf-grid-evidence-budget/v1", "message": str(exc),
+                          "page": exc.page, "table_index": exc.table_index,
+                          "stage": exc.stage}), file=sys.stderr)
+        return 3
     except (PdfTableExtractionError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

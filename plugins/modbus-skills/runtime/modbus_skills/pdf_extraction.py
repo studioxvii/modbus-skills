@@ -24,6 +24,7 @@ from .artifacts import (
 from .pdf_table_extraction import (
     PDF_HEADER_ALIASES,
     PdfTableExtractionError,
+    PdfTableEvidenceBudgetError,
     _address_record_fields,
     _address_with_area,
     _parse_pdf_address,
@@ -1826,15 +1827,23 @@ def extract_pdf(
         try:
             grid, grid_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered,
                                                                  fresh_body_proofs=fresh_body_proofs)
+        except PdfTableEvidenceBudgetError as exc:
+            return _envelope(path, source, [], rejected, findings, [_grid_budget_hold(exc)],
+                             page_range, capability=capability, discovered_pages=discovered,
+                             discovery_complete=False)
         except PdfTableExtractionError as exc:
             return _hold_result(path, source, "pdf-structured-rows-unavailable", f"Text and coordinate parsing produced no rows, and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
         findings.append(_GRID_RECOVERY_FINDING)
         return _envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered, quarantined=grid_quarantined,
                          fresh_body_proofs=fresh_body_proofs)
     records, quarantined, conflicts = _reconcile(strict, coordinate)
+    budget_holds: list[dict[str, Any]] = []
     try:
         grid, grid_source_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered,
                                                                      fresh_body_proofs=fresh_body_proofs)
+    except PdfTableEvidenceBudgetError as exc:
+        grid, grid_source_quarantined = [], []
+        budget_holds.append(_grid_budget_hold(exc))
     except PdfTableExtractionError:
         grid = []
         grid_source_quarantined = []
@@ -1844,7 +1853,7 @@ def extract_pdf(
                                                        source_sha256=stable_input_hash(source))
         conflicts.extend(grid_conflicts)
         findings.append(_GRID_RECOVERY_FINDING)
-    holds: list[dict[str, Any]] = []
+    holds: list[dict[str, Any]] = list(budget_holds)
     if conflicts:
         holds.append({
             "code": "pdf-material-claim-conflict",
@@ -1854,6 +1863,7 @@ def extract_pdf(
             "conflicts": conflicts,
         })
     return _envelope(path, source, records, rejected, findings, holds, page_range, capability=capability, discovered_pages=discovered, quarantined=quarantined,
+                     discovery_complete=not budget_holds,
                      fresh_body_proofs=fresh_body_proofs)
 
 
@@ -1867,6 +1877,7 @@ def _extract_large_pdf_in_chunks(
     """Recover an oversized manual without requiring manual page selection."""
 
     fresh_body_proofs: dict[int, Any] = {}
+    budget_holds: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
@@ -1954,6 +1965,9 @@ def _extract_large_pdf_in_chunks(
                     timeout_seconds=min(60, remaining),
                     fresh_body_proofs=fresh_body_proofs,
                 )
+            except PdfTableEvidenceBudgetError as exc:
+                grid, grid_source_quarantined = [], []
+                budget_holds.append(_grid_budget_hold(exc))
             except PdfTableExtractionError:
                 grid = []
                 grid_source_quarantined = []
@@ -1983,7 +1997,7 @@ def _extract_large_pdf_in_chunks(
         if page_count < _MAX_PAGE_SPAN:
             scan_complete = True
             break
-    holds: list[dict[str, Any]] = []
+    holds: list[dict[str, Any]] = list(budget_holds)
     if not scan_complete:
         holds.append(
             {
@@ -2028,13 +2042,22 @@ def _extract_large_pdf_in_chunks(
         capability=capability,
         discovered_pages=sorted(set(discovered_pages)),
         quarantined=quarantined,
-        discovery_complete=scan_complete,
+        discovery_complete=scan_complete and not budget_holds,
         fresh_body_proofs=fresh_body_proofs,
     )
 
 
 def _extracted_page_count(text: str) -> int:
     return max(1, text.count("\f") + (0 if text.endswith("\f") else 1))
+
+
+def _grid_budget_hold(exc: PdfTableEvidenceBudgetError) -> dict[str, Any]:
+    return {
+        "code": "pdf-grid-evidence-budget", "severity": "hold", "blocking": True,
+        "message": f"Independent grid evidence is incomplete: {exc}. Existing text rows remain available without unproved common-cell claims.",
+        "source_scope": {"pages": [exc.page], "table_index": exc.table_index},
+        "budget_stage": exc.stage,
+    }
 
 
 def _recover_grid_rows(
@@ -2111,7 +2134,8 @@ def _recover_grid_or(
     try:
         grid, quarantined, discovered = _recover_grid_rows(path, pages=pages,
                                                          fresh_body_proofs=fresh_body_proofs)
-    except PdfTableExtractionError:
+    except PdfTableExtractionError as exc:
+        budget_hold = _grid_budget_hold(exc) if isinstance(exc, PdfTableEvidenceBudgetError) else None
         if keep_rows:
             return _envelope(
                 path,
@@ -2119,11 +2143,18 @@ def _recover_grid_or(
                 list(keep_rows),
                 list(keep_rejected or []),
                 [keep_finding],
-                [],
+                [budget_hold] if budget_hold else [],
                 page_range,
                 capability=capability,
                 discovered_pages=kept_pages,
+                discovery_complete=budget_hold is None,
             )
+        if budget_hold:
+            return {**fallback, "status": "held",
+                    "holds": [*fallback.get("holds", []), budget_hold],
+                    "source_coverage": {**fallback.get("source_coverage", {}),
+                                        "status": "unknown", "discovery_complete": False,
+                                        "basis": "incomplete-or-conflicting-discovery"}}
         return fallback
     # Empty accepted grid with only quarantines must not discard layout rows.
     if not grid and keep_rows:
