@@ -476,6 +476,18 @@ def _literal_context_size(value: Any) -> int:
             raise UserMapError("literal source context exceeds the 4 MiB evidence budget")
 
     def text_size(text: str) -> None:
+        if type(text) is str:
+            # Reject the minimum cost before scanning; visit only characters
+            # whose ensure_ascii JSON spelling needs additional bytes.
+            charge(2 + len(text))
+            for match in re.finditer(r'[\x00-\x1f"\\\x7f-\U0010ffff]', text):
+                char = match.group()
+                if char in '\\"\b\f\n\r\t':
+                    charge(1)
+                else:
+                    charge(11 if ord(char) > 65535 else 5)
+            return
+        # Preserve custom string iteration semantics outside the fast path.
         charge(2)  # Quotes, without constructing an escaped copy.
         for char in text:
             ordinal = ord(char)
@@ -591,7 +603,9 @@ def build_literal_source_context(entries: Iterable[Mapping[str, Any]]) -> list[d
         if any(not isinstance(key, str) or isinstance(value, bool)
                or not isinstance(value, (str, int)) for key, value in reference.items()):
             raise UserMapError("literal source context source reference is malformed")
-        key = (field, type(literal), literal)
+        # Numeric equality collapses -0.0 and 0.0, but their source literals
+        # and JSON identities differ. Preserve finite float bit identity here.
+        key = (field, type(literal), float.hex(literal) if isinstance(literal, float) else literal)
         if key not in groups:
             if len(groups) >= _LITERAL_CONTEXT_GROUPS:
                 raise UserMapError("literal source context group limit exceeded")
