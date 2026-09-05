@@ -345,7 +345,11 @@ def parse_pdf_table_evidence(
         parsed_address = (
             _parse_source_offset(address_text)
             if any(_header_text(raw) == "offset" for _column, raw in columns["address"])
-            else _parse_pdf_address(address_text)
+            else _parse_pdf_address(
+                address_text,
+                protocol_offset=any(_header_text(raw) == "protocol offset"
+                                    for _column, raw in columns["address"]),
+            )
         )
         if parsed_address is None:
             continue
@@ -752,20 +756,21 @@ def _resolve_cells(
     return values, conflicts
 
 
-def _parse_pdf_address(value: Any) -> dict[str, Any] | None:
+def _parse_pdf_address(value: Any, *, protocol_offset: bool = False) -> dict[str, Any] | None:
     """Parse one source address without creating a protocol offset."""
 
     raw = _clean(value)
     match = _ADDRESS.fullmatch(raw)
     if match is None:
         return None
-    first = _parse_address_component(match.group("first"))
+    parse_component = _parse_protocol_component if protocol_offset else _parse_address_component
+    first = parse_component(match.group("first"))
     second_text = match.group("second")
     separator = match.group("separator")
     parsed: dict[str, Any] = {
         "raw": raw,
         "first": first,
-        "second": _parse_address_component(second_text) if second_text else None,
+        "second": parse_component(second_text) if second_text else None,
         "separator": separator,
         "footnote_marker": bool(match.group("footnote")),
         "status": "single",
@@ -817,6 +822,18 @@ def _parse_pdf_address(value: Any) -> dict[str, Any] | None:
         }
     )
     return parsed
+
+
+def _parse_protocol_component(value: str) -> dict[str, Any]:
+    """Use an explicit protocol header without display-prefix heuristics."""
+    numeric = re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|\d+)", value) is not None
+    return {
+        "raw": value,
+        "status": "single" if numeric else "ambiguous",
+        "convention": "protocol-offset",
+        "area": None,
+        "number": int(value, 16 if value.lower().startswith("0x") else 10) if numeric else None,
+    }
 
 
 def _parse_address_component(value: str) -> dict[str, Any]:
@@ -894,9 +911,10 @@ def _parse_register_area(value: Any) -> tuple[str | None, str | None]:
 
 def _address_with_area(parsed: Mapping[str, Any], area: str) -> dict[str, Any]:
     result = dict(parsed)
-    if parsed.get("source_offset"):
+    if parsed.get("source_offset") or parsed.get("convention") == "protocol-offset":
         # An area does not establish whether an unqualified Offset is zero-based,
-        # one-based, a reference number, or an engineering bias.
+        # one-based, a reference number, or an engineering bias; it also cannot
+        # change an already explicit protocol basis into a display reference.
         result["area"] = area
         result["first"] = {**parsed["first"], "area": area}
         return result

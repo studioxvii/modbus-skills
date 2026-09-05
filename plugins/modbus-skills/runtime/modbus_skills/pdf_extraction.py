@@ -415,7 +415,7 @@ def parse_layout_rows(
             parsed_address = (
                 _parse_source_offset(address)
                 if address_field == "source_offset"
-                else _parse_pdf_address(address)
+                else _parse_pdf_address(address, protocol_offset=address_field == "protocol_offset")
             )
             if parsed_address is None or parsed_address.get("status") != "single":
                 rejected.append(
@@ -451,16 +451,6 @@ def parse_layout_rows(
             record.update(_address_record_fields(parsed_address, explicit_word_count=record.get("word_count")))
             if values.get("source_offset"):
                 record["source_offset"] = values["source_offset"]
-            if address_field == "protocol_offset":
-                record.pop("display_address", None)
-                record["address_convention"] = "protocol-offset"
-                record["source_address"] = {
-                    # A validated pair supplies one starting address and a
-                    # width; the complete token remains in source_register,
-                    # address_parse, and the original field claims.
-                    "raw": parsed_address["first"]["raw"] if parsed_address.get("second") is not None else address,
-                    "convention": "protocol-offset",
-                }
             if record.get("name") in (None, ""):
                 record["name"] = record.get("description")
             if record.get("description") in (None, ""):
@@ -827,7 +817,7 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
             parsed_address = (
                 _parse_source_offset(address)
                 if address_field == "source_offset"
-                else _parse_pdf_address(address)
+                else _parse_pdf_address(address, protocol_offset=address_field == "protocol_offset")
             )
             if parsed_address is None or parsed_address.get("status") != "single":
                 continue
@@ -862,13 +852,6 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
             record.update(_address_record_fields(parsed_address, explicit_word_count=record.get("word_count")))
             if values.get("source_offset"):
                 record["source_offset"] = values["source_offset"]
-            if address_field == "protocol_offset":
-                record.pop("display_address", None)
-                record["address_convention"] = "protocol-offset"
-                record["source_address"] = {
-                    "raw": parsed_address["first"]["raw"] if parsed_address.get("second") is not None else address,
-                    "convention": "protocol-offset",
-                }
             if record.get("name") in (None, ""):
                 record["name"] = record.get("description")
             if record.get("description") in (None, ""):
