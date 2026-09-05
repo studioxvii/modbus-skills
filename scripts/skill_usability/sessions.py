@@ -205,10 +205,25 @@ def record_transition(session: TrialSession, event: dict[str, Any]) -> None:
 def _python_command(item: Mapping[str, Any]) -> list[str]:
     command = shlex.split(str(item.get("command", "")))
     if len(command) == 3 and Path(command[0]).name in {"bash", "sh"} and command[1] in {"-lc", "-c"}:
+        script = command[2]
+        lines = script.splitlines()
+        # A common worker action writes a JSON request with a quoted Python
+        # heredoc, then invokes the trusted wrapper as the sole final command.
+        # Recognize that final invocation, not the safety of the prefix program.
+        header = re.fullmatch(r"(?:/usr/bin/)?python3(?:\.[0-9]+)? - <<(['\"])([A-Za-z_][A-Za-z0-9_]*)\1", lines[0]) if lines else None
+        if header:
+            delimiter = header.group(2)
+            end = next((index for index, line in enumerate(lines[1:], 1) if line == delimiter), None)
+            if end is not None and len(lines[end + 1:]) == 1:
+                final_command = shlex.split(lines[-1])
+                if not any(token in {";", "&&", "||", "|", ">", ">>"} for token in final_command):
+                    return _python_command({"command": lines[-1]})
         command = shlex.split(command[2])
     if command and command[0] == "PYTHONDONTWRITEBYTECODE=1":
         command = command[1:]
-    if not command or re.fullmatch(r"python3(?:\.[0-9]+)?", Path(command[0]).name) is None:
+    if not command or re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?", Path(command[0]).name) is None:
+        return []
+    if any(any(marker in token for marker in (";", "&", "|", "<", ">", "$", "`", "\n")) for token in command):
         return []
     executable = shutil.which(command[0])
     trusted = {Path(sys.executable).resolve(), Path(shutil.which("python3") or sys.executable).resolve()}
@@ -920,7 +935,7 @@ class CodexSessionAdapter(SessionAdapter):
         # Markdown decoration is presentation, not part of the skill name.
         plain = re.sub(r"[*`_]", "", final)
         plain = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", plain)
-        recommendation = re.search(r"Recommended next:\s*([a-z-]+)", plain, re.IGNORECASE)
+        recommendation = re.search(r"Recommended next:\s*\$?([a-z-]+)", plain, re.IGNORECASE)
         if not recommendation:
             recommendation = re.search(
                 r"(?:^|\n)\s*(?:Use|Run|Choose|Start with|I recommend|You should use)\s+(?:the\s+)?\$?([a-z][a-z-]+)",

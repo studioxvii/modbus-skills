@@ -159,6 +159,9 @@ def run_trial(
 
         snapshot = adapter.snapshot(session) if session else None
         profile = scenario["oracle_profile"]
+        if session and snapshot and adapter.name == "codex" and profile.get("direct_skill_case"):
+            from .execution_evidence import observe_execution
+            record_transition(session, observe_execution(session, snapshot))
         if session and snapshot and adapter.name == "codex" and (
             profile.get("handoff_policy") or "expected-refusal" in profile.get("completion_conditions", ())
         ):
