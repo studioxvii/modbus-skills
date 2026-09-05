@@ -192,12 +192,14 @@ def compile_user_map_bundle(
     selection_candidate: Mapping[str, Any],
     *,
     case_id: str,
+    selection_decision_resolved: bool = False,
 ) -> dict[str, Any]:
     """Return an offline user-map bundle or one bounded selection packet."""
 
     normalized_case_id = _case_id(case_id)
     selection = validate_selection_candidate(oem_map, selection_candidate)
-    if not selection["included"]:
+    resolved_empty = selection_decision_resolved and not selection["suggested"]
+    if not selection["included"] and not resolved_empty:
         candidates = selection["suggested"] or selection["excluded"]
         if not candidates:
             candidates = [
@@ -302,6 +304,8 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
     for point in user_map["points"]:
         groups[str(point.get("requested_measurement") or "Other")].append(point)
     lines = ["# User map", "", "## Included"]
+    if not user_map["points"]:
+        lines.extend(["", "No points selected. Exclusions are retained below; no device read or target workflow is requested by this empty map."])
     for measurement in sorted(groups, key=str.casefold):
         lines.extend(["", f"### {measurement}"])
         for point in groups[measurement]:
