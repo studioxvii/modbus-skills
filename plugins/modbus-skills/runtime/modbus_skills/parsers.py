@@ -888,6 +888,51 @@ def _skip_title_rows(non_empty_rows: Sequence[tuple[int, list[Any], bool]]) -> t
     return index, skipped
 
 
+def _xlsx_datatype_legends(
+    rows: Sequence[tuple[int, list[Any], bool]],
+) -> list[list[tuple[int, list[Any], bool]]]:
+    """Identify explicitly headed datatype dictionaries, not register names.
+
+    A datatype heading followed by Type/Description/Range columns establishes
+    a different table. Only contiguous, recognizable datatype-definition rows
+    belong to it; arbitrary addresses or later register tables are not masked.
+    """
+    groups: list[list[tuple[int, list[Any], bool]]] = []
+    for index in range(len(rows) - 1):
+        if rows[index][2] or rows[index + 1][2]:
+            continue
+        populated = [str(v).strip() for v in rows[index][1] if v not in (None, "")]
+        if len(populated) != 1 or not re.fullmatch(
+            r"(?:modbus\s+)?data\s*types\s*:?", populated[0], re.IGNORECASE
+        ):
+            continue
+        values = rows[index + 1][1]
+        headers = [_header_key(value, column) for column, value in enumerate(values)]
+        if not {"datatype", "description", "range"}.issubset(headers) or set(headers) & _ADDRESS_KEYS:
+            continue
+        columns = [headers.index(field) for field in ("datatype", "description", "range")]
+        group = [rows[index], rows[index + 1]]
+        for row in rows[index + 2 :]:
+            if row[2]:
+                break
+            values = row[1]
+            if any(column >= len(values) or values[column] in (None, "") for column in columns):
+                break
+            if any(value not in (None, "") for column, value in enumerate(values) if column not in columns):
+                break
+            if not re.fullmatch(
+                r"(?:u?int(?:8|16|32|64)?|float(?:16|32|64)?|bool(?:ean)?|double|word|dword|string|ascii)",
+                str(values[columns[0]]).strip(), re.IGNORECASE,
+            ):
+                break
+            group.append(row)
+        # Require an actual definition after the heading/header, not a title
+        # whose coincidental column labels happen to resemble a dictionary.
+        if len(group) > 2:
+            groups.append(group)
+    return groups
+
+
 def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
     """Parse basic XLSX worksheets with shared, inline, numeric, and formula cells."""
 
@@ -920,6 +965,21 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                     }
                 )
                 continue
+            legend_rows: set[int] = set()
+            for group in _xlsx_datatype_legends(non_empty):
+                legend_rows.update(row_number for row_number, _, _ in group)
+                assumptions.append(
+                    {
+                        "code": "excluded_xlsx_datatype_legend",
+                        "message": "Excluded an explicitly headed datatype dictionary, not register points.",
+                        "sheet": sheet_name,
+                        "rows": [row_number for row_number, _, _ in group],
+                        "source_rows": [
+                            {"row": row_number, "values": values}
+                            for row_number, values, _ in group
+                        ],
+                    }
+                )
             header_index, skipped_titles = _skip_title_rows(non_empty)
             header_row_number, header_values, header_formula = non_empty[header_index]
             headers, header_warnings = _xlsx_headers(header_values, non_empty[:header_index])
@@ -967,6 +1027,8 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                     }
                 )
             for row_number, row_values, has_formula in non_empty[header_index + 1 :]:
+                if row_number in legend_rows:
+                    continue
                 location = {"sheet": sheet_name, "row": row_number, "format": "xlsx"}
                 padded = list(row_values[: len(headers)]) + [""] * max(0, len(headers) - len(row_values))
                 record = {key: _trim_text(value) for key, value in zip(headers, padded)}

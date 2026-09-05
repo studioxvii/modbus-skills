@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import stat
 from typing import Any
+from urllib.parse import quote
 
 from .artifacts import stable_input_hash
 from .compiler_contracts import CompilerContractError, build_oem_map, point_evidence_refs
@@ -588,6 +589,21 @@ def _source_ref(value: Any, index: int) -> dict[str, Any]:
         return reference
     source_format = str(source.get("format", "record"))
     locator = source.get("row", source.get("index", index))
+    sheet = source.get("sheet")
+    if (
+        source_format == "xlsx"
+        and isinstance(sheet, str)
+        and sheet.strip()
+        and isinstance(locator, int)
+        and not isinstance(locator, bool)
+        and locator >= 1
+    ):
+        return {
+            "record_id": f"xlsx:sheet:{quote(sheet, safe='')}:row:{locator}",
+            "format": "xlsx",
+            "sheet": sheet,
+            "row": locator,
+        }
     return {"record_id": f"{source_format}:{locator}"}
 
 
