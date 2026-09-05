@@ -98,10 +98,38 @@ class SkillUsabilitySessionTests(unittest.TestCase):
                 for rpc in (first, second):
                     self.assertEqual(["initialize", "thread/start"], [call.args[0] for call in rpc.call.call_args_list])
                     self.assertTrue(all(call.kwargs["deadline"] == deadline for call in rpc.call.call_args_list))
+                first_context = first.call.call_args_list[1].args[1]["developerInstructions"]
+                resumed_context = second.call.call_args_list[1].args[1]["developerInstructions"]
+                self.assertNotIn("Saved case directory:", first_context)
+                self.assertIn('Saved case directory: ".".', resumed_context)
+                self.assertNotIn('"state":"complete"', resumed_context)
                 self.assertTrue(adapter.cleanup(session)["cleaned"])
             second.close.assert_called_once()
             self.assertEqual(200, session.state["output_bytes_used"])
             self.assertFalse(session.workspace.exists())
+
+    def test_saved_case_reference_is_quoted_path_not_state_or_expected_answers(self):
+        scenario = load_campaign()["loaded_scenarios"][3]
+        with tempfile.TemporaryDirectory() as temporary:
+            session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+            relative = 'saved "case"\nreference'
+            session.durable_case = session.work / relative
+            session.durable_case.mkdir()
+            (session.durable_case / "case.json").write_text('{"hidden-state-sentinel":true}')
+            rpc = mock.Mock(bytes_read=0, pending=[], reader=None)
+            rpc.call.side_effect = [{}, {"thread": {"id": "fresh"}, "model": "test-model"}]
+            adapter = CodexSessionAdapter()
+            with mock.patch("skill_usability.sessions.shutil.which", return_value="/usr/bin/codex"), mock.patch(
+                "skill_usability.codex_rpc.CodexRpc", return_value=rpc
+            ):
+                adapter.start(session)
+                context = rpc.call.call_args_list[1].args[1]["developerInstructions"]
+                self.assertIn(f"Saved case directory: {json.dumps(relative)}.", context)
+                self.assertNotIn(relative, context)
+                self.assertNotIn("hidden-state-sentinel", context)
+                self.assertNotIn("oracle_profile", context)
+                self.assertNotIn("selected_subject_ids", context)
+                self.assertTrue(adapter.cleanup(session)["cleaned"])
 
     def test_restart_cannot_reset_exhausted_deadline_or_output_budget(self):
         scenario = load_campaign()["loaded_scenarios"][3]
