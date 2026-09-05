@@ -637,8 +637,29 @@ def build_literal_source_context(entries: Iterable[Mapping[str, Any]]) -> list[d
         groups[key]["bindings"].append({**binding, "source_ref": dict(reference)})
     result = list(groups.values())
     for group in result:
-        group["bindings"].sort(key=lambda binding: (binding["oem_point_id"],
-            binding["source_field"], stable_input_hash(binding["source_ref"])))
+        bindings = group["bindings"]
+        if any(type(binding[field]) is not str for binding in bindings
+               for field in ("oem_point_id", "source_field")):
+            bindings.sort(key=lambda binding: (binding["oem_point_id"],
+                binding["source_field"], stable_input_hash(binding["source_ref"])))
+            continue
+        prefix_counts: dict[tuple[str, str], int] = defaultdict(int)
+        for binding in bindings:
+            prefix_counts[(binding["oem_point_id"], binding["source_field"])] += 1
+
+        def binding_order(binding: Mapping[str, Any]) -> tuple[str, str, str]:
+            prefix = (binding["oem_point_id"], binding["source_field"])
+            reference = binding["source_ref"]
+            # A unique primary pair never compares its reference digest. Only
+            # skip hashing when it cannot carry JSON/UTF-8 validation either.
+            safe_singleton = prefix_counts[prefix] == 1 and all(
+                type(key) is str and key.isascii() and (
+                    type(value) is str and value.isascii()
+                    or type(value) is int and value.bit_length() <= 63)
+                for key, value in reference.items())
+            return (*prefix, "" if safe_singleton else stable_input_hash(reference))
+
+        bindings.sort(key=binding_order)
     return sorted(result, key=lambda group: (group["field"], group["context_id"]))
 
 
