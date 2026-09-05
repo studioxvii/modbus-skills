@@ -1256,6 +1256,7 @@ def _reconcile(
     coordinate: list[dict[str, Any]],
     *,
     quarantined_records: Sequence[dict[str, Any]] = (),
+    source_sha256: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     # Earlier parser conflicts remain held even if a later parser agrees with
     # one interpretation. Include them in the same identity/scope uniqueness
@@ -1265,6 +1266,7 @@ def _reconcile(
     accepted: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
+    description_projections = []
     unmatched_right = set(range(len(coordinate)))
     left_identities = [_identity(row) for row in strict]
     right_identities = [_identity(row) for row in coordinate]
@@ -1368,6 +1370,14 @@ def _reconcile(
             if row_conflicts:
                 conflicts.append({"identity": {"page": identity[0], "address": identity[1], "name": identity[2]}, "fields": row_conflicts, "source_regions": [left["_source"]["region"], right["_source"]["region"]]})
         else:
+            if (len(left_addresses.get(address_key, ())) == 1
+                    and len(right_addresses.get(address_key, ())) == 1
+                    and len(left_names.get(name_key, ())) == 1
+                    and len(right_names.get(name_key, ())) == 1
+                    and (physical_row is None or len(left_physical[physical_row]) == 1)
+                    and right_scopes[match_index][0] is not None
+                    and len(right_physical.get(right_scopes[match_index][0], ())) == 1):
+                description_projections.append((merged, left, right))
             accepted.append(merged)
     accepted.extend(dict(coordinate[index]) for index in sorted(unmatched_right))
     if held_count:
@@ -1397,7 +1407,46 @@ def _reconcile(
             else:
                 usable.append(row)
         accepted = usable
+    usable_ids = {id(row) for row in accepted}
+    for merged, left, right in description_projections:
+        if id(merged) in usable_ids:
+            _project_description_cell(merged, left, right, source_sha256)
     return accepted, quarantined, conflicts
+
+
+def _project_description_cell(
+    merged: dict[str, Any], left: Mapping[str, Any], right: Mapping[str, Any],
+    source_sha256: str | None,
+) -> None:
+    """Correct an accepted adjacent-cell join, retaining both original claims."""
+    if not source_sha256 or _identity(left) != _identity(right):
+        return
+    description, access = right.get("description"), right.get("access")
+    if (not isinstance(description, str) or not isinstance(access, str)
+            or access not in {"R", "RW", "W", "RO", "WO", "R/W"}
+            or re.sub(r"\s+", " ", str(left.get("description", "")).strip())
+            != f"{description} {access}"):
+        return
+    claims = [claim for claim in right.get("_claims", [])
+              if claim.get("field") == "description" and claim.get("value") == description
+              and claim.get("body_cell_evidence")]
+    if len(claims) != 1:
+        return
+    proof = claims[0]["body_cell_evidence"]
+    if (proof.get("source_sha256") != source_sha256
+            or proof.get("method") != "same-source-drawn-cells-and-glyphs/v1"
+            or proof.get("source_locator") != claims[0].get("source_locator")
+            or proof.get("source_locator", {}).get("region") != right.get("_source", {}).get("region")
+            or [(cell.get("field"), cell.get("raw_value")) for cell in proof.get("cells", [])]
+            != [("description", description), ("access", access)]):
+        return
+    merged["description"] = description
+    merged["_claims"].append({
+        "parser_id": "pdf-description-cell-projection/v1", "field": "description",
+        "value": description, "previous_value": left["description"],
+        "source_locator": dict(proof["source_locator"]),
+        "body_cell_evidence": proof,
+    })
 
 
 def _ocr_rows(value: Mapping[str, Any], *, source_sha256: str, page_range: tuple[int, int] | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
@@ -1449,6 +1498,27 @@ def _ocr_rows(value: Mapping[str, Any], *, source_sha256: str, page_range: tuple
     return records, rejected, {"name": str(tool["name"]), "version": str(tool["version"])}
 
 
+def _retain_used_body_proofs(
+    records: list[dict[str, Any]], fresh_body_proofs: Mapping[int, Any],
+) -> list[dict[str, Any]]:
+    """Emit fresh geometry only where used, never sanitize imported evidence."""
+    result = []
+    for record in records:
+        claims = []
+        changed = False
+        for claim in record.get("_claims", ()):
+            proof = claim.get("body_cell_evidence")
+            if (proof is not None and fresh_body_proofs.get(id(proof)) is proof
+                    and claim.get("parser_id") != "pdf-description-cell-projection/v1"):
+                claims.append({key: value for key, value in claim.items()
+                               if key != "body_cell_evidence"})
+                changed = True
+            else:
+                claims.append(claim)
+        result.append({**record, "_claims": claims} if changed else record)
+    return result
+
+
 def _envelope(
     path: Path,
     source: bytes,
@@ -1464,12 +1534,17 @@ def _envelope(
     ocr_tool: Mapping[str, str] | None = None,
     ocr_evidence: Mapping[str, Any] | None = None,
     discovery_complete: bool = True,
+    fresh_body_proofs: Mapping[int, Any] | None = None,
 ) -> dict[str, Any]:
     page_selection = {"first_page": page_range[0], "last_page": page_range[1]} if page_range else None
     width_conflicts = [row for row in records if row.get("code") == "pdf-address-width-conflict"]
     if width_conflicts:
         records = [row for row in records if row.get("code") != "pdf-address-width-conflict"]
         quarantined = [*quarantined, *width_conflicts]
+    # All quarantine moves precede retention. Only this invocation's freshly
+    # decoded worker proof objects are eligible; old/raw claims remain intact.
+    if fresh_body_proofs:
+        records = _retain_used_body_proofs(records, fresh_body_proofs)
     coverage = _source_coverage(
         records, rejected, quarantined, discovered_pages, discovery_complete
     )
@@ -1594,6 +1669,7 @@ def extract_pdf(
     """Extract a bounded map while retaining independently sourced claims."""
 
     source_sha256 = stable_input_hash(source)
+    fresh_body_proofs: dict[int, Any] = {}
     if ocr_evidence is not None:
         records, rejected, tool = _ocr_rows(ocr_evidence, source_sha256=source_sha256, page_range=page_range)
         code = "pdf-ocr-human-review-required" if records else "pdf-ocr-structured-rows-unavailable"
@@ -1639,7 +1715,7 @@ def extract_pdf(
     discovered = list(range(page_range[0], page_range[1] + 1)) if page_range else discover_register_pages(text, first_page=first_page)
     if not discovered:
         try:
-            grid, grid_quarantined, discovered = _recover_grid_rows(path)
+            grid, grid_quarantined, discovered = _recover_grid_rows(path, fresh_body_proofs=fresh_body_proofs)
         except PdfTableExtractionError as exc:
             return _hold_result(path, source, "pdf-register-pages-unavailable", f"No likely register pages were discovered and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
         return _envelope(
@@ -1653,6 +1729,7 @@ def extract_pdf(
             capability=capability,
             discovered_pages=discovered,
             quarantined=grid_quarantined,
+            fresh_body_proofs=fresh_body_proofs,
         )
     page_filter = set(discovered)
     strict, rejected = parse_layout_rows(text, first_page=first_page, pages=page_filter)
@@ -1712,20 +1789,24 @@ def extract_pdf(
     coordinate = [record for record in coordinate if record["_source"]["page"] in page_filter]
     if not coordinate and not strict:
         try:
-            grid, grid_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered)
+            grid, grid_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered,
+                                                                 fresh_body_proofs=fresh_body_proofs)
         except PdfTableExtractionError as exc:
             return _hold_result(path, source, "pdf-structured-rows-unavailable", f"Text and coordinate parsing produced no rows, and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
         findings.append(_GRID_RECOVERY_FINDING)
-        return _envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered, quarantined=grid_quarantined)
+        return _envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered, quarantined=grid_quarantined,
+                         fresh_body_proofs=fresh_body_proofs)
     records, quarantined, conflicts = _reconcile(strict, coordinate)
     try:
-        grid, grid_source_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered)
+        grid, grid_source_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered,
+                                                                     fresh_body_proofs=fresh_body_proofs)
     except PdfTableExtractionError:
         grid = []
         grid_source_quarantined = []
     quarantined.extend(grid_source_quarantined)
     if grid:
-        records, quarantined, grid_conflicts = _reconcile(records, grid, quarantined_records=quarantined)
+        records, quarantined, grid_conflicts = _reconcile(records, grid, quarantined_records=quarantined,
+                                                       source_sha256=stable_input_hash(source))
         conflicts.extend(grid_conflicts)
         findings.append(_GRID_RECOVERY_FINDING)
     holds: list[dict[str, Any]] = []
@@ -1737,7 +1818,8 @@ def extract_pdf(
             "message": "Resolve the listed material field conflicts as one localized decision; unaffected rows remain available.",
             "conflicts": conflicts,
         })
-    return _envelope(path, source, records, rejected, findings, holds, page_range, capability=capability, discovered_pages=discovered, quarantined=quarantined)
+    return _envelope(path, source, records, rejected, findings, holds, page_range, capability=capability, discovered_pages=discovered, quarantined=quarantined,
+                     fresh_body_proofs=fresh_body_proofs)
 
 
 def _extract_large_pdf_in_chunks(
@@ -1749,6 +1831,7 @@ def _extract_large_pdf_in_chunks(
 ) -> dict[str, Any]:
     """Recover an oversized manual without requiring manual page selection."""
 
+    fresh_body_proofs: dict[int, Any] = {}
     records: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
@@ -1834,6 +1917,7 @@ def _extract_large_pdf_in_chunks(
                     path,
                     pages=chunk_pages,
                     timeout_seconds=min(60, remaining),
+                    fresh_body_proofs=fresh_body_proofs,
                 )
             except PdfTableExtractionError:
                 grid = []
@@ -1841,7 +1925,8 @@ def _extract_large_pdf_in_chunks(
             chunk_quarantined.extend(grid_source_quarantined)
             if grid:
                 chunk_records, chunk_quarantined, grid_conflicts = _reconcile(
-                    chunk_records, grid, quarantined_records=chunk_quarantined
+                    chunk_records, grid, quarantined_records=chunk_quarantined,
+                    source_sha256=stable_input_hash(source),
                 )
                 chunk_conflicts.extend(grid_conflicts)
             records.extend(chunk_records)
@@ -1909,6 +1994,7 @@ def _extract_large_pdf_in_chunks(
         discovered_pages=sorted(set(discovered_pages)),
         quarantined=quarantined,
         discovery_complete=scan_complete,
+        fresh_body_proofs=fresh_body_proofs,
     )
 
 
@@ -1921,12 +2007,21 @@ def _recover_grid_rows(
     *,
     pages: Sequence[int] | None = None,
     timeout_seconds: int = 60,
+    fresh_body_proofs: dict[int, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[int]]:
     evidence = extract_pdf_table_evidence(
         path, pages=pages, timeout_seconds=timeout_seconds
     )
     records = evidence["records"]
     quarantined = evidence["quarantined_records"]
+    if fresh_body_proofs is not None:
+        for row in chain(records, quarantined):
+            for claim in row.get("_claims", ()):
+                proof = claim.get("body_cell_evidence")
+                if isinstance(proof, Mapping):
+                    # Hold references as well as IDs so identities cannot be
+                    # recycled; this registry never comes from source metadata.
+                    fresh_body_proofs[id(proof)] = proof
     if not records and not quarantined:
         raise PdfTableExtractionError("table geometry contained no register rows")
     discovered = sorted(
@@ -1955,6 +2050,7 @@ def _recover_grid_or(
     under ``-layout`` still produce candidates when ``-bbox-layout`` blows up.
     """
 
+    fresh_body_proofs: dict[int, Any] = {}
     pages = (
         list(range(page_range[0], page_range[1] + 1))
         if page_range is not None
@@ -1978,7 +2074,8 @@ def _recover_grid_or(
         ),
     }
     try:
-        grid, quarantined, discovered = _recover_grid_rows(path, pages=pages)
+        grid, quarantined, discovered = _recover_grid_rows(path, pages=pages,
+                                                         fresh_body_proofs=fresh_body_proofs)
     except PdfTableExtractionError:
         if keep_rows:
             return _envelope(
@@ -2006,6 +2103,7 @@ def _recover_grid_or(
             capability=capability,
             discovered_pages=kept_pages or discovered,
             quarantined=quarantined,
+            fresh_body_proofs=fresh_body_proofs,
         )
     return _envelope(
         path,
@@ -2018,6 +2116,7 @@ def _recover_grid_or(
         capability=capability,
         discovered_pages=discovered,
         quarantined=quarantined,
+        fresh_body_proofs=fresh_body_proofs,
     )
 
 
