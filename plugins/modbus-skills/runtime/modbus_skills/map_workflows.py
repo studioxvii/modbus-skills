@@ -6,6 +6,8 @@ import hashlib
 import json
 import math
 import re
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -593,6 +595,67 @@ def _hold(
     if source:
         result["source"] = dict(source)
     return result
+
+
+def _source_scale_fraction(value: Any) -> Fraction | None:
+    """Bounded exact comparison only; never install a computed reciprocal."""
+    if isinstance(value, bool) or value is None or len(str(value)) > 128:
+        return None
+    try:
+        number = Decimal(str(value))
+        if not number.is_finite() or abs(number.as_tuple().exponent) > 1000:
+            return None
+        return Fraction(number)
+    except (InvalidOperation, ValueError, TypeError, OverflowError):
+        return None
+
+
+def _scale_conversion_hold(record: Mapping[str, Any], scale: float | None, source: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Reconcile all source claims, withholding only unsafe executable scales."""
+    claims = [claim for claim in record.get("_claims", ()) if isinstance(claim, Mapping)
+              and claim.get("parser_id") == "structured.xlsx-scale/v1" and claim.get("field") == "scale"]
+    if not claims:
+        return None
+    expected: set[Fraction] = set()
+    unresolved = False
+    possible_scope = False
+    for claim in claims:
+        notes = claim.get("conversion_notes")
+        if not isinstance(notes, list) or not notes:
+            unresolved = True
+            continue
+        for note in notes:
+            if not isinstance(note, Mapping):
+                unresolved = True
+                continue
+            possible_scope |= note.get("binding") == "possible-workbook-scale-scope"
+            if note.get("scope") != "stated":
+                unresolved = True
+            clauses = note.get("clauses")
+            if not isinstance(clauses, list) or not clauses:
+                unresolved = True
+                continue
+            for clause in clauses:
+                if not isinstance(clause, Mapping):
+                    unresolved = True
+                    continue
+                operand = _source_scale_fraction(clause.get("operand"))
+                operator = clause.get("operator")
+                if operand is None or operator not in {"multiply", "divide"} or (operator == "divide" and not operand):
+                    unresolved = True
+                else:
+                    expected.add(1 / operand if operator == "divide" else operand)
+    actual = _source_scale_fraction(record.get("scale"))
+    if not unresolved and len(expected) == 1 and actual in expected and scale is not None:
+        return None
+    return {
+        **_hold("source.scale-conversion-unresolved",
+                "Source conversion direction or scope is unresolved or conflicting; engineering scaling is withheld. "
+                "Provide one corrected source rule for this grouped issue; possible scope does not mean every raw factor is wrong.",
+                "scale", source=source),
+        "details": {"scale_evidence": [dict(claim) for claim in claims],
+                    "possible_scope": possible_scope},
+    }
 
 
 def _assumption(code: str, message: str, **details: Any) -> dict[str, Any]:
@@ -1258,6 +1321,14 @@ def _normalize_one(
     )
 
     scale_raw, scale_source = _get(record, defaults, "scale")
+    if record.get("scale") in (None, "") and any(
+        isinstance(claim, Mapping) and claim.get("parser_id") == "structured.xlsx-scale/v1"
+        and claim.get("field") == "scale" and claim.get("scale_source") == "absent-column"
+        for claim in record.get("_claims", ())
+    ):
+        # Bound source conversion evidence is unresolved, not permission to
+        # manufacture a source Scale cell from a caller's workflow default.
+        scale_raw, scale_source = None, None
     engineering_offset_raw, engineering_offset_source = _get(record, defaults, "engineering_offset", "offset")
     numeric_values: dict[str, float | None] = {}
     for field, raw_value, field_source in (
@@ -1287,6 +1358,13 @@ def _normalize_one(
             numeric_values[field] = None
             holds.append(_hold(f"point.{field.replace('_', '-')}-invalid", str(exc), field, source=source, severity="error"))
         evidence.append({"field": field, "source_field": field_source, "source_value": raw_value, "value": numeric_values[field]})
+    scale_hold = _scale_conversion_hold(record, numeric_values["scale"], source)
+    if scale_hold is not None:
+        numeric_values["scale"] = None
+        holds.append(scale_hold)
+        for entry in evidence:
+            if entry.get("field") == "scale":
+                entry["value"] = None
     if (
         numeric_values["minimum"] is not None
         and numeric_values["maximum"] is not None

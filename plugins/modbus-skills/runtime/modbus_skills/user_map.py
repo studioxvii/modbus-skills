@@ -344,6 +344,37 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
             lines.append(f"- {hold.get('code', 'UNRESOLVED')}: {hold.get('message', hold.get('reason', 'Review required'))}{suffix}")
     else:
         lines.append("- None")
+    scale_notes: dict[str, dict[str, Any]] = {}
+    scale_subjects: set[str] = set()
+    possible_scale_scope = False
+    missing_scale_column = False
+    for hold in user_map["holds"]:
+        if hold.get("code") != "source.scale-conversion-unresolved":
+            continue
+        scale_subjects.update(hold.get("subject_ids", ()))
+        details = hold.get("details", {})
+        possible_scale_scope |= details.get("possible_scope", False) is True
+        for evidence in details.get("scale_evidence", ()):
+            missing_scale_column |= evidence.get("scale_source") == "absent-column"
+            for note in evidence.get("conversion_notes", ()):
+                key = stable_input_hash({"literal": note.get("literal"), "scope": note.get("scope")})
+                grouped_note = scale_notes.setdefault(key, {"literal": note.get("literal"), "locations": {}})
+                locator = note.get("source_locator", {})
+                grouped_note["locations"][stable_input_hash(locator)] = locator
+    if scale_notes:
+        lines.extend(["", "## Unresolved source scaling", "",
+                      f"Engineering scaling is withheld for {len(scale_subjects)} selected points. "
+                      + ("The possible workbook scope is conservative; this does not mean every raw factor is wrong. "
+                         if possible_scale_scope else "")
+                      + "Resolve the shared source rule once, not point by point. "
+                      + ("A bound conversion statement has no Scale column; no source cell is invented. "
+                         if missing_scale_column else "")
+                      + "Available Scale-cell evidence and affected identities are retained in [the JSON map](user-map.json).", ""])
+        for key in sorted(scale_notes):
+            note = scale_notes[key]
+            locations = [f"{locator.get('sheet', '')}: row {locator.get('row', '')}, column {locator.get('column', '')}"
+                         for _, locator in sorted(note["locations"].items())]
+            lines.append(f"- {_note_markdown(str(note.get('literal', '')))} ({_note_markdown('; '.join(locations))})")
     lines.extend(["", "## Exclusions and evidence annex"])
     if user_map["exception_annex"]:
         annex_groups: list[tuple[Mapping[str, Any], int]] = []
@@ -353,8 +384,12 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
             # semantic differences and every original record in the JSON map.
             key = None
             if item.get("kind") == "unselected-hold":
-                key = stable_input_hash({k: v for k, v in item.items()
-                                         if k not in {"source", "point_ids", "subject_ids"}})
+                excluded_keys = {"source", "point_ids", "subject_ids"}
+                if item.get("code") == "source.scale-conversion-unresolved":
+                    # Full per-row scale/note evidence remains in the JSON
+                    # annex; it must not turn one shared issue into N prose rows.
+                    excluded_keys.add("details")
+                key = stable_input_hash({k: v for k, v in item.items() if k not in excluded_keys})
             if key is not None and key in group_indexes:
                 index = group_indexes[key]
                 first, count = annex_groups[index]
@@ -623,6 +658,12 @@ def _group_holds(holds: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
             },
         )
         group["_occurrences"] += 1
+        if code == "source.scale-conversion-unresolved" and isinstance(raw.get("details"), Mapping):
+            details = group.setdefault("details", {"scale_evidence": [], "possible_scope": False})
+            details["possible_scope"] |= raw["details"].get("possible_scope") is True
+            for evidence in raw["details"].get("scale_evidence", ()):
+                if isinstance(evidence, Mapping):
+                    details["scale_evidence"].append({**evidence, "point_ids": list(raw.get("point_ids", ()))})
         subject_ids = group["_subject_ids"]
         for value in raw.get("point_ids", ()):
             subject_ids.add(str(value))
