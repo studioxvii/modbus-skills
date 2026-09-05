@@ -38,6 +38,11 @@ mode enables only the configured documents for the bounded interval.
 
 ## `witte-v12-xml`
 
-Generate disabled XML read documents for Witte version 12 or later. Do not store connection settings.
+Generate disabled, human-readable XML read documents using Witte's published
+version-12 structure and the native `.mbp` filename extension. Do not store
+connection settings. Modbus Poll 13.2.1 accepts the `.mbp` document but does not
+open byte-identical content named `.xml`; verify other installed versions separately.
 
-Neither Witte profile creates opaque `.mbp` or `.mbw` project data. The XML profile is not interchangeable with Witte desktop automation.
+The XML `.mbp` content is documented text, not an invented opaque binary. Neither
+profile synthesizes an opaque `.mbw` workspace. The XML profile is not
+interchangeable with Witte desktop automation.

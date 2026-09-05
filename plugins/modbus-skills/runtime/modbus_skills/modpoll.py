@@ -136,7 +136,8 @@ def export_modpoll(
     format.  ``proconx-cli`` produces one bounded ``modpoll`` command per
     compiled read block for the proconX FieldTalk CLI.  ``witte-desktop``
     produces an auditable read plan and a PowerShell automation script.  The
-    Witte application, not this exporter, creates any native ``.mbp`` files.
+    Witte application creates desktop-profile native files. The separate XML
+    profile emits documented human-readable XML using the native ``.mbp`` suffix.
     """
 
     mode = normalize_mode(mode)
@@ -1116,7 +1117,7 @@ def _export_witte_v12_xml(
         enumerate(blocks), key=lambda item: block_id(item[1], item[0])
     ):
         identifier = block_id(block, index)
-        filename = safe_slug(identifier, fallback=f"read-{index + 1:04d}") + ".xml"
+        filename = safe_slug(identifier, fallback=f"read-{index + 1:04d}") + ".mbp"
         path = f"modpoll/witte-v12-xml/{filename}"
         xml_text = _witte_v12_xml(block)
         validation_findings = validate_witte_v12_xml(xml_text)
@@ -1640,7 +1641,10 @@ def _witte_v12_readme(mode: str) -> str:
     return f"""# Witte Modbus Poll v12 XML {mode.title()} Documents
 
 These files follow the human-readable XML structure that Witte publishes for
-Modbus Poll version 12. Each XML file represents one compiled read request.
+Modbus Poll version 12. Each human-readable XML `.mbp` file represents one
+compiled read request. Open the `.mbp` file in Modbus Poll; do not rename it to
+`.xml`. Native Modbus Poll 13.2.1 accepts these bytes with `.mbp` but does not
+open the same document with `.xml`. Other versions need their own native check.
 The document uses base-zero protocol offsets and is disabled by default.
 
 This target is BETA. Native Modpoll verification was not run, so native verification is unavailable.
@@ -1652,7 +1656,8 @@ The files do not store a connection endpoint. Configure the reviewed Modbus
 TCP or serial connection in Modbus Poll. Inspect the unit ID, function, address,
 quantity, and scan rate in each XML file before you open or enable it.
 
-Only functions 01 through 04 are present. No opaque `.mbp` or `.mbw` content is
-generated. Native application acceptance still requires a Windows test with
+Only functions 01 through 04 are present. The `.mbp` content is documented XML,
+not an invented binary project; no `.mbw` workspace is generated.
+Native application acceptance still requires a Windows test with
 the intended Modbus Poll version.
 """
