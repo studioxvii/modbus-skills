@@ -124,7 +124,25 @@ integrity problem. Do not repair its state or hashes, silently start over, or us
 stale files as completed evidence. A valid result provides `case_id`, `case_hash`,
 `next_action`, and `active_packet` for the exact current checkpoint.
 
-For a selection reply, construct the following JSON using that valid inspection.
+For the usual single grouped selection packet, use the preparation helper to avoid
+manually copying its source and input hashes. Supply the exact inspected case hash,
+only offered IDs the user actually chose, and a reason describing that choice:
+
+```bash
+python3 <skill-dir>/scripts/prepare_selection.py <case-directory> \
+  --case-hash <inspection.case_hash> --include <chosen-subject-id> \
+  --reason "<actual user choice>" --output selection-reply.json
+python3 <skill-dir>/scripts/run.py --case <case-directory> --resume selection-reply.json
+```
+
+Repeat `--include` for additional chosen IDs. Use `--exclude-all` instead only for
+an explicit choice to exclude every offered candidate. Choose a new reply filename
+outside the case; the helper will not overwrite an existing file. It verifies the
+case again and prepares the typed reply without changing the checkpoint. The normal
+resume command performs the transition and revalidates the bindings. Missing choices,
+unoffered IDs, stale cases and other packet shapes are rejected, never filled in.
+
+For other supported typed replies, construct the following JSON using that valid inspection.
 Copy packet bindings verbatim; replace the decision's selected IDs with only the
 offered IDs that the user actually chose. `reason` describes that choice and
 `evidence_refs` uses the packet's supplied references. This is a shape example,
