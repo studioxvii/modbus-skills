@@ -97,6 +97,46 @@ class CompilerError(ValueError):
     """Raised when a compiler request or persisted transition is unsafe."""
 
 
+def inspect_compile_case(case_root: str | Path) -> dict[str, Any]:
+    """Validate a durable case and its indexed bytes without writing or resuming."""
+
+    root = Path(case_root)
+    if root.name == "case.json":
+        root = root.parent
+    _reject_symlink(root)
+    _reject_symlink(root / "case.json")
+    try:
+        case = _read_case(root)
+    except (KeyError, TypeError) as exc:
+        raise CompilerError("compile case is malformed") from exc
+    for name, record in case["artifacts"].items():
+        _reject_symlink(root / record["path"])
+        target = _contained_path(root, record["path"])
+        if target.is_symlink() or not target.is_file():
+            raise CompilerError(f"case artifact is missing or unsafe: {name}")
+        if stable_input_hash(target.read_bytes()) != record["sha256"]:
+            raise CompilerError(f"compile case {name} artifact hash is stale")
+    result = _read_indexed_json(root, case, "compile_result")
+    if (result.get("schema_version") != COMPILE_RESULT_SCHEMA_VERSION
+            or not isinstance(result.get("next_action"), Mapping)
+            or result.get("case_id") != case["case_id"] or result.get("state") != case["state"]):
+        raise CompilerError("compile result does not match the persisted case")
+    packet = case.get("active_packet")
+    if packet is not None and "selection_packet" in case["artifacts"]:
+        if packet != _read_indexed_json(root, case, "selection_packet"):
+            raise CompilerError("active packet does not match its indexed artifact")
+    return {
+        "schema_version": "modbus-compile-inspection/v1",
+        "status": "valid",
+        "case_id": case["case_id"],
+        "case_hash": stable_input_hash(case),
+        "state": case["state"],
+        "verified_artifact_count": len(case["artifacts"]),
+        "next_action": result["next_action"],
+        "active_packet": packet,
+    }
+
+
 def compile_user_map(
     request: Mapping[str, Any] | None,
     case_root: str | Path,
@@ -1123,4 +1163,5 @@ __all__ = [
     "COMPILER_VERSION",
     "CompilerError",
     "compile_user_map",
+    "inspect_compile_case",
 ]

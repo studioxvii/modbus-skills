@@ -25,6 +25,10 @@ Follow `../../references/interaction-contract.md`.
 6. When the result needs a decision, present its complete grouped packet once, encode
    the reply in a new request, and rerun the same case. Do not invent fields or bypass
    case, source, packet, or artifact hashes.
+   On resume, run `scripts/inspect_case.py <case-directory>` first. It verifies the
+   checkpoint and every indexed artifact without changing files, and returns the
+   current case hash and packet. Use the resume example in `references/request.md`;
+   implementation-code inspection is unnecessary for a normal supported request.
 7. Continue this skill automatically for safe internal stages. When a typed decision,
    physical read, or target choice is required, recommend continuing this skill with
    the exact case and input. Do not expose internal specialist-stage choreography.

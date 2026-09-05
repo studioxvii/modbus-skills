@@ -31,6 +31,12 @@ Use `pdf-extraction.json` from that directory to obtain exact point names, stabl
 and evidence references. For structured sources, use the equivalent `parse-map`
 entrypoint and its candidate-map output.
 
+For CSV, JSON, or XLSX, the command is
+`python3 <plugin-dir>/skills/parse-map/scripts/run.py --input <source> --output <inspection.json>`.
+The documented request below is sufficient for supported input: inspecting runtime
+implementation files or recomputing every completed artifact hash is unnecessary.
+The compiler validates requests; the case inspector validates persisted artifacts.
+
 This example shows the complete request shape after source inspection. Replace its
 names and evidence references with values from the actual source:
 
@@ -104,6 +110,47 @@ Include the existing case reference and exactly one typed input requested by its
 decision. Copy the expected case, phase, input, and packet hashes exactly. A plain-
 language reply may be translated into the offered candidate shape, but deterministic
 runtime validation remains authoritative.
+
+First run
+`python3 <skill-dir>/scripts/inspect_case.py <case-directory>`.
+If it returns `status: error`, preserve the case and its outputs and report the
+integrity problem. Do not repair its state or hashes, silently start over, or use
+stale files as completed evidence. A valid result provides `case_id`, `case_hash`,
+`next_action`, and `active_packet` for the exact current checkpoint.
+
+For a selection reply, construct the following JSON using that valid inspection.
+Copy packet bindings verbatim; replace the decision's selected IDs with only the
+offered IDs that the user actually chose. `reason` describes that choice and
+`evidence_refs` uses the packet's supplied references. This is a shape example,
+not permission to select any point:
+
+```json
+{
+  "schema_version": "modbus-compile-resume/v1",
+  "case_id": "<inspection.case_id>",
+  "case_hash": "<inspection.case_hash>",
+  "action": "provide-selection-decision",
+  "decision_candidate": {
+    "schema_version": "modbus-compiler-decision-candidate/v1",
+    "case_id": "<packet.case_id>",
+    "phase": "<packet.phase>",
+    "packet_id": "<packet.packet_id>",
+    "source_hash": "<packet.source_hash>",
+    "input_hashes": {"<copy every key>": "<copy its hash>"},
+    "decisions": [{
+      "decision_id": "<offered decision_id>",
+      "disposition": "include-specified",
+      "selected_subject_ids": ["<user-chosen offered subject_id>"],
+      "reason": "<actual user choice>",
+      "evidence_refs": ["<offered evidence reference>"]
+    }]
+  }
+}
+```
+
+Run `python3 <skill-dir>/scripts/run.py --case <case-directory> --resume <reply.json>`.
+Do not replay source parsing on resume. Inspect the resulting receipt and user-map
+bundle; the compiler validates the decision and the indexed input artifacts.
 
 `provide-corrected-source` is not a resume. Copy the original request, replace the
 source path or typed source data, choose a new empty case directory, and start a new
