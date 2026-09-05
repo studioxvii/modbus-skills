@@ -800,6 +800,12 @@ class CodexSessionAdapter(SessionAdapter):
             raise SessionError("codex-output-budget-exceeded")
         if "rpc" in session.state:
             raise SessionError("codex-session-already-started")
+        # A cold thread has no prior dialogue naming the saved work. Supply
+        # its location, not checkpoint contents, decisions or grading facts.
+        case_context = ""
+        if session.durable_case is not None:
+            relative_case = session.durable_case.relative_to(session.work).as_posix()
+            case_context = f" Saved case directory: {json.dumps(relative_case)}."
         python_reads = worker_python_reads()
         rpc = CodexRpc(shutil.which("codex"), max_bytes=remaining_bytes)
         session.state["rpc"] = rpc
@@ -827,6 +833,7 @@ class CodexSessionAdapter(SessionAdapter):
                     f"Plugin: {session.plugin_root}. Fixtures: {session.fixtures}. "
                     f"Available test Python interpreter: {sys.executable}. Use this existing executable for Python wrappers; "
                     "its installed runtime libraries are readable, not writable. Do not install dependencies."
+                    + case_context
                 ),
             }, deadline=session.state["deadline"])
             session.state["thread_id"] = result["thread"]["id"]
