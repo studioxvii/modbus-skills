@@ -113,6 +113,10 @@ def run_campaign(
                 )
                 plugin_hash = plugin_hash or trial.get("plugin_hash")
                 trials.append(trial)
+                # A later crash must not erase completed trials or look like a
+                # complete campaign. Coverage checks keep checkpoints incomplete.
+                write_report(output, build_report(campaign=campaign, trials=trials,
+                    mode=mode, adapter=adapter.name, plugin_hash=plugin_hash))
     report = build_report(
         campaign=campaign,
         trials=trials,

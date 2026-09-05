@@ -703,7 +703,11 @@ class CodexSessionAdapter(SessionAdapter):
                 continue
             if path.name == "compile-result.json":
                 session.events.append({"kind": "compiler-state", "state": payload.get("state")})
-            for hold in payload.get("holds", []):
+            holds = payload.get("holds", [])
+            # CLI receipts carry counts; evidence artifacts carry arrays.
+            if not isinstance(holds, list):
+                holds = []
+            for hold in holds:
                 if isinstance(hold, dict):
                     session.events.append({"kind": "hold", "code": hold.get("code")})
             if payload.get("schema_version") == "modbus-map-diff/v1":

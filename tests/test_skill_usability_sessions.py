@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,15 @@ from skill_usability.sessions import (  # noqa: E402
 
 
 class SkillUsabilitySessionTests(unittest.TestCase):
+    def test_receipt_hold_count_is_not_an_evidence_array(self):
+        scenario = load_campaign()["loaded_scenarios"][0]
+        with tempfile.TemporaryDirectory() as temporary:
+            session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+            (session.work / "receipt.json").write_text('{"holds": 0}')
+            (session.work / "evidence.json").write_text(json.dumps({"holds": [{"code": "actual-hold"}]}))
+            CodexSessionAdapter()._observe_artifacts(session)
+            self.assertEqual(["actual-hold"], [event["code"] for event in session.events if event["kind"] == "hold"])
+
     def test_two_fake_trials_get_distinct_workspaces_and_session_ids(self) -> None:
         campaign = load_campaign()
         scenario = campaign["loaded_scenarios"][0]

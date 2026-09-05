@@ -390,10 +390,10 @@ def run_map(map_entry: dict[str, Any], evals: dict[str, Any]) -> dict[str, Any]:
             out_dir = work / "pdf-extract"
             out_dir.mkdir(parents=True, exist_ok=True)
             page_cap = int(evals.get("budgets", {}).get("pdf_page_cap", 40))
-            pages_used = f"1-{page_cap}"
+            pages_used = "auto-discovery"
             code, text = run_cli_capture(
                 "extract-pdf-map",
-                ["--input", str(source), "--output", str(out_dir), "--pages", pages_used],
+                ["--input", str(source), "--output", str(out_dir)],
             )
 
             def _load_records(directory: Path) -> tuple[Path | None, int]:
@@ -419,26 +419,9 @@ def run_map(map_entry: dict[str, Any], evals: dict[str, Any]) -> dict[str, Any]:
                 return found, count
 
             candidate_path, records = _load_records(out_dir)
-            # The bounded page cap is a harness budget guard, not a real user
-            # constraint (extract-pdf-map's own contract only bounds pages when
-            # the caller already knows a bounded range). Manuals with register
-            # tables beyond the capped range legitimately yield zero candidates
-            # here even though the skill can find them via its own unbounded
-            # auto-discovery — retry once, uncapped, before recording a fail so
-            # the harness matches real skill usage instead of an artificial cap.
-            if code == 0 and records == 0:
-                out_dir_full = work / "pdf-extract-uncapped"
-                out_dir_full.mkdir(parents=True, exist_ok=True)
-                code_full, text_full = run_cli_capture(
-                    "extract-pdf-map",
-                    ["--input", str(source), "--output", str(out_dir_full)],
-                )
-                candidate_path_full, records_full = _load_records(out_dir_full)
-                if code_full == 0 and records_full > records:
-                    code, text = code_full, text_full
-                    candidate_path, records = candidate_path_full, records_full
-                    pages_used = "uncapped-retry"
-                    compile_pages = None
+            # Let the runtime's bounded discovery inspect the whole source.
+            # An early nonempty table must not hide another table after page 40.
+            # Do not repeat identical discovery when no rows were found.
             # Scanned manuals: build local OCR evidence and retry once.
             if code == 0 and records == 0:
                 ocr_last = min(page_cap, 20)
@@ -476,9 +459,6 @@ def run_map(map_entry: dict[str, Any], evals: dict[str, Any]) -> dict[str, Any]:
                             pages_used = f"ocr-{ocr_pages}"
                             compile_pages = ocr_pages
                             compile_ocr_evidence = ocr_path
-            elif code == 0 and records > 0 and pages_used.startswith("1-"):
-                # Bound compile re-extract to the same successful intake window.
-                compile_pages = pages_used
             # PDF intake can legally yield 0 with a hold — pass if CLI succeeded
             receipt["steps"].append(
                 step(

@@ -19,6 +19,18 @@ from skill_usability.sessions import CodexSessionAdapter  # noqa: E402
 
 
 class SkillUsabilityReportingTests(unittest.TestCase):
+    def test_completed_trial_checkpoint_survives_later_runner_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "out"
+            first = {"scenario_id": "01-novice-routing", "repetition": 1, "status": "passed"}
+            with mock.patch("run_skill_usability_tests.run_trial", side_effect=[first, RuntimeError("unexpected runner failure")]):
+                with self.assertRaises(RuntimeError):
+                    run_campaign(mode="deterministic", output=output)
+            report = json.loads((output / "skill-usability-report.json").read_text())
+            self.assertEqual("inconclusive", report["status"])
+            self.assertEqual(1, len(report["trials"]))
+            self.assertIn("campaign-coverage-incomplete", report["issue_codes"])
+
     def test_runner_deterministic_mode_passes_without_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "out"
