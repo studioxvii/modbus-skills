@@ -1230,6 +1230,29 @@ def _constraint_array(path: str | None, label: str) -> list[Mapping[str, Any]]:
     return [dict(item) for item in value]
 
 
+def _plan_finding_identity(item: Mapping[str, Any]) -> tuple[Any, Any, tuple[str, ...]]:
+    point_ids = item.get("point_ids", ())
+    return (item.get("code"), item.get("field"),
+            tuple(str(value) for value in point_ids)
+            if isinstance(point_ids, Sequence) and not isinstance(point_ids, (str, bytes, bytearray)) else ())
+
+
+def _append_plan_source_holds(findings: list[Any], source_holds: Sequence[Any]) -> None:
+    # Index once, lazily: preserve the previous no-op behavior when no blocking
+    # mapping is supplied, including pre-existing unusual finding values.
+    existing_keys = None
+    for hold in source_holds:
+        if not isinstance(hold, Mapping) or hold.get("blocking", True) is False:
+            continue
+        candidate = dict(hold)
+        key = _plan_finding_identity(candidate)
+        if existing_keys is None:
+            existing_keys = {_plan_finding_identity(item) for item in findings if isinstance(item, Mapping)}
+        if key not in existing_keys:
+            findings.append(candidate)
+            existing_keys.add(key)
+
+
 def _handle_plan(args: argparse.Namespace) -> dict[str, Any]:
     canonical = _read_json(args.input)
     max_quantities = _max_quantities(args.max_quantity)
@@ -1289,31 +1312,7 @@ def _handle_plan(args: argparse.Namespace) -> dict[str, Any]:
     }
     raw_result["planning_options"] = planning_options
     findings = list(raw_result.get("findings", ()))
-    for hold in source_holds:
-        if isinstance(hold, Mapping) and hold.get("blocking", True) is not False:
-            candidate = dict(hold)
-            key = (
-                candidate.get("code"),
-                candidate.get("field"),
-                tuple(str(value) for value in candidate.get("point_ids", ()))
-                if isinstance(candidate.get("point_ids", ()), Sequence)
-                and not isinstance(candidate.get("point_ids", ()), (str, bytes, bytearray))
-                else (),
-            )
-            existing_keys = {
-                (
-                    item.get("code"),
-                    item.get("field"),
-                    tuple(str(value) for value in item.get("point_ids", ()))
-                    if isinstance(item.get("point_ids", ()), Sequence)
-                    and not isinstance(item.get("point_ids", ()), (str, bytes, bytearray))
-                    else (),
-                )
-                for item in findings
-                if isinstance(item, Mapping)
-            }
-            if key not in existing_keys:
-                findings.append(candidate)
+    _append_plan_source_holds(findings, source_holds)
     raw_result["findings"] = findings
     raw_result["has_holds"] = bool(_blocking_findings(findings))
     raw_result["status"] = "held" if raw_result["has_holds"] else "planned"
