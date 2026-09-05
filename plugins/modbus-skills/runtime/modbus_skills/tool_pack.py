@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
 from io import BytesIO
 from pathlib import Path
 import re
-from typing import Any, Mapping, Sequence
+from threading import Lock
+from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from .artifacts import artifact_envelope
@@ -39,6 +43,9 @@ TOOL_PACK_MANIFEST_SCHEMA_VERSION = "modbus-tool-pack-manifest/v1"
 # Backward-compatible import name. Workflow outputs use modbus-tool-pack/v1.
 TOOL_PACK_SCHEMA_VERSION = TOOL_PACK_MANIFEST_SCHEMA_VERSION
 SUPPORTED_TARGETS = ("node-red", "modpoll", "modscan")
+_ARTIFACT_SCAN_CACHE_LIMIT = 128
+_ARTIFACT_SCAN_CACHE: OrderedDict[tuple[bytes, int], bool] = OrderedDict()
+_ARTIFACT_SCAN_LOCK = Lock()
 _SENSITIVE_SINGLE_KEY_PARTS = frozenset(
     {"password", "passwd", "token", "secret", "credential", "credentials"}
 )
@@ -787,6 +794,8 @@ def _find_embedded_local_path_fields(value: Any, *, path: str) -> list[str]:
 
 
 def _contains_embedded_local_path(value: str) -> bool:
+    if type(value) is str and "/" not in value and "\\" not in value:
+        return False
     # HTTP route paths are intentionally slash-prefixed, but they are not
     # local filesystem paths. Remove only the explicit route forms before
     # applying the stricter local-path checks below.
@@ -802,19 +811,41 @@ def _contains_embedded_local_path(value: str) -> bool:
     )
 
 
+def _scan_artifact_content(content: bytes) -> bool:
+    text = content.decode("utf-8", errors="ignore")
+    return (
+        _PEM_KEY_BLOCK.search(text.upper()) is not None
+        or _SENSITIVE_VALUE.search(text) is not None
+        or _contains_embedded_local_path(text)
+    )
+
+
+def _artifact_content_is_unsafe(content: bytes) -> bool:
+    # Construction, manifest validation, and ZIP validation inspect the same
+    # immutable bytes repeatedly. Recheck their content hash every time, but
+    # retain only a bounded digest/verdict cache, never the private text itself.
+    # Mutable or custom byte-like objects always take the original scan path.
+    if type(content) is not bytes:
+        return _scan_artifact_content(content)
+    key = (hashlib.sha256(content).digest(), len(content))
+    with _ARTIFACT_SCAN_LOCK:
+        cached = _ARTIFACT_SCAN_CACHE.get(key)
+        if cached is not None:
+            _ARTIFACT_SCAN_CACHE.move_to_end(key)
+            return cached
+    unsafe = _scan_artifact_content(content)
+    with _ARTIFACT_SCAN_LOCK:
+        _ARTIFACT_SCAN_CACHE[key] = unsafe
+        _ARTIFACT_SCAN_CACHE.move_to_end(key)
+        while len(_ARTIFACT_SCAN_CACHE) > _ARTIFACT_SCAN_CACHE_LIMIT:
+            _ARTIFACT_SCAN_CACHE.popitem(last=False)
+    return unsafe
+
+
 def _find_unsafe_artifact_paths(artifacts: Sequence[Artifact]) -> list[str]:
     """Return paths of emitted text artifacts that violate export safety."""
-
-    findings: list[str] = []
-    for artifact in artifacts:
-        text = artifact.content.decode("utf-8", errors="ignore")
-        if (
-            _PEM_KEY_BLOCK.search(text.upper()) is not None
-            or _SENSITIVE_VALUE.search(text) is not None
-            or _contains_embedded_local_path(text)
-        ):
-            findings.append(artifact.path)
-    return sorted(set(findings))
+    return sorted({artifact.path for artifact in artifacts
+                   if _artifact_content_is_unsafe(artifact.content)})
 
 
 def _is_absolute_local_path(value: str) -> bool:
