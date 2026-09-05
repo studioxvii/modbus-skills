@@ -449,7 +449,7 @@
   },
   "next_actions": [
     "Run python3 scripts/setup_oem_corpus_files.py to refresh private/oem-corpus/",
-    "Install Windows VM tools per docs/windows-lab-setup.md",
+    "For authorized native checks, follow plugins/modbus-skills/skills/build-modscan/references/native-verification.md",
     "Later: compile-user-map and Windows import verification (not started)"
   ]
 }

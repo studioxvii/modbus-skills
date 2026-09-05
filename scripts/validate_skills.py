@@ -48,6 +48,12 @@ def parse_openai_yaml(path: Path) -> dict[str, str]:
     return values
 
 
+def missing_skill_references(skill_dir: Path, skill_text: str) -> list[str]:
+    """Check concrete routed references, not example output paths or templates."""
+    paths = re.findall(r"(?:`|\]\()((?:\.\./)*references/[A-Za-z0-9_./-]+\.md)(?:`|\))", skill_text)
+    return sorted({path for path in paths if not (skill_dir / path).is_file()})
+
+
 def validate(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     plugin = root / "plugins" / "modbus-skills"
@@ -122,6 +128,8 @@ def validate(root: Path = ROOT) -> list[str]:
         if frontmatter.get("license") != EXPECTED_LICENSE:
             errors.append(f"{skill_dir.name}: license must be {EXPECTED_LICENSE}")
         skill_text = skill_md.read_text(encoding="utf-8")
+        for reference in missing_skill_references(skill_dir, skill_text):
+            errors.append(f"{skill_dir.name}: missing routed reference {reference}")
         if "TODO" in skill_text:
             errors.append(f"{skill_dir.name}: contains TODO placeholder")
         if "Completion requires" not in skill_text:

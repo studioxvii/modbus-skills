@@ -43,7 +43,9 @@ Tracked metadata lives in `manifest.json`. Tracked messy fixtures live in `synth
 
 ## Windows lab files
 
-See `docs/windows-lab-setup.md` and `tests/windows-lab/campaign.json`.
+See the [ModScan native-verification guidance](../../../plugins/modbus-skills/skills/build-modscan/references/native-verification.md).
+Keep machine-specific VM setup outside the public plugin; it is not required for
+offline source compilation.
 
 ## After setup
 
