@@ -111,6 +111,12 @@ class HandoffEvidenceTests(unittest.TestCase):
         self.assertEqual(2, session.tool_calls)
         self.assertEqual(["fileChange", "dynamicToolCall"], [event["tool_type"] for event in session.events if event["kind"] == "noncommand-tool"])
 
+    def test_explicit_none_is_not_a_recommendation_to_a_nonexistent_skill(self):
+        scenario = load_campaign()["loaded_scenarios"][0]
+        session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=self.root)
+        CodexSessionAdapter()._observe_final(session, "Recommended next: None. This task is outside Modbus.")
+        self.assertIsNone(next(event["recommended_skill"] for event in session.events if event["kind"] == "recommendation"))
+
 
 if __name__ == "__main__":
     unittest.main()

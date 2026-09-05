@@ -214,6 +214,10 @@ def _python_command(item: Mapping[str, Any]) -> list[str]:
     trusted = {Path(sys.executable).resolve(), Path(shutil.which("python3") or sys.executable).resolve()}
     if executable is None or Path(executable).resolve() not in trusted:
         return []
+    if len(command) > 1 and command[1] == "-B":
+        # This interpreter flag only suppresses bytecode writes; it does not
+        # replace the trusted script with arbitrary Python code.
+        command = [command[0], *command[2:]]
     return command
 
 
@@ -917,7 +921,8 @@ class CodexSessionAdapter(SessionAdapter):
         plain = re.sub(r"[*`_]", "", final)
         recommendation = re.search(r"Recommended next:\s*([a-z-]+)", plain, re.IGNORECASE)
         if recommendation:
-            session.events.append({"kind": "recommendation", "recommended_skill": recommendation.group(1)})
+            recommended = recommendation.group(1).lower()
+            session.events.append({"kind": "recommendation", "recommended_skill": None if recommended == "none" else recommended})
         if "?" in final or re.search(r"\b(?:please (?:provide|confirm|choose)|reply (?:with|yes|no)|send me)\b", plain, re.IGNORECASE):
             session.awaiting_user = True
             session.events.append({"kind": "question", "scope": "group", "prompt": final})
