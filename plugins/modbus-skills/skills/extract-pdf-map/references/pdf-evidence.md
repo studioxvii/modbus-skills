@@ -34,8 +34,10 @@
    identity, address, area, width, datatype, or access; keep unaffected rows usable.
 
 The artifact records the extractor receipt, discovered pages and table regions,
-accepted rows, rejected or quarantined rows, and a `source_coverage` summary. Coverage
-is complete when bounded discovery finishes with no rejected or quarantined rows.
+accepted rows, rejected or quarantined rows, and a `source_coverage` summary. A
+`complete` discovery status accounts for detected candidates within the bounded
+scan; it does not certify that every source table or field was found correctly.
+Full-source fidelity requires independent source-row and field reconciliation.
 Independent-parser agreement is reported as evidence, not turned into a mandatory
 approval. Incomplete discovery or actual exceptions produce one grouped source hold;
 the skill never asks for page-by-page approval.

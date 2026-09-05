@@ -931,10 +931,21 @@ def _preflight(path: Path, source: bytes, page_range: tuple[int, int] | None) ->
 def _identity(record: Mapping[str, Any]) -> tuple[int, str, str]:
     source = record.get("_source", {})
     page = int(source.get("page", 0)) if isinstance(source, Mapping) else 0
-    address = record.get(
-        "address",
-        record.get("protocol_offset", record.get("display_address", "")),
+    address = next(
+        (record[field] for field in ("address", "protocol_offset", "display_address") if record.get(field) not in (None, "")),
+        "",
     )
+    if address in (None, ""):
+        source_address = record.get("source_address")
+        address = (
+            source_address.get("raw")
+            if isinstance(source_address, Mapping)
+            else source_address
+        )
+    if address in (None, ""):
+        address = record.get("source_register")
+    if address is None:
+        address = ""
     normalized_address = re.sub(r"\s+", "", str(address).casefold())
     name = re.sub(r"\W+", "", str(record.get("name", "")).casefold())
     return page, normalized_address, name
@@ -962,65 +973,130 @@ def _address_identity(record: Mapping[str, Any]) -> tuple[int, str]:
     return identity[0], identity[1]
 
 
+def _physical_row_identity(record: Mapping[str, Any]) -> tuple[int, str] | None:
+    source = record.get("_source", {})
+    if not isinstance(source, Mapping):
+        return None
+    page, region = source.get("page"), source.get("region")
+    if (
+        isinstance(page, int)
+        and page > 0
+        and isinstance(region, str)
+        and re.fullmatch(rf"p{page}:t\d+:r\d+", region)
+    ):
+        return page, region
+    return None
+
+
+def _merge_scope_compatible(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    """Do not associate claims across known area or physical table boundaries."""
+    physical_row = _physical_row_identity(left)
+    right_physical_row = _physical_row_identity(right)
+    if physical_row is not None and right_physical_row is not None:
+        # Two interpretations of the same located table row are not two
+        # separate device points merely because their scope claims differ.
+        # Associate them so the material conflicts below retain both claims.
+        return physical_row == right_physical_row
+    for field in ("area", "unit_id", "route_id"):
+        a, b = left.get(field), right.get(field)
+        if a not in (None, "") and b not in (None, "") and not _equivalent(field, a, b):
+            return False
+
+    def table(record: Mapping[str, Any]) -> str | None:
+        source = record.get("_source", {})
+        if not isinstance(source, Mapping):
+            return None
+        for field in ("table_index", "table", "table_id"):
+            if source.get(field) not in (None, ""):
+                return str(source[field])
+        match = re.search(r"(?:^|:)t(\d+)(?=:|$)", str(source.get("region", "")))
+        return match.group(1) if match else None
+
+    a, b = table(left), table(right)
+    return a is None or b is None or a == b
+
+
 def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
     unmatched_right = set(range(len(coordinate)))
-    left_name_counts: dict[tuple[int, str], int] = {}
-    right_name_counts: dict[tuple[int, str], int] = {}
-    left_address_counts: dict[tuple[int, str], int] = {}
-    right_address_counts: dict[tuple[int, str], int] = {}
+    left_names: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    left_addresses: dict[tuple[int, str], list[dict[str, Any]]] = {}
     for record in strict:
-        key = _name_identity(record)
-        left_name_counts[key] = left_name_counts.get(key, 0) + 1
-        address_key = _address_identity(record)
-        left_address_counts[address_key] = left_address_counts.get(address_key, 0) + 1
-    for record in coordinate:
-        key = _name_identity(record)
-        right_name_counts[key] = right_name_counts.get(key, 0) + 1
-        address_key = _address_identity(record)
-        right_address_counts[address_key] = right_address_counts.get(address_key, 0) + 1
+        left_names.setdefault(_name_identity(record), []).append(record)
+        left_addresses.setdefault(_address_identity(record), []).append(record)
     for left in strict:
+        compatible_right = [
+            index for index in unmatched_right
+            if _merge_scope_compatible(left, coordinate[index])
+        ]
         exact = [
             index
-            for index in unmatched_right
+            for index in compatible_right
             if _identity(coordinate[index]) == _identity(left)
         ]
-        match_index = exact[0] if len(exact) == 1 else None
+        physical_row = _physical_row_identity(left)
+        same_physical_row = [
+            index for index in compatible_right
+            if physical_row is not None
+            and _physical_row_identity(coordinate[index]) == physical_row
+        ]
+        match_index = None
+        if (
+            len(same_physical_row) == 1
+            and sum(_physical_row_identity(row) == physical_row for row in strict) == 1
+            and sum(_physical_row_identity(row) == physical_row for row in coordinate) == 1
+        ):
+            match_index = same_physical_row[0]
+        if match_index is None:
+            match_index = exact[0] if len(exact) == 1 else None
         address_key = _address_identity(left)
+        same_address = [
+            index for index in compatible_right
+            if _address_identity(coordinate[index]) == address_key
+        ]
         if (
             match_index is None
             and address_key[1]
-            and left_address_counts[address_key] == 1
-            and right_address_counts.get(address_key) == 1
+            and sum(_merge_scope_compatible(left, row) for row in left_addresses[address_key]) == 1
+            and len(same_address) == 1
         ):
-            match_index = next(
-                index
-                for index in unmatched_right
-                if _address_identity(coordinate[index]) == address_key
-            )
+            match_index = same_address[0]
         name_key = _name_identity(left)
+        same_name = [
+            index for index in compatible_right
+            if _name_identity(coordinate[index]) == name_key
+        ]
         if (
             match_index is None
             and name_key[1]
-            and left_name_counts[name_key] == 1
-            and right_name_counts.get(name_key) == 1
+            and sum(_merge_scope_compatible(left, row) for row in left_names[name_key]) == 1
+            and len(same_name) == 1
         ):
-            match_index = next(
-                index
-                for index in unmatched_right
-                if _name_identity(coordinate[index]) == name_key
-            )
+            match_index = same_name[0]
         if match_index is None:
             accepted.append(dict(left))
             continue
         unmatched_right.remove(match_index)
         right = coordinate[match_index]
         row_conflicts = []
-        for field in sorted(_MATERIAL_FIELDS & (set(left) & set(right))):
+        for field in sorted((_MATERIAL_FIELDS | {"unit_id", "route_id"}) & (set(left) & set(right))):
+            if field in {"unit_id", "route_id"} and (
+                left[field] in (None, "") or right[field] in (None, "")
+            ):
+                continue
             if not _equivalent(field, left[field], right[field]):
                 row_conflicts.append({"field": field, "claims": [left[field], right[field]]})
+        left_address, right_address = _identity(left)[1], _identity(right)[1]
+        if (
+            left_address and right_address
+            and not _equivalent("address", left_address, right_address)
+            and not any(item["field"] in _ADDRESS_FIELDS for item in row_conflicts)
+        ):
+            # Source-register/raw-address claims are material too, even when
+            # neither parser has assigned a protocol/display address field.
+            row_conflicts.append({"field": "address", "claims": [left_address, right_address]})
         merged = dict(left)
         for field, value in right.items():
             if not field.startswith("_") and field not in merged:
