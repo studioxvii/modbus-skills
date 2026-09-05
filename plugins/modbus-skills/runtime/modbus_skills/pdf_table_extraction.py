@@ -512,11 +512,23 @@ def parse_pdf_table_evidence(
                 description_claim["field"] = "description"
                 description_claim["value"] = description
                 claims.append(description_claim)
-        extra_fields = {
-            header: _clean(_cell(row, column))
-            for column, header in extra_columns
-            if _clean(_cell(row, column))
-        }
+        extra_fields: dict[str, str] = {}
+        extra_conflicts: list[str] = []
+        extra_values: dict[str, str] = {}
+        for column, header in extra_columns:
+            value = _clean(_cell(row, column))
+            if not value:
+                continue
+            field = "_extra:" + re.sub(r"[^a-z0-9]+", "_", header.casefold()).strip("_")
+            if field in extra_values and extra_values[field] != value:
+                extra_conflicts.append(field)
+            extra_values.setdefault(field, value)
+            extra_fields.setdefault(header, value)
+            claims.append({
+                "parser_id": "pdfplumber-table/v1", "field": field, "value": value,
+                "raw_header": header, "raw_value": value, "column_index": column,
+                "source_locator": {"page": page_number, "row": row_index, "region": region},
+            })
         for column, header in columns.get("units", []):
             raw_unit = _clean(_cell(row, column))
             if raw_unit:
@@ -533,7 +545,11 @@ def parse_pdf_table_evidence(
             record["_extra"] = extra_fields
         if trailing:
             record["notes"] = " | ".join(trailing)
-        if record.get("code") == "pdf-address-width-conflict":
+        if extra_conflicts:
+            record["code"] = "pdf-grid-column-ambiguous"
+            record["fields"] = sorted(set(extra_conflicts))
+            quarantined.append(record)
+        elif record.get("code") == "pdf-address-width-conflict":
             quarantined.append(record)
         else:
             records.append(record)
