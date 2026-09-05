@@ -134,8 +134,36 @@ def evaluate_trial(
     if snapshot and snapshot.exists():
         snapshot_names = {path.name for path in snapshot.rglob("*") if path.is_file()}
     required = set(profile.get("required_artifacts") or ())
-    if required and not (required <= names or required <= snapshot_names):
+    if required and not required <= snapshot_names:
         issues.append("missing-artifact")
+
+    # Inspect persisted output, not a worker's claim to have produced a file.
+    payloads = []
+    if snapshot:
+        for path in snapshot.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name in required and path.stat().st_size == 0:
+                issues.append("empty-artifact")
+            if path.suffix == ".json":
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict):
+                        payloads.append(payload)
+                except (ValueError, UnicodeError):
+                    if path.name in required:
+                        issues.append("invalid-artifact-json")
+    for schema in profile.get("artifact_schemas", []):
+        if not any(payload.get("schema_version") == schema for payload in payloads):
+            issues.append("artifact-schema-missing")
+    for expected in profile.get("expected_points", []):
+        matching = [payload for payload in payloads if payload.get("schema_version") == expected["schema"]]
+        if not matching or not any(
+            len(payload.get("points", [])) == len(expected["points"])
+            and all(any(all(point.get(key) == value for key, value in truth.items()) for point in payload["points"]) for truth in expected["points"])
+            for payload in matching
+        ):
+            issues.append("point-fidelity-mismatch")
 
     if profile["dimensions"].get("artifact_usefulness"):
         useful = not required or required <= names or required <= snapshot_names
@@ -151,6 +179,14 @@ def evaluate_trial(
     holds = _codes(events)
     acceptable = set(profile.get("acceptable_holds") or ())
     conditions = set(profile.get("completion_conditions") or ())
+    if terminal_reason in {"budget-exceeded", "model-turn-failed", "session-error"}:
+        issues.append("execution-incomplete")
+    if "offline-complete" in conditions and not any(
+        payload.get("state") == "offline-complete"
+        and payload.get("schema_version") == "modbus-compile-result/v1"
+        for payload in payloads
+    ):
+        issues.append("offline-completion-unproven")
     if "no-approval-turn" in conditions and questions:
         issues.append("unexpected-question")
     if "recommended_skill_present" in conditions and not any(
@@ -201,6 +237,12 @@ def evaluate_trial(
         "stale-decision-accepted",
         "resume-repeated-work",
         "expected-refusal-missing",
+        "empty-artifact",
+        "invalid-artifact-json",
+        "artifact-schema-missing",
+        "point-fidelity-mismatch",
+        "execution-incomplete",
+        "offline-completion-unproven",
     } & set(issues)
     outcome_ok = not hard_fail and not (
         set(issues) - {"question-budget-exceeded"}

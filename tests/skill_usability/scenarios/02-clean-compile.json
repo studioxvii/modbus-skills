@@ -40,6 +40,7 @@
     "expected_route": "compile-user-map",
     "required_artifacts": ["user-map.json", "user-map.csv", "user-map.md", "user-map-manifest.json"],
     "artifact_schemas": ["modbus-user-map/v1"],
+    "expected_points": [{"schema": "modbus-user-map/v1", "points": [{"name": "Temperature", "area": "holding-register", "protocol_offset": 10, "datatype": "uint16", "word_span": 1}]}],
     "acceptable_holds": [],
     "prohibited_operations": ["write", "broadcast", "discovery", "unbounded-poll", "credential-access", "live-device"],
     "completion_conditions": ["offline-complete", "no-approval-turn"],

@@ -88,6 +88,10 @@ def build_report(
             "event_count": int(trial.get("event_count") or 0),
             "terminal_reason": trial.get("terminal_reason") or trial.get("status"),
             "repetition": int(trial.get("repetition") or 1),
+            "elapsed_seconds": trial.get("elapsed_seconds"),
+            "tool_calls": trial.get("tool_calls"),
+            "final_words": trial.get("final_words"),
+            "actual_model": trial.get("actual_model"),
         }
         for trial in trials
     ]

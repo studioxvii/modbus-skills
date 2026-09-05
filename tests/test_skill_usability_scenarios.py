@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import sys
 import tempfile
 import unittest
@@ -123,6 +125,32 @@ class SkillUsabilityScenarioTests(unittest.TestCase):
         result = self._run("07-revision-compare")
         self.assertEqual("passed", result["status"], result)
         self.assertEqual("not-applicable", result["dimensions"]["resume_behavior"])
+
+    def test_claimed_files_wrong_values_and_false_completion_fail(self) -> None:
+        campaign = load_campaign()
+        scenario = next(item for item in campaign["loaded_scenarios"] if item["scenario_id"] == "02-clean-compile")
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = Path(temporary)
+            for name in scenario["oracle_profile"]["required_artifacts"]:
+                (snapshot / name).write_text("{}" if name.endswith(".json") else "placeholder")
+            (snapshot / "user-map.json").write_text(json.dumps({
+                "schema_version": "modbus-user-map/v1",
+                "points": [{"name": "Temperature", "protocol_offset": 40010}],
+            }))
+            result = evaluate_trial(
+                scenario=scenario, events=[{"kind": "skill-selected", "skill": "compile-user-map"}],
+                artifacts=[{"name": name} for name in scenario["oracle_profile"]["required_artifacts"]],
+                snapshot=snapshot, terminal_reason="done", execution_status="completed",
+            )
+            self.assertEqual("failed", result["status"])
+            self.assertIn("point-fidelity-mismatch", result["issue_codes"])
+            self.assertIn("offline-completion-unproven", result["issue_codes"])
+            (snapshot / "user-map.csv").unlink()
+            result = evaluate_trial(
+                scenario=scenario, events=[], artifacts=[{"name": "user-map.csv"}],
+                snapshot=snapshot, terminal_reason="done", execution_status="completed",
+            )
+            self.assertIn("missing-artifact", result["issue_codes"])
 
     def test_tampered_case_emits_recovery_and_preserves_trusted_files(self) -> None:
         result = self._run("08-stale-tampered")
