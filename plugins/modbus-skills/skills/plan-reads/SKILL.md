@@ -20,6 +20,10 @@ Follow `../../references/interaction-contract.md`.
 5. Verify `planning_options` and its hash record the gap policy.
 6. For final output, verify the plan's canonical-map hash matches the exact map.
 
+Inspect these fields together in the emitted plan. For routine generation, use
+the wrapper's validation and existing trace records; do not repeatedly browse
+runtime code or reconstruct validators unless a concrete discrepancy requires it.
+
 ## Output files
 
 - `read-plan.json` - Use this machine-readable list of bounded Modbus requests when building a target tool. It also records which points each request returns and why blocks were split.
