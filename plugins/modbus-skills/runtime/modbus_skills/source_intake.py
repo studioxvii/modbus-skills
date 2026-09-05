@@ -16,6 +16,7 @@ from .map_workflows import MapWorkflowError, normalize_map
 from .parsers import ParseError, parse_source
 from .pdf_extraction import PdfExtractionError, extract_pdf, parse_page_range
 from .pdf_table_extraction import prepare_pdf_records
+from .user_map import UserMapError, validate_selection_entry_structure
 
 
 SELECTION_TEMPLATE_SCHEMA_VERSION = "modbus-user-selection-template/v1"
@@ -286,26 +287,7 @@ def bind_selection_template(
 ) -> dict[str, Any]:
     """Bind typed IDs or unique exact names to one derived OEM map hash."""
 
-    if not isinstance(template, Mapping):
-        raise SourceIntakeError("selection_template must be an object")
-    allowed = {
-        "schema_version",
-        "requested_measurements",
-        "mode",
-        "included",
-        "suggested",
-        "excluded",
-    }
-    unknown = set(template) - allowed
-    if unknown:
-        raise SourceIntakeError(
-            "selection_template has unknown fields: "
-            + ", ".join(sorted(map(str, unknown)))
-        )
-    if template.get("schema_version") != SELECTION_TEMPLATE_SCHEMA_VERSION:
-        raise SourceIntakeError(
-            f"selection_template.schema_version must be {SELECTION_TEMPLATE_SCHEMA_VERSION}"
-        )
+    _validate_selection_template_header(template)
     by_id = {str(point["oem_point_id"]): point for point in oem_map["points"]}
     by_name: dict[str, list[str]] = {}
     for point_id, point in by_id.items():
@@ -363,6 +345,64 @@ def bind_selection_template(
             for index, entry in enumerate(entries)
         ]
     return candidate
+
+
+def _validate_selection_template_header(template: Any) -> None:
+    if not isinstance(template, Mapping):
+        raise SourceIntakeError("selection_template must be an object")
+    allowed = {
+        "schema_version",
+        "requested_measurements",
+        "mode",
+        "included",
+        "suggested",
+        "excluded",
+    }
+    unknown = set(template) - allowed
+    if unknown:
+        raise SourceIntakeError(
+            "selection_template has unknown fields: "
+            + ", ".join(sorted(map(str, unknown)))
+        )
+    if template.get("schema_version") != SELECTION_TEMPLATE_SCHEMA_VERSION:
+        raise SourceIntakeError(
+            f"selection_template.schema_version must be {SELECTION_TEMPLATE_SCHEMA_VERSION}"
+        )
+
+
+def validate_selection_template_structure(template: Mapping[str, Any]) -> None:
+    """Check a deferred request, without binding names against absent evidence."""
+    _validate_selection_template_header(template)
+    measurements = _array(template.get("requested_measurements"), "requested_measurements")
+    if any(not isinstance(value, str) or not value.strip() for value in measurements):
+        raise SourceIntakeError("requested_measurements must contain non-empty text")
+    mode = template.get("mode")
+    if mode is not None:
+        if mode != "all-readable":
+            raise SourceIntakeError("selection_template.mode must be all-readable")
+        if any(template.get(field) not in (None, []) for field in ("included", "suggested", "excluded")):
+            raise SourceIntakeError(
+                "selection_template.mode cannot be combined with explicit dispositions"
+            )
+        return
+    seen: set[tuple[str, str]] = set()
+    for disposition in ("included", "suggested", "excluded"):
+        for index, raw in enumerate(_array(template.get(disposition), disposition)):
+            if not isinstance(raw, Mapping):
+                raise SourceIntakeError(f"selection_template.{disposition}[{index}] must be an object")
+            entry = dict(raw)
+            if entry.get("oem_point_id") not in (None, "") and entry.get("exact_name") not in (None, ""):
+                raise SourceIntakeError("selection template entry must use oem_point_id or exact_name, not both")
+            selector = "exact_name" if entry.get("exact_name") not in (None, "") else "oem_point_id"
+            entry.pop("oem_point_id" if selector == "exact_name" else "exact_name", None)
+            try:
+                checked = validate_selection_entry_structure(entry, disposition, index, selector=selector)
+            except UserMapError as exc:
+                raise SourceIntakeError(str(exc)) from exc
+            identity = (selector, checked[selector].casefold() if selector == "exact_name" else checked[selector])
+            if identity in seen:
+                raise SourceIntakeError("selection template repeats a selector across dispositions")
+            seen.add(identity)
 
 
 def _bind_selection_entry(

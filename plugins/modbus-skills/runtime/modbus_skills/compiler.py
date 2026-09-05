@@ -36,6 +36,7 @@ from .source_intake import (
     bind_selection_template,
     compile_source_descriptor,
     source_request_identity,
+    validate_selection_template_structure,
 )
 from .tool_pack import SUPPORTED_TARGETS, build_tool_pack
 from .user_map import UserMapError, compile_user_map_bundle
@@ -922,11 +923,24 @@ def _validate_request(value: Mapping[str, Any]) -> dict[str, Any]:
         validate_oem_map(oem_map)
     except CompilerContractError as exc:
         raise CompilerError(str(exc)) from exc
+    deferred_template = None
     if template is not None:
         if not isinstance(template, Mapping):
             raise CompilerError("selection_template must be an object")
         try:
-            candidate = bind_selection_template(template, oem_map)
+            if raw_source is not None and not oem_map["points"] and _blocking_holds(oem_map):
+                validate_selection_template_structure(template)
+                deferred_template = template
+                # Nonexecuted placeholder: the existing source guard persists
+                # the blocker before any selection or target stage can run.
+                candidate = {
+                    "schema_version": "modbus-user-selection-candidate/v1",
+                    "oem_map_hash": stable_input_hash(oem_map),
+                    "requested_measurements": list(template["requested_measurements"]),
+                    "included": [], "suggested": [], "excluded": [],
+                }
+            else:
+                candidate = bind_selection_template(template, oem_map)
         except SourceIntakeError as exc:
             raise CompilerError(str(exc)) from exc
     if not isinstance(candidate, Mapping):
@@ -950,6 +964,7 @@ def _validate_request(value: Mapping[str, Any]) -> dict[str, Any]:
             "schema_version": COMPILE_REQUEST_SCHEMA_VERSION,
             "oem_map": oem_map,
             "selection_candidate": candidate,
+            **({"selection_template": deferred_template} if deferred_template is not None else {}),
             **({"source": source_descriptor} if source_descriptor is not None else {}),
             "targets": targets,
             "target_options": {str(key): dict(options[key]) for key in sorted(options)},
