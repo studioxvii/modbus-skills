@@ -81,19 +81,19 @@ class PdfExplicitWidthBiasTests(unittest.TestCase):
                     self.assertTrue(any(c.get("field") == "word_count" and c.get("value") == "02" for c in claims))
                     self.assertTrue(any(c.get("field") == "engineering_offset" and c.get("value") == "-3.50" for c in claims))
 
-    def test_absent_width_retains_existing_default_not_datatype_inference(self):
+    def test_absent_width_is_not_a_source_claim(self):
         cells = table()
         for row in cells:
             del row[3]
         for reader, rows in readers(cells).items():
             with self.subTest(reader=reader):
-                self.assertEqual(1, rows[0]["word_count"])
+                self.assertNotIn("word_count", rows[0])
                 self.assertIn(rows[0].get("datatype", rows[0].get("format")), {"float32"})
 
     def test_unknown_width_header_does_not_gain_a_width(self):
         for reader, rows in readers(table("Unspecified", width="7")).items():
             with self.subTest(reader=reader):
-                self.assertEqual(1, rows[0]["word_count"])
+                self.assertNotIn("word_count", rows[0])
 
     def test_bare_offset_is_not_engineering_bias_or_address_approval(self):
         cells = [["Offset", "Name", "Datatype", "Words", "Engineering Offset", "Access"],
@@ -127,7 +127,7 @@ class PdfExplicitWidthBiasTests(unittest.TestCase):
         cells = table()
         cells.append(["100", "Sample Next", "uint16", "", "AB", "1", "", "R"])
         evidence = parse_pdf_table_evidence(cells, page_number=1, table_index=0)
-        self.assertEqual(1, evidence["records"][1]["word_count"])
+        self.assertNotIn("word_count", evidence["records"][1])
         self.assertNotIn("engineering_offset", evidence["records"][1])
 
     def test_invalid_printed_width_is_preserved_not_defaulted(self):

@@ -1051,6 +1051,15 @@ def _normalize_one(
             )
         )
         word_source = "datatype"
+    if word_span is None and word_raw in (None, "") and datatype_enum is DataType.STRING:
+        holds.append(
+            _hold(
+                "point.span-unresolved",
+                "Provide an explicit register span for this variable-length string.",
+                "word_span",
+                source=source,
+            )
+        )
     if (
         word_span is not None
         and datatype_enum.bit_width is not None
