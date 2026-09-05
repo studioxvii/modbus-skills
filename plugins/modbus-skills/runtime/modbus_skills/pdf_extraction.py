@@ -451,6 +451,7 @@ def parse_layout_rows(
                     page_number=page_number,
                     line_number=line_number,
                     parser_id=parser_id,
+                    rejected=rejected,
                 )
                 if headerless is not None:
                     records.append(headerless)
@@ -629,6 +630,7 @@ def _headerless_layout_row(
     page_number: int,
     line_number: int,
     parser_id: str,
+    rejected: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Accept obvious register rows even when no table header locked on the page.
 
@@ -721,12 +723,24 @@ def _headerless_layout_row(
         None,
     )
     if (
-        datatype_token is None
-        and address_index > 0
+        address_index > 0
         and len(_layout_segments(line)) < 2
+        and (datatype_token is None or "|" not in line)
     ):
-        # A single-spaced title such as "Example 8123 Modbus Notes" has a
-        # number and a keyword, but no address-leading or tabular row evidence.
+        # A datatype word cannot assign address/name roles to an incidental
+        # number in prose or a collapsed name-first row. Keep that unresolved
+        # source evidence, without approving the fallback's guessed fields.
+        if datatype_token is not None and rejected is not None:
+            rejected.append({
+                "code": "pdf-headerless-column-roles-unresolved",
+                "page": page_number, "line": line_number, "parser_id": parser_id,
+                "_source": {
+                    "format": "pdf", "page": page_number, "line": line_number,
+                    "region": f"p{page_number}:l{line_number}", "parser_id": parser_id,
+                    "method": "exact" if parser_id == "pdftotext-layout/v1" else "ocr-derived",
+                    "excerpt": line.strip()[:300],
+                },
+            })
         return None
     # Require a datatype cue so enum/bit legend lines (``0 No / 1 Yes``) are not
     # promoted into register rows when no table header is locked.
