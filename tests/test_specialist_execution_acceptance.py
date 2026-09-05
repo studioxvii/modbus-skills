@@ -142,6 +142,51 @@ class SpecialistExecutionTests(unittest.TestCase):
                            "python3 forge.py; " + final):
                 self.assertEqual([], wrapper_tokens(item(script), session), script)
 
+    def test_scoped_pdf_temporary_directory_preserves_wrapper_proof(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary) / "work"
+            work.mkdir()
+            session = SimpleNamespace(work=work, plugin_root=Path(temporary) / "plugin")
+            final = "python3 -B ../plugin/run.py --input ../fixtures/good.pdf --output bundle"
+            expected = shlex.split(final)
+            expected.remove("-B")
+            def item(script, cwd=work):
+                return {"command": shlex.join(["/usr/bin/bash", "-lc", script]), "cwd": str(cwd)}
+            for prefix in ('TMPDIR="$PWD" ', 'PYTHONDONTWRITEBYTECODE=1 TMPDIR="$PWD" '):
+                self.assertEqual(expected, wrapper_tokens(item(prefix + final), session))
+            self.assertEqual([], wrapper_tokens(item('TMPDIR="$PWD" ' + final, work.parent), session))
+            for prefix in ('TMPDIR=\'$PWD\' ', 'TMPDIR="${PWD}" ', 'TMPDIR="$(pwd)" ',
+                           'TMPDIR=/untrusted ', 'TMPDIR="$PWD" PYTHONPATH=/untrusted ',
+                           'PYTHONPATH=/untrusted TMPDIR="$PWD" ', 'TMPDIR="$PWD" env '):
+                self.assertEqual([], wrapper_tokens(item(prefix + final), session), prefix)
+            for suffix in ('; true', ' && cat bundle/result.json', ' | cat', ' > output', '\ntrue'):
+                self.assertEqual([], wrapper_tokens(item('TMPDIR="$PWD" ' + final + suffix), session), suffix)
+
+    def test_temporary_directory_wrapper_still_requires_faithful_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            campaign = create_inputs(root / "inputs")
+            scenario = next(s for s in load_campaign(campaign)["loaded_scenarios"] if s["skill"] == "parse-map")
+            session = seed_workspace(scenario, campaign_dir=campaign.parent, parent=root)
+            script = 'PYTHONDONTWRITEBYTECODE=1 TMPDIR="$PWD" ' + shlex.join([
+                sys.executable, "-B", str(session.plugin_root / "skills/parse-map/scripts/run.py"),
+                "--input", str(session.fixtures / "parse-good.json"), "--output", "result.json"])
+            command = ["/usr/bin/bash", "-lc", script]
+            completed = subprocess.run(command, cwd=session.work, env=session.env,
+                                       capture_output=True, text=True, timeout=20)
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            item = {"id": "scoped-temp-replay", "type": "commandExecution", "command": shlex.join(command),
+                    "cwd": str(session.work), "exitCode": completed.returncode, "aggregatedOutput": completed.stdout}
+            session.state["transcript"] = [{"method": method, "params": {"item": copy.deepcopy(item)}}
+                                           for method in ("item/started", "item/completed")]
+            self.assertTrue(observe_execution(session, session.work)["proven"])
+            result = session.work / "result.json"
+            payload = json.loads(result.read_text())
+            payload["records"][0]["protocol_offset"] = 65535
+            result.write_text(json.dumps(payload))
+            self.assertFalse(observe_execution(session, session.work)["proven"])
+
 
 if __name__ == "__main__":
     unittest.main()
