@@ -183,6 +183,7 @@ _ACCESS_ALIASES = {
     "read-only": "read-only",
     "rw": "read-write",
     "r/w": "read-write",
+    "read/write": "read-write",
     "read write": "read-write",
     "read-write": "read-write",
     "w": "write-only",
