@@ -21,6 +21,12 @@ Follow `../../references/interaction-contract.md`.
 6. Run once for the complete batch and report applied decisions, exclusions, audit
    data, and only the remaining holds.
 
+For a complete supplied decision file, let the wrapper validate its map binding
+and evidence before investigating implementation details. Inspect the resulting
+validation or audit record once. Repeated hashing and scratch validators are
+unnecessary unless a concrete discrepancy remains; never repair a stale decision
+by rebinding it to a newer map.
+
 ## Output files
 
 - `reviewed.json` - Use this new reviewed map. It contains the accepted changes, exclusions, remaining holds, and the evidence trail. The original draft is unchanged.
