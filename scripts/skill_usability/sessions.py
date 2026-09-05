@@ -230,8 +230,6 @@ class SessionAdapter:
         raise NotImplementedError
 
     def continue_session(self, session: TrialSession, user_text: str | None) -> TrialSession:
-        if session.session_id != session.session_id:
-            raise SessionError("continuation referenced a different trial")
         session.interrupted = False
         session.session_id = str(uuid.uuid4())
         session.events.append(
@@ -675,16 +673,21 @@ class CodexSessionAdapter(SessionAdapter):
         self._observe_artifacts(session)
         final = texts[-1] if texts else ""
         session.state["final_text"] = final
-        recommendation = re.search(r"Recommended next:\s*`?([a-z-]+)", final)
+        self._observe_final(session, final)
+        session.terminal_reason = "awaiting-user" if session.awaiting_user else "completed"
+        return session.events[before:]
+
+    def _observe_final(self, session: TrialSession, final: str) -> None:
+        # Markdown decoration is presentation, not part of the skill name.
+        plain = re.sub(r"[*`_]", "", final)
+        recommendation = re.search(r"Recommended next:\s*([a-z-]+)", plain, re.IGNORECASE)
         if recommendation:
             session.events.append({"kind": "recommendation", "recommended_skill": recommendation.group(1)})
-        if "?" in final:
+        if "?" in final or re.search(r"\b(?:please (?:provide|confirm|choose)|reply (?:with|yes|no)|send me)\b", plain, re.IGNORECASE):
             session.awaiting_user = True
             session.events.append({"kind": "question", "scope": "group", "prompt": final})
         else:
             session.terminal = True
-        session.terminal_reason = "awaiting-user" if session.awaiting_user else "completed"
-        return session.events[before:]
 
     def _observe_artifacts(self, session: TrialSession) -> None:
         session.artifacts.clear()
@@ -712,6 +715,9 @@ class CodexSessionAdapter(SessionAdapter):
                     session.events.append({"kind": "hold", "code": hold.get("code")})
             if payload.get("schema_version") == "modbus-map-diff/v1":
                 session.events.append({"kind": "comparison", "moved": payload.get("moved", [])})
+            if payload.get("schema_version") == "modbus-byte-order-evidence/v1":
+                session.events.append({"kind": "byte-order-evaluation", "candidates": len(payload.get("candidates", [])),
+                                       "winner": payload.get("winner") or payload.get("selected_layout")})
 
     def cleanup(self, session: TrialSession) -> dict[str, Any]:
         rpc = session.state.pop("rpc", None)

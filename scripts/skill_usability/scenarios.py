@@ -41,16 +41,20 @@ class BoundedUserActor:
             return None
         for rule in self.scenario.get("response_rules", ()):
             prompt_id = str(rule.get("prompt_id"))
+            if prompt_id in self.used:
+                continue
             fact = str(rule.get("fact"))
             if fact not in self.facts:
                 raise ContractError(f"actor cannot invent fact {fact}")
             self.used.add(prompt_id)
             return str(self.prompts[prompt_id])
         for step in self.scenario.get("transitions", ()):
-            if step.get("kind") == "reply-if-asked":
+            if step.get("kind") == "reply-if-asked" and str(step["prompt_id"]) not in self.used:
                 self.used.add(str(step["prompt_id"]))
                 return str(self.prompts[step["prompt_id"]])
-        raise ContractError("worker asked a question with no authorized reply")
+        # Preserve the unanswered question for the outcome oracle; do not
+        # manufacture a fact or turn an ordinary worker question into a crash.
+        return None
 
     def prompt(self, prompt_id: str) -> str:
         if prompt_id not in self.prompts:
@@ -134,6 +138,9 @@ def run_trial(
                     pending_text = actor.prompt(str(step["prompt_id"]))
                 elif session.awaiting_user:
                     pending_text = actor.reply(session.events)
+                    if pending_text is None:
+                        continue
+                    session.events.append({"kind": "actor-response", "prompt_ids": sorted(actor.used)})
                 else:
                     continue
                 events = adapter.turn(session, pending_text)
@@ -146,6 +153,7 @@ def run_trial(
                 if session.awaiting_user and kind != "reply-if-asked":
                     reply = actor.reply(events)
                     if reply:
+                        session.events.append({"kind": "actor-response", "prompt_ids": sorted(actor.used)})
                         adapter.turn(session, reply)
                 if time.monotonic() - started > int(budget.get("max_seconds", 120)):
                     session.terminal = True

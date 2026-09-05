@@ -25,6 +25,14 @@ from skill_usability.sessions import (  # noqa: E402
 
 
 class SkillUsabilitySessionTests(unittest.TestCase):
+    def test_markdown_recommendation_and_non_question_mark_request(self):
+        scenario = load_campaign()["loaded_scenarios"][0]
+        with tempfile.TemporaryDirectory() as temporary:
+            session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+            CodexSessionAdapter()._observe_final(session, "Recommended next: **`compile-user-map`**\nPlease provide the map.")
+            self.assertEqual("compile-user-map", next(e["recommended_skill"] for e in session.events if e["kind"] == "recommendation"))
+            self.assertTrue(session.awaiting_user)
+
     def test_receipt_hold_count_is_not_an_evidence_array(self):
         scenario = load_campaign()["loaded_scenarios"][0]
         with tempfile.TemporaryDirectory() as temporary:

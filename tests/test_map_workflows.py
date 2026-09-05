@@ -25,6 +25,23 @@ FIXTURES = ROOT / "tests" / "fixtures" / "maps"
 
 
 class NormalizeMapTests(unittest.TestCase):
+    def test_explicit_convention_default_fills_blanks_without_overriding_source(self):
+        base = {"route_id": "fixture", "unit_id": 1, "area": "holding-register", "datatype": "uint16"}
+        for blank in (None, ""):
+            with self.subTest(blank=blank):
+                result = normalize_map([{**base, "address": "2", "address_convention": blank}],
+                                       defaults={"address_convention": "protocol-offset"})
+                self.assertEqual(2, result["points"][0]["protocol_offset"])
+                result = normalize_map([{**base, "source_address": {"raw": "2", "convention": blank}}],
+                                       defaults={"address_convention": "protocol-offset"})
+                self.assertEqual(2, result["points"][0]["protocol_offset"])
+        result = normalize_map([{**base, "address": "40003", "address_convention": "modicon-reference"}],
+                               defaults={"address_convention": "protocol-offset"})
+        self.assertEqual(2, result["points"][0]["protocol_offset"])
+        result = normalize_map([{**base, "address": "2", "address_convention": "unknown"}],
+                               defaults={"address_convention": "protocol-offset"})
+        self.assertIsNone(result["points"][0]["protocol_offset"])
+
     def test_empty_object_is_not_verified_map_evidence(self) -> None:
         with self.assertRaises(MapWorkflowError):
             review_parse_evidence({})

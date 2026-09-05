@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from skill_usability.contracts import load_campaign  # noqa: E402
 from skill_usability.oracles import evaluate_trial  # noqa: E402
-from skill_usability.scenarios import run_trial  # noqa: E402
+from skill_usability.scenarios import BoundedUserActor, run_trial  # noqa: E402
 from skill_usability.sessions import FakeSessionAdapter, ScriptedWorker, TrialSession  # noqa: E402
 
 
@@ -46,6 +46,33 @@ class WrongRouteWorker(ScriptedWorker):
 
 
 class SkillUsabilityScenarioTests(unittest.TestCase):
+    def test_actor_never_repeats_a_correction_or_invents_unknown_facts(self):
+        scenario = load_campaign()["loaded_scenarios"][2]
+        actor = BoundedUserActor(scenario)
+        questions = [{"kind": "question", "prompt": "What convention?"}]
+        self.assertEqual(scenario["prompts"]["correction"], actor.reply(questions))
+        self.assertIsNone(actor.reply(questions))
+        self.assertIsNone(BoundedUserActor(load_campaign()["loaded_scenarios"][5]).reply(questions))
+
+    def test_semantic_artifact_accepts_user_chosen_name_but_rejects_wrong_move(self):
+        scenario = load_campaign()["loaded_scenarios"][6]
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = Path(temporary)
+            payload = {"schema_version": "modbus-map-diff/v1", "moved": [{
+                "logical_point_id": "comparison_point", "before_identity": {"protocol_offset": 5},
+                "after_identity": {"protocol_offset": 6}}]}
+            artifact = snapshot / "my-comparison.json"
+            events = [{"kind": "skill-selected", "skill": "compare-maps"}, {"kind": "comparison", "moved": True}]
+            def evaluate():
+                artifact.write_text(json.dumps(payload))
+                return evaluate_trial(scenario=scenario, events=events, artifacts=[], snapshot=snapshot,
+                                      terminal_reason="completed", execution_status="completed")
+            self.assertEqual("passed", evaluate()["status"])
+            payload["moved"][0]["after_identity"]["protocol_offset"] = 7
+            self.assertIn("comparison-fidelity-mismatch", evaluate()["issue_codes"])
+            payload.clear()
+            self.assertIn("artifact-schema-missing", evaluate()["issue_codes"])
+
     def _run(self, scenario_id: str, adapter: FakeSessionAdapter | None = None) -> dict:
         campaign = load_campaign()
         scenario = next(item for item in campaign["loaded_scenarios"] if item["scenario_id"] == scenario_id)

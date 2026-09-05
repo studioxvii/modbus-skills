@@ -103,7 +103,7 @@ def build_report(
         "adapter": adapter,
         "worker_model": "fake" if mode == "deterministic" else campaign["worker_model"],
         "status": aggregate_status(statuses if complete else [*statuses, "inconclusive"]),
-        "evidence_class": "simulated-user" if mode == "deterministic" else "deterministic",
+        "evidence_class": "deterministic" if mode == "deterministic" else "simulated-user",
         "issue_codes": issue_codes,
         "trials": public_trials,
         "coverage": {

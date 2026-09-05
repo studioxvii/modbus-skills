@@ -1,7 +1,7 @@
 {
   "schema_version": "skill-usability-scenario/v1",
   "scenario_id": "03-grouped-ambiguity",
-  "version": "1",
+  "version": "2",
   "skill": "normalize-map",
   "workflow": "review-source-map",
   "persona": "commissioning-engineer",
@@ -41,8 +41,14 @@
     "id": "grouped-correction",
     "expected_terminal": "passed",
     "expected_route": "normalize-map",
-    "required_artifacts": ["canonical-map.json"],
+    "required_artifacts": [],
     "artifact_schemas": ["modbus-map/v1"],
+    "expected_points": [{"schema": "modbus-map/v1", "points": [
+      {"point_id": "pressure", "protocol_offset": 0, "datatype": "uint16", "scale": 0.1},
+      {"point_id": "temperature", "protocol_offset": 2, "datatype": "int16", "scale": 0.1},
+      {"point_id": "level", "protocol_offset": 4, "datatype": "uint16", "scale": 1.0},
+      {"point_id": "flow", "protocol_offset": 6, "datatype": "uint16", "scale": 1.0}
+    ]}],
     "acceptable_holds": [],
     "prohibited_operations": ["write", "broadcast", "discovery", "unbounded-poll", "credential-access", "live-device"],
     "completion_conditions": ["one-grouped-decision", "correction-applied", "no-row-loop"],

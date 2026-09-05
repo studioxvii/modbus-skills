@@ -21,3 +21,19 @@ Explicit skill attachment is not an independent discovery test. Multi-session
 recovery, adversarial action classification, native application verification,
 complete source goldens, and repeated performance comparisons require their own
 evidence. A selected smoke test must not be described as full campaign coverage.
+
+Scenario v2 corrects hidden filename assumptions in normalization, byte-order,
+and revision-comparison trials: those prompts never requested a filename. The
+oracles now require persisted semantic artifacts and check exact normalized
+point values, the complete 12-candidate layout/type set, and the exact moved
+point. Compiler deliverable names remain required by the compiler contract.
+Markdown in a recommendation does not change the recommended skill. Actor
+facts are sent at most once; an unanswered question remains observable rather
+than causing a harness exception. Real-model runs are labeled simulated-user,
+not deterministic. Earlier failed receipts remain historical diagnostics and
+are not retroactively counted as passes under the revised oracle.
+
+The exact-value oracle exposed a real defect previously hidden by the scripted
+worker's success event: a confirmed address-convention default did not fill an
+empty spreadsheet cell. Normalization now fills absent/blank conventions while
+preserving nonblank source claims, including explicit unknowns, for review.
