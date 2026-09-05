@@ -48,7 +48,10 @@ def create_inputs(output):
         if isinstance(value, dict): return {key: portable(item) for key, item in value.items()}
         if isinstance(value, list): return [portable(item) for item in value]
         if isinstance(value, str) and value.startswith(str(all_inputs) + "/"):
-            return Path(value).name
+            # CLI request paths are relative to the caller's work directory,
+            # not the JSON request's own directory. Supply usable inputs instead
+            # of requiring the worker to discover and repair a harness mistake.
+            return str(Path("../fixtures") / Path(value).name)
         return value
     for path in all_inputs.glob("*.json"):
         try: payload = json.loads(path.read_text())

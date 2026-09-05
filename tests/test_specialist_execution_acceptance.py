@@ -36,12 +36,31 @@ class SpecialistExecutionTests(unittest.TestCase):
             campaign = load_campaign(campaign_path)
             self.assertEqual(19, len(campaign["loaded_scenarios"]))
             inputs = campaign_path.parent / "fixtures"
-            self.assertEqual("good-raw.json", json.loads((inputs / "compile-positive.json").read_text())["source"]["path"])
-            self.assertEqual("good.json", json.loads((inputs / "pack-positive.json").read_text())["map"])
+            self.assertEqual("../fixtures/good-raw.json", json.loads((inputs / "compile-positive.json").read_text())["source"]["path"])
+            self.assertEqual("../fixtures/good.json", json.loads((inputs / "pack-positive.json").read_text())["map"])
             for scenario in campaign["loaded_scenarios"]:
                 names = {Path(item["path"]).name for item in scenario["fixtures"]}
                 self.assertEqual(names, set(scenario["oracle_profile"]["fixture_hashes"]))
                 self.assertNotIn("model_needed", scenario)
+
+    def test_nested_requests_run_from_worker_cwd_without_fixture_repairs(self):
+        from run_direct_skill_acceptance import command_arguments
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = create_inputs(root / "inputs")
+            for skill in ("compile-user-map", "build-tool-pack"):
+                scenario = next(s for s in load_campaign(path)["loaded_scenarios"] if s["skill"] == skill)
+                session = seed_workspace(scenario, campaign_dir=path.parent, parent=root)
+                command = [sys.executable, "-B", str(session.plugin_root / f"skills/{skill}/scripts/run.py"),
+                           *command_arguments(skill, "positive", Path("../fixtures"), Path("."))]
+                completed = subprocess.run(command, cwd=session.work, env=session.env,
+                                           capture_output=True, text=True, timeout=20)
+                self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+                item = {"id": "direct-request-replay", "type": "commandExecution", "command": shlex.join(command),
+                        "cwd": str(session.work), "exitCode": completed.returncode, "aggregatedOutput": completed.stdout}
+                session.state["transcript"] = [{"method": method, "params": {"item": copy.deepcopy(item)}}
+                                               for method in ("item/started", "item/completed")]
+                self.assertTrue(observe_execution(session, session.work)["proven"])
 
     def test_worker_prose_cannot_substitute_for_actual_wrapper_and_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
