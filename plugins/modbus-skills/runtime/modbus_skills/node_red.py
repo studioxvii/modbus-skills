@@ -1273,7 +1273,7 @@ def _readme(*, mode: str, environment: list[str]) -> str:
         else
         "After you enable the tab, click `01 Start bounded plan` once. The flow "
         "sends the next request only after the current request returns or times "
-        "out. Probe mode is manual one-shot and does not poll."
+        "out. Probe mode is manual one-shot and does not poll or retry."
     )
     return f"""# Node-RED {mode.title()} Flow
 
@@ -1304,7 +1304,7 @@ endpoint is safe for the selected mode.
 Set `MODBUS_CAPTURE_PATH` to the local path for `capture.json`. The flow writes
 one complete `capture/v1` document only after the queue drains or the run is
 cancelled. The flow uses one shared reader per route, keeps one request in
-flight, and retries a failed block at most once.
+flight. {"Final mode retries a failed block at most once." if mode == "final" else "Probe mode makes one physical attempt per block, with no retry."}
 
 The derive nodes keep an immutable copy of the raw values. They also attach
 point datatype, byte-order, scaling, and engineering-unit metadata. For each

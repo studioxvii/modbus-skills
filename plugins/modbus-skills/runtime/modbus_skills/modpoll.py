@@ -70,7 +70,7 @@ _PROCONX_FINAL_TYPE_SUFFIX = {
     "float64": ":f64",
     "double": ":f64",
 }
-_PROCONX_SUPPORTED_BYTE_ORDERS = frozenset({"ABCD", "BE_BE"})
+_PROCONX_SUPPORTED_BYTE_ORDERS = frozenset({"ABCD", "ABCDEFGH", "BE_BE"})
 WITTE_DESKTOP_MIN_SCAN_INTERVAL_MS = 1000
 WITTE_DESKTOP_MAX_ROUTE_READS_PER_SECOND = 5
 
@@ -87,6 +87,10 @@ _TRADITIONAL_BASE = {
     "holding-register": 40000,
 }
 _GAVINYING_BYTE_ORDER = {
+    "ABCDEFGH": "BE_BE",
+    "BADCFEHG": "LE_BE",
+    "GHEFCDAB": "BE_LE",
+    "HGFEDCBA": "LE_LE",
     "ABCD": "BE_BE",
     "BADC": "LE_BE",
     "CDAB": "BE_LE",

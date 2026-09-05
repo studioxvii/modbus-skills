@@ -279,6 +279,11 @@ class ModpollExporterTests(unittest.TestCase):
             self.assertEqual("held", result.status)
             self.assertFalse(any(artifact.path.endswith("commands.txt") for artifact in result.artifacts))
 
+    def test_canonical_64_bit_layout_is_supported(self) -> None:
+        canonical, plan = inputs(point(datatype="float64", word_span=4, byte_order="ABCDEFGH"))
+        for profile in ("gavinying-cli", "proconx-cli"):
+            self.assertEqual("generated", export_modpoll(canonical, plan, profile=profile).status)
+
     def test_witte_desktop_uses_documented_read_automation_only(self) -> None:
         canonical_map, read_plan = inputs()
         result = export_modpoll(canonical_map, read_plan, profile="witte-desktop")

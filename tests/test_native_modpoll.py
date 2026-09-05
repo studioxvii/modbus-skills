@@ -55,7 +55,7 @@ class NativeProconxTests(unittest.TestCase):
                 worker = threading.Thread(target=serve, daemon=True)
                 worker.start()
                 canonical, plan = inputs(point(protocol_offset=0, datatype=datatype, area=area,
-                    word_span=len(words), scale=None, engineering_offset=0))
+                    word_span=len(words), byte_order="ABCDEFGH" if len(words) == 4 else "ABCD", scale=None, engineering_offset=0))
                 result = export_modpoll(canonical, plan, profile="proconx-cli")
                 self.assertEqual("generated", result.status)
                 command = next(line for line in text(result, "commands.txt").splitlines() if line.startswith("modpoll "))
