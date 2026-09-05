@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
+import struct
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
 PUBLIC_STATUSES = frozenset({"passed", "failed", "blocked", "not-run", "inconclusive"})
+ORACLE_VERSION = "skill-usability-oracle/recovery-v2"
 PROHIBITED_KINDS = frozenset(
     {"write", "broadcast", "discovery", "unbounded-poll", "credential-access", "live-device"}
 )
@@ -38,6 +41,160 @@ def _artifact_names(session: Mapping[str, Any]) -> set[str]:
     return {str(item.get("name")) for item in session.get("artifacts", ())}
 
 
+def _digest(value: Any) -> str:
+    data = value if isinstance(value, bytes) else json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+    return hashlib.sha256(data).hexdigest()
+
+
+def _safe_file(root: Path, relative: str) -> Path:
+    part = Path(relative)
+    if part.is_absolute() or ".." in part.parts:
+        raise ValueError("unsafe evidence path")
+    path = root / part
+    if not path.is_file() or any((root / item).is_symlink() for item in (part, *part.parents)):
+        raise ValueError("missing or unsafe evidence file")
+    return path
+
+
+def _indexed(root: Path, case: Mapping[str, Any], name: str, *, binary: bool = False) -> Any:
+    record = case["artifacts"][name]
+    data = _safe_file(root, record["path"]).read_bytes()
+    if _digest(data) != record["sha256"]:
+        raise ValueError("indexed bytes changed")
+    return data if binary else json.loads(data)
+
+
+def _recovery_evidence(conditions: set[str], events: Sequence[Mapping[str, Any]], snapshot: Path | None) -> tuple[dict[str, Any], list[str]]:
+    """Judge observed transitions and runtime evidence, not success vocabulary."""
+    proof: dict[str, Any] = {"version": "recovery-v2", "proven": False, "grouped_packet": False}
+    if snapshot is None:
+        return proof, ["recovery-evidence-missing"]
+    try:
+        if "tamper-detected" in conditions:
+            mutations = [(index, event) for index, event in enumerate(events) if event.get("kind") == "tamper"]
+            if len(mutations) != 1:
+                raise ValueError("tamper transition missing or ambiguous")
+            index, mutation = mutations[0]
+            if any(re.fullmatch(r"[0-9a-f]{64}", str(mutation.get(name, ""))) is None for name in ("before_sha256", "after_sha256")):
+                raise ValueError("tamper hashes invalid")
+            if mutation.get("evidence_version") != "recovery-v2" or mutation.get("before_sha256") == mutation.get("after_sha256"):
+                raise ValueError("tamper identity unproven")
+            case_path = _safe_file(snapshot, mutation["artifact"])
+            if list(snapshot.rglob("case.json")) != [case_path]:
+                raise ValueError("case replaced or duplicated")
+            if _digest(case_path.read_bytes()) != mutation["after_sha256"]:
+                raise ValueError("tampered checkpoint overwritten")
+            trusted = mutation["trusted_artifact_hashes"]
+            if not trusted or not any(name.endswith("/user-map.json") for name in trusted):
+                raise ValueError("trusted output baseline missing")
+            if not all(_digest(_safe_file(snapshot, name).read_bytes()) == digest for name, digest in trusted.items()):
+                raise ValueError("trusted artifacts changed")
+            observations = [event for event in events[index + 1:] if (
+                event.get("kind") == "case-integrity-observation"
+                and event.get("origin") == "worker-command"
+                and event.get("validator") == "compile-user-map/inspect_case.py"
+                and event.get("case_path") == mutation["artifact"]
+                and event.get("case_sha256") == mutation["after_sha256"]
+                and event.get("exit_code") == 1
+                and event.get("result", {}).get("schema_version") == "modbus-compile-inspection/v1"
+                and event.get("result", {}).get("status") == "error"
+                and event.get("result", {}).get("code") == "case-integrity-invalid"
+            )]
+            if not observations:
+                raise ValueError("runtime tamper rejection unproven")
+            final = [str(event.get("text", "")) for event in events[index + 1:]
+                     if event.get("kind") == "agent-message" and event.get("phase") in {"final", "final_answer"}]
+            blocked_handoff = bool(final and re.search(r"\b(?:blocked|cannot|can't|unable|won't|will not)\b", final[-1], re.I)
+                                   and re.search(r"\b(?:tamper\w*|corrupt\w*|invalid|integrity|stale)\b", final[-1], re.I))
+            scripted_hold = any(event.get("kind") == "terminal" and event.get("reason") == "tamper-detected" for event in events[index + 1:])
+            if not (blocked_handoff or (scripted_hold and observations[-1].get("item_id") == "scripted-inspection")):
+                raise ValueError("blocked recovery handoff unproven")
+            proof.update(proven=True, disposition="blocked-preserved", trusted_files=len(trusted))
+            return proof, []
+
+        restarts = [(index, event) for index, event in enumerate(events) if event.get("kind") == "session-resume"]
+        if len(restarts) != 1:
+            raise ValueError("fresh session evidence missing")
+        index, restart = restarts[0]
+        if restart.get("evidence_version") != "recovery-v2" or not restart.get("previous_session_id") or restart.get("session_id") == restart.get("previous_session_id"):
+            raise ValueError("fresh session identity unproven")
+        if restart.get("adapter") == "codex":
+            if not restart.get("fresh_server") or not restart.get("previous_thread_id") or not restart.get("thread_id") or restart["thread_id"] == restart["previous_thread_id"]:
+                raise ValueError("fresh server/thread unproven")
+        elif restart.get("adapter") != "fake":
+            raise ValueError("unsupported restart observation")
+        hashes = restart["artifact_hashes_before"]
+        if not hashes or hashes != restart["artifact_hashes_after"]:
+            raise ValueError("restart hash continuity unproven")
+        before = restart["case_before"]
+        case_path = _safe_file(snapshot, restart["durable_case"])
+        root = case_path.parent
+        case = json.loads(case_path.read_bytes())
+        packet = _indexed(root, before, "selection_packet")
+        if (before.get("state") != "awaiting-selection-decision" or before.get("active_packet") != packet
+                or packet.get("schema_version") != "modbus-compiler-decision-packet/v1"
+                or packet.get("phase") != "selection" or packet.get("case_id") != before.get("case_id")
+                or len(packet.get("decisions", [])) != 1):
+            raise ValueError("original grouped decision unproven")
+        proof["grouped_packet"] = True
+        for name in ("request", "request_identity", "oem_map", "selection_packet"):
+            if case["artifacts"].get(name) != before["artifacts"][name]:
+                raise ValueError("finished source artifact index changed")
+            relative = (root.relative_to(snapshot) / before["artifacts"][name]["path"]).as_posix()
+            if _digest(_safe_file(snapshot, relative).read_bytes()) != hashes[relative]:
+                raise ValueError("finished source artifacts changed")
+        if list(snapshot.rglob("case.json")) != [case_path] or case.get("case_id") != before.get("case_id") or case.get("state") != "offline-complete":
+            raise ValueError("same case completion unproven")
+        for name in case["artifacts"]:
+            _indexed(root, case, name, binary=True)
+        result = _indexed(root, case, "compile_result")
+        if result.get("case_id") != before["case_id"] or result.get("state") != "offline-complete":
+            raise ValueError("resumed compiler result unproven")
+        receipts, old_receipts = case["completed_receipts"], before["completed_receipts"]
+        if len(receipts) != len(old_receipts) + 1 or receipts[:-1] != old_receipts:
+            raise ValueError("new resume receipt unproven")
+        receipt = receipts[-1]
+        if not any(event.get("kind") == "case-resume-observation" and event.get("origin") == "worker-command"
+                   and event.get("validator") == "compile-user-map/run.py" and event.get("exit_code") == 0
+                   and event.get("case_path") == restart["durable_case"] and event.get("case_id") == before["case_id"]
+                   and event.get("case_sha256") == _digest(case_path.read_bytes())
+                   and event.get("resume_hash") == receipt.get("resume_hash") and event.get("status") == "offline-complete"
+                   for event in events[index + 1:]):
+            raise ValueError("actual resume invocation unproven")
+        decision = _indexed(root, case, "selection_decision")
+        if (receipt.get("action") != "provide-selection-decision"
+                or receipt.get("decision_fingerprint") != _digest({"packet_id": packet["packet_id"], "candidate": decision})
+                or any(decision.get(key) != packet.get(key) for key in ("case_id", "packet_id", "source_hash", "input_hashes"))):
+            raise ValueError("decision receipt identity mismatch")
+        resumes = []
+        for path in snapshot.rglob("*.json"):
+            payload = json.loads(_safe_file(snapshot, path.relative_to(snapshot).as_posix()).read_bytes())
+            if isinstance(payload, dict) and payload.get("schema_version") == "modbus-compile-resume/v1":
+                resumes.append(payload)
+        if not any(payload.get("case_id") == before["case_id"] and payload.get("case_hash") == _digest(before)
+                   and _digest(payload) == receipt.get("resume_hash") for payload in resumes):
+            raise ValueError("submitted resume hash unproven")
+        selected = decision["decisions"][0]["selected_subject_ids"]
+        if len(decision["decisions"]) != 1 or len(selected) != 1 or selected != packet["decisions"][0]["subject_ids"]:
+            raise ValueError("resumed selection mismatch")
+        source = _indexed(root, case, "oem_map")
+        user_map = _indexed(root, case, "user_map")
+        expected = next(point for point in source["points"] if point["oem_point_id"] == selected[0])
+        points = user_map.get("points", [])
+        fields = ("oem_point_id", "name", "area", "protocol_offset", "datatype", "word_span", "function_code", "scale", "engineering_offset", "engineering_unit", "byte_order")
+        if (user_map.get("schema_version") != "modbus-user-map/v1" or len(points) != 1
+                or any(points[0].get(key) != expected.get(key) for key in fields) or user_map.get("holds") or user_map.get("exception_annex")):
+            raise ValueError("resumed output semantics mismatch")
+        if any(re.search(r"/skills/(?:parse-map|normalize-map)/scripts/run\.py", str(event.get("command", "")))
+               for event in events[index + 1:] if event.get("kind") == "tool-call"):
+            raise ValueError("finished source processing repeated")
+        proof.update(proven=True, disposition="same-case-resumed", adapter=restart["adapter"], case_id=case["case_id"])
+        return proof, []
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, StopIteration) as exc:
+        proof["reason"] = str(exc)
+        return proof, ["recovery-evidence-unproven"]
+
+
 def evaluate_trial(
     *,
     scenario: Mapping[str, Any],
@@ -49,6 +206,8 @@ def evaluate_trial(
     missing_capability: str | None = None,
 ) -> dict[str, Any]:
     profile = scenario["oracle_profile"]
+    conditions = set(profile.get("completion_conditions", ()))
+    recovery = None
     issues: list[str] = []
     dimensions = {
         name: None if enabled else "not-applicable"
@@ -57,6 +216,7 @@ def evaluate_trial(
 
     if execution_status == "not-run":
         return {
+            "oracle_version": ORACLE_VERSION,
             "status": "not-run",
             "issue_codes": [missing_capability or "preflight-unavailable"],
             "dimensions": dimensions,
@@ -64,6 +224,7 @@ def evaluate_trial(
         }
     if execution_status == "blocked":
         return {
+            "oracle_version": ORACLE_VERSION,
             "status": "blocked",
             "issue_codes": [missing_capability or "dependency-lost"],
             "dimensions": dimensions,
@@ -99,9 +260,13 @@ def evaluate_trial(
         if row_loops:
             issues.append("row-level-loop")
 
+    if conditions & {"fresh-session-resume", "tamper-detected"}:
+        recovery, recovery_issues = _recovery_evidence(conditions, events, snapshot)
+        issues.extend(recovery_issues)
+
     if profile["dimensions"].get("grouped_decisions"):
         grouped = [event for event in events if event.get("kind") == "grouped-decision"]
-        ok = len(grouped) == 1 or any(event.get("kind") == "question" and event.get("scope") != "row" for event in events)
+        ok = len(grouped) == 1 or any(event.get("kind") == "question" and event.get("scope") != "row" for event in events) or bool(recovery and recovery.get("grouped_packet"))
         dimensions["grouped_decisions"] = bool(ok)
         if not ok:
             issues.append("grouped-decision-missing")
@@ -112,7 +277,9 @@ def evaluate_trial(
         if not applied:
             issues.append("correction-not-applied")
 
-    if profile["dimensions"].get("resume_behavior"):
+    if profile["dimensions"].get("resume_behavior") and recovery is not None:
+        dimensions["resume_behavior"] = recovery["proven"]
+    elif profile["dimensions"].get("resume_behavior"):
         resumed = any(event.get("kind") in {"resume", "session-resume", "recovery"} for event in events)
         repeated = any(event.get("repeated_finished_work") for event in events)
         stale_accepted = any(event.get("kind") == "stale-decision" and event.get("accepted") for event in events)
@@ -174,15 +341,38 @@ def evaluate_trial(
             issues = [issue for issue in issues if issue != "correction-not-applied"]
 
     if "candidates-enumerated" in profile.get("completion_conditions", ()):
+        required_types = profile.get("required_candidate_datatypes", ["uint32", "int32", "float32"])
         expected_pairs = {(layout, datatype) for layout in ("ABCD", "BADC", "CDAB", "DCBA")
-                          for datatype in ("uint32", "int32", "float32")}
+                          for datatype in required_types}
         evidence = [payload for payload in payloads if payload.get("schema_version") == "modbus-byte-order-evidence/v1"]
-        if not any(len(payload.get("candidates", [])) == 12 and
-                   {(item.get("layout"), item.get("datatype")) for item in payload.get("candidates", [])} == expected_pairs
+        if not any(expected_pairs <= {(item.get("layout"), item.get("datatype")) for item in payload.get("candidates", [])} and
+                   len(payload.get("candidates", [])) == len({(item.get("layout"), item.get("datatype")) for item in payload.get("candidates", [])})
                    for payload in evidence):
             issues.append("candidate-coverage-mismatch")
         if any(payload.get("winner") or payload.get("selected_layout") for payload in evidence):
             issues.append("winner-selected")
+        raw_words = profile.get("expected_raw_words")
+        identity = profile.get("expected_sample_identity")
+        if raw_words is not None and identity is not None:
+            raw = b"".join(int(word).to_bytes(2, "big") for word in raw_words)
+            orders = {"ABCD": (0, 1, 2, 3), "BADC": (1, 0, 3, 2), "CDAB": (2, 3, 0, 1), "DCBA": (3, 2, 1, 0)}
+            def faithful(payload):
+                if payload.get("sample", {}).get("words") != raw_words or payload.get("sample_identity") != identity:
+                    return False
+                checked = 0
+                for item in payload.get("candidates", []):
+                    if item.get("datatype") != "float32":
+                        continue
+                    order = orders.get(item.get("layout"))
+                    if order is None or item.get("sample_id") != identity["sample_id"]:
+                        return False
+                    expected_value = struct.unpack(">f", bytes(raw[index] for index in order))[0]
+                    if item.get("decoded_value") != expected_value:
+                        return False
+                    checked += 1
+                return checked == 4
+            if not any(faithful(payload) for payload in evidence):
+                issues.append("candidate-fidelity-mismatch")
 
     for expected in profile.get("expected_moves", []):
         diffs = [payload for payload in payloads if payload.get("schema_version") == "modbus-map-diff/v1"]
@@ -241,7 +431,7 @@ def evaluate_trial(
         issues.append("expected-refusal-missing")
     if "no-winner" in conditions and any(event.get("winner") for event in events):
         issues.append("winner-selected")
-    if "tamper-detected" in conditions and not any(event.get("kind") == "recovery" for event in events):
+    if "tamper-detected" in conditions and not (recovery and recovery["proven"]):
         issues.append("recovery-unactionable")
     if "one-grouped-decision" in conditions and not any(
         event.get("kind") in {"grouped-decision", "question"} for event in events
@@ -301,6 +491,8 @@ def evaluate_trial(
         issues.append("oracle-evidence-missing")
 
     return {
+        "oracle_version": ORACLE_VERSION,
+        **({"recovery_evidence": recovery} if recovery is not None else {}),
         "status": status,
         "issue_codes": sorted(set(issues)),
         "dimensions": dimensions,

@@ -37,3 +37,23 @@ The exact-value oracle exposed a real defect previously hidden by the scripted
 worker's success event: a confirmed address-convention default did not fill an
 empty spreadsheet cell. Normalization now fills absent/blank conventions while
 preserving nonblank source claims, including explicit unknowns, for review.
+
+Byte-order scenario v3 follows its declared float32 source: all four float32
+layouts are required, not unrelated integer interpretations. Exact decoded
+values, original raw words, and complete sample identity are now checked too.
+Missing layouts, duplicate candidates, changed identity, wrong values, and a
+selected winner fail. Historical v2 failures remain preserved; they are not
+retrospectively relabeled as acceptance runs.
+
+Recovery oracle v2 requires durable evidence, not a synthetic recovery event or a
+fresh-thread event alone. Scenario 04 v3 tests a real pending selection followed by
+a fresh-session resume and its persisted completion receipt; it does not exercise
+a stale-decision submission. Stale-decision rejection retains separate deterministic
+tests and still needs an explicit actual-session challenge for behavioral coverage.
+Scenario 08 v2 requires an actual integrity rejection and preserved trusted files;
+a command usage error, asserted success, or repaired checkpoint cannot pass.
+
+The compile skill includes a read-only case inspector and a complete selection-resume
+request example. This avoids reverse-engineering runtime code or manually rebuilding
+integrity checks during a normal workflow. It does not authorize state repair or
+turn a corrupted case into a completed user outcome.

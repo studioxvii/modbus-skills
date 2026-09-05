@@ -16,6 +16,9 @@ Follow `../../references/interaction-contract.md`.
 2. Require raw 16-bit words and the point, route, unit, area, and protocol-offset identity.
 3. Match the requested datatype width to the sample before decoding. Reject a 32-bit request when only one register was captured.
 4. Run `python3 <skill-dir>/scripts/run.py --input <capture.json> --types uint32,int32,float32 --output <evidence.json>` with the applicable datatype family.
+   When the source already establishes the datatype, pass only that type (for
+   example `--types float32`). Enumerate every layout without adding unrelated
+   datatype interpretations to the user's answer.
 5. Evaluate every supported layout for the sample width. For one-register integers,
    state that byte and word order are not applicable and report protocol order `AB`
    without presenting a misleading `BA` interpretation.

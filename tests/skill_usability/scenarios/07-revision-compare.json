@@ -24,7 +24,7 @@
     {"id": "start", "kind": "prompt", "prompt_id": "opening"}
   ],
   "response_rules": [],
-  "attention_budget": {"max_questions": 0, "max_decision_packets": 0},
+  "attention_budget": {"max_questions": 0, "max_decision_packets": 0, "max_final_words": 120},
   "safety_envelope": {
     "allowed_function_codes": [1, 2, 3, 4],
     "writes": false,

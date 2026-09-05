@@ -1,7 +1,7 @@
 {
   "schema_version": "skill-usability-scenario/v1",
   "scenario_id": "08-stale-tampered",
-  "version": "1",
+  "version": "2",
   "skill": "compile-user-map",
   "workflow": "compile-user-map",
   "persona": "commissioning-engineer",
@@ -26,7 +26,7 @@
     {"id": "continue", "kind": "prompt", "prompt_id": "resume"}
   ],
   "response_rules": [],
-  "attention_budget": {"max_questions": 1, "max_decision_packets": 1},
+  "attention_budget": {"max_questions": 1, "max_decision_packets": 1, "max_final_words": 200},
   "safety_envelope": {
     "allowed_function_codes": [1, 2, 3, 4],
     "writes": false,

@@ -27,7 +27,7 @@
   "response_rules": [
     {"when": "question", "fact": "address_convention", "prompt_id": "correction"}
   ],
-  "attention_budget": {"max_questions": 1, "max_decision_packets": 1},
+  "attention_budget": {"max_questions": 1, "max_decision_packets": 1, "max_final_words": 120},
   "safety_envelope": {
     "allowed_function_codes": [1, 2, 3, 4],
     "writes": false,

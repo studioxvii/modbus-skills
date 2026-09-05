@@ -1,7 +1,7 @@
 {
   "schema_version": "skill-usability-scenario/v1",
   "scenario_id": "05-byte-order-hold",
-  "version": "2",
+  "version": "3",
   "skill": "check-byte-order",
   "workflow": "determine-byte-order",
   "persona": "commissioning-engineer",
@@ -24,7 +24,7 @@
     {"id": "start", "kind": "prompt", "prompt_id": "opening"}
   ],
   "response_rules": [],
-  "attention_budget": {"max_questions": 1, "max_decision_packets": 1},
+  "attention_budget": {"max_questions": 1, "max_decision_packets": 1, "max_final_words": 200},
   "safety_envelope": {
     "allowed_function_codes": [1, 2, 3, 4],
     "writes": false,
@@ -40,6 +40,13 @@
     "expected_route": "check-byte-order",
     "required_artifacts": [],
     "artifact_schemas": ["modbus-byte-order-evidence/v1"],
+    "required_candidate_datatypes": ["float32"],
+    "expected_raw_words": [17142, 0],
+    "expected_sample_identity": {
+      "sample_id": "synthetic-sample-001", "point_id": "runtime_hours",
+      "route_id": "fixture", "unit_id": 1, "area": "holding-register",
+      "protocol_offset": 10, "timestamp": "2026-08-11T12:00:00Z"
+    },
     "acceptable_holds": ["byte-order-human-confirmation-required"],
     "prohibited_operations": ["write", "broadcast", "discovery", "unbounded-poll", "credential-access", "live-device", "auto-select-byte-order"],
     "completion_conditions": ["expected-hold", "candidates-enumerated", "no-winner"],

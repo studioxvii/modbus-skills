@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -168,6 +169,146 @@ class TrialSession:
         return stripped_worker_env(home=self.home, runtime=self.plugin_root / "runtime")
 
 
+def work_file_hashes(session: TrialSession) -> dict[str, str]:
+    """Hash regular durable files without following worker-created symlinks."""
+    result = {}
+    for path in sorted(session.work.rglob("*")):
+        relative = path.relative_to(session.work)
+        if any((session.work / parent).is_symlink() for parent in (relative, *relative.parents)):
+            continue
+        if path.is_file():
+            result[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return result
+
+
+def unique_case_path(session: TrialSession) -> Path:
+    candidates = list(session.work.rglob("case.json"))
+    if len(candidates) != 1:
+        raise SessionError("durable-case-missing" if not candidates else "durable-case-ambiguous")
+    path = candidates[0]
+    relative = path.relative_to(session.work)
+    if (
+        not path.is_file()
+        or not path.resolve().is_relative_to(session.work.resolve())
+        or any((session.work / parent).is_symlink() for parent in (relative, *relative.parents))
+    ):
+        raise SessionError("durable-case-outside-work")
+    return path
+
+
+def record_transition(session: TrialSession, event: dict[str, Any]) -> None:
+    session.events.append(event)
+    if "transcript" in session.state:
+        session.state["transcript"].append({"role": "harness", "event": event})
+
+
+def _python_command(item: Mapping[str, Any]) -> list[str]:
+    command = shlex.split(str(item.get("command", "")))
+    if len(command) == 3 and Path(command[0]).name in {"bash", "sh"} and command[1] in {"-lc", "-c"}:
+        command = shlex.split(command[2])
+    if command and command[0] == "PYTHONDONTWRITEBYTECODE=1":
+        command = command[1:]
+    if not command or re.fullmatch(r"python3(?:\.[0-9]+)?", Path(command[0]).name) is None:
+        return []
+    executable = shutil.which(command[0])
+    trusted = {Path(sys.executable).resolve(), Path(shutil.which("python3") or sys.executable).resolve()}
+    if executable is None or Path(executable).resolve() not in trusted:
+        return []
+    return command
+
+
+def observe_case_resume(session: TrialSession, item: Mapping[str, Any]) -> None:
+    """Observe the trusted resume wrapper and bind its request/result bytes."""
+    try:
+        command = _python_command(item)
+        wrapper = session.plugin_root / "skills/compile-user-map/scripts/run.py"
+        if len(command) != 6 or (session.work / command[1]).resolve() != wrapper.resolve():
+            return
+        options = dict(zip(command[2::2], command[3::2]))
+        if set(options) != {"--case", "--resume"} or item.get("exitCode") != 0:
+            return
+        case_path = session.work / options["--case"]
+        if case_path.name != "case.json":
+            case_path /= "case.json"
+        if case_path.resolve() != unique_case_path(session).resolve():
+            return
+        resume_path = (session.work / options["--resume"]).resolve()
+        if not resume_path.is_relative_to(session.work.resolve()) or not resume_path.is_file():
+            return
+        result = json.loads(str(item.get("aggregatedOutput") or ""))
+        if result.get("command") != "compile-user-map" or result.get("status") != "offline-complete":
+            return
+        resume = _read_json(resume_path)
+        record_transition(session, {
+            "kind": "case-resume-observation", "evidence_version": "recovery-v2", "origin": "worker-command",
+            "validator": "compile-user-map/run.py", "item_id": item.get("id"), "exit_code": 0,
+            "case_path": case_path.resolve().relative_to(session.work.resolve()).as_posix(),
+            "case_sha256": hashlib.sha256(case_path.read_bytes()).hexdigest(),
+            "resume_hash": stable_input_hash(resume), "case_id": result.get("case_id"), "status": result["status"],
+        })
+    except (OSError, ValueError, TypeError, AttributeError, SessionError):
+        return
+
+
+def observe_case_inspection(session: TrialSession, item: Mapping[str, Any]) -> None:
+    """Record a real invocation of the trusted inspector, never echoed claims."""
+    try:
+        command = _python_command(item)
+        if len(command) != 3:
+            return
+        inspector = session.plugin_root / "skills/compile-user-map/scripts/inspect_case.py"
+        script = (session.work / command[1]).resolve()
+        if script != inspector.resolve():
+            return
+        target = session.work / command[2]
+        case_path = target if target.name == "case.json" else target / "case.json"
+        if case_path.resolve() != unique_case_path(session).resolve():
+            return
+        output = str(item.get("aggregatedOutput") or "")
+        payload = json.loads(output)
+        if payload.get("schema_version") != "modbus-compile-inspection/v1":
+            return
+        if (payload.get("status"), item.get("exitCode")) not in {("valid", 0), ("error", 1)}:
+            return
+        record_transition(session, {
+            "kind": "case-integrity-observation", "evidence_version": "recovery-v2",
+            "origin": "worker-command", "item_id": item.get("id"),
+            "validator": "compile-user-map/inspect_case.py", "exit_code": item.get("exitCode"),
+            "case_path": case_path.resolve().relative_to(session.work.resolve()).as_posix(),
+            "case_sha256": hashlib.sha256(case_path.read_bytes()).hexdigest(),
+            "output_sha256": hashlib.sha256(output.encode()).hexdigest(), "result": payload,
+        })
+    except (OSError, ValueError, TypeError, AttributeError, SessionError):
+        # Unsupported command forms or observations remain unproven.
+        return
+
+
+def tamper_durable_case(session: TrialSession) -> None:
+    """Apply the declared fault, not a worker recovery or an approval."""
+    path = unique_case_path(session)
+    payload = _read_json(path)
+    if not isinstance(payload, dict) or not isinstance(payload.get("state"), str):
+        raise SessionError("tamper-case-invalid")
+    if payload["state"] == "tampered":
+        raise SessionError("tamper-case-already-mutated")
+    before = work_file_hashes(session)
+    relative = path.relative_to(session.work).as_posix()
+    payload["state"] = "tampered"
+    _write_json(path, payload)
+    after = work_file_hashes(session)
+    trusted = {name: digest for name, digest in before.items() if name != relative}
+    if {name: digest for name, digest in after.items() if name != relative} != trusted:
+        raise SessionError("tamper-changed-trusted-artifacts")
+    session.durable_case = path.parent
+    session.state["tamper_case"] = relative
+    record_transition(session, {
+        "kind": "tamper", "actor": "test-harness", "artifact": relative, "evidence_version": "recovery-v2",
+        "mutation": {"field": "state", "value": "tampered"},
+        "before_sha256": before[relative], "after_sha256": after[relative],
+        "trusted_artifact_hashes": trusted, "trusted_artifacts_unchanged": True,
+    })
+
+
 def copy_plugin(destination: Path) -> Path:
     plugin = destination / "plugin"
     shutil.copytree(
@@ -186,6 +327,16 @@ def seed_workspace(
     parent: Path,
 ) -> TrialSession:
     workspace = Path(tempfile.mkdtemp(prefix="skill-usability-", dir=parent))
+    try:
+        return _seed_workspace(scenario, campaign_dir=campaign_dir, workspace=workspace)
+    except BaseException:
+        shutil.rmtree(workspace)
+        raise
+
+
+def _seed_workspace(
+    scenario: Mapping[str, Any], *, campaign_dir: Path, workspace: Path
+) -> TrialSession:
     plugin = copy_plugin(workspace)
     fixtures = workspace / "fixtures"
     work = workspace / "work"
@@ -230,13 +381,24 @@ class SessionAdapter:
         raise NotImplementedError
 
     def continue_session(self, session: TrialSession, user_text: str | None) -> TrialSession:
+        previous = session.session_id
+        before = work_file_hashes(session)
+        try:
+            case_path = unique_case_path(session)
+            case = _read_json(case_path)
+        except (SessionError, OSError, ValueError):
+            case_path, case = None, None
         session.interrupted = False
         session.session_id = str(uuid.uuid4())
         session.events.append(
             {
                 "kind": "session-resume",
+                "evidence_version": "recovery-v2", "adapter": self.name,
+                "previous_session_id": previous,
                 "session_id": session.session_id,
-                "durable_case": session.durable_case.name if session.durable_case else None,
+                "durable_case": case_path.relative_to(session.work).as_posix() if case_path else None,
+                "case_before": case,
+                "artifact_hashes_before": before, "artifact_hashes_after": work_file_hashes(session),
             }
         )
         return session
@@ -298,6 +460,8 @@ class ScriptedWorker:
             capture_output=True,
             check=False,
         )
+        observe_case_resume(session, {"id": "scripted-wrapper", "command": shlex.join([sys.executable, str(wrapper), *args]),
+                                      "exitCode": result.returncode, "aggregatedOutput": result.stdout + result.stderr})
         receipt: dict[str, Any]
         try:
             parsed = json.loads(result.stdout) if result.stdout else {}
@@ -450,9 +614,9 @@ class ScriptedWorker:
         except CompilerError:
             self._event(session, "stale-decision", accepted=False, issue="stale-decision-rejected")
         resume = selection_resume(_read_json(case_root / "case.json"), packet, "temperature")
-        result = compile_user_map(None, case_root, resume=resume)
-        session.tool_calls += 1
-        self._event(session, "wrapper-call", skill="compile-user-map", return_code=0)
+        _write_json(case_root / "control/resume-submitted.json", resume)
+        self._wrapper(session, "compile-user-map", ["--case", str(case_root), "--resume", str(case_root / "control/resume-submitted.json")])
+        result = _read_json(case_root / "compile-result.json")
         self._event(session, "resume", repeated_finished_work=False)
         for name in ("user-map.json", "user-map.csv", "user-map.md"):
             self._artifact(session, case_root / "output" / name, "modbus-user-map/v1" if name.endswith(".json") else None)
@@ -530,28 +694,14 @@ class ScriptedWorker:
             self._artifact(session, case_root / "output" / "user-map.json", "modbus-user-map/v1")
             return
         case_root = session.durable_case
-        trusted = hashlib.sha256((case_root / "output" / "user-map.json").read_bytes()).hexdigest()
         case_path = case_root / "case.json"
-        payload = _read_json(case_path)
-        payload["state"] = "tampered"
-        _write_json(case_path, payload)
-        self._event(session, "tamper", artifact="case.json")
-        try:
-            compile_user_map(
-                None,
-                case_root,
-                resume={
-                    "schema_version": "modbus-compile-resume/v1",
-                    "case_id": payload.get("case_id", "unknown"),
-                    "case_hash": "0" * 64,
-                    "action": "provide-selection-decision",
-                },
-            )
-            self._event(session, "tamper-accepted", accepted=True)
-        except (CompilerError, Exception):
-            self._event(session, "recovery", issue="stale-or-tampered-case", trusted_hash=trusted)
-        current = hashlib.sha256((case_root / "output" / "user-map.json").read_bytes()).hexdigest()
-        self._event(session, "trusted-artifact", preserved=current == trusted)
+        if session.state.get("tamper_case") != case_path.relative_to(session.work).as_posix():
+            raise SessionError("tamper-transition-not-driven")
+        args = [sys.executable, str(session.plugin_root / "skills/compile-user-map/scripts/inspect_case.py"), str(case_root)]
+        result = subprocess.run(args, cwd=session.work, env=session.env, text=True, capture_output=True, check=False)
+        session.tool_calls += 1
+        observe_case_inspection(session, {"id": "scripted-inspection", "command": shlex.join(args),
+                                          "exitCode": result.returncode, "aggregatedOutput": result.stdout + result.stderr})
         self._finish(session, "tamper-detected", hold="stale-or-tampered-case")
 
 
@@ -594,10 +744,18 @@ class CodexSessionAdapter(SessionAdapter):
         self.preflight()
         if hash_tree(session.plugin_root) != session.source_plugin_hash:
             raise SessionError("installed plugin changed before worker start")
-        session.state["deadline"] = time.monotonic() + int(self.budget["max_seconds"])
-        rpc = CodexRpc(shutil.which("codex"), max_bytes=int(self.budget["max_output_bytes"]))
+        limits = session.state.setdefault("budget", dict(self.budget))
+        session.state.setdefault("deadline", time.monotonic() + int(limits["max_seconds"]))
+        if time.monotonic() >= session.state["deadline"]:
+            raise SessionError("codex-time-budget-exceeded")
+        remaining_bytes = int(limits["max_output_bytes"]) - session.state.get("output_bytes_used", 0)
+        if remaining_bytes <= 0:
+            raise SessionError("codex-output-budget-exceeded")
+        if "rpc" in session.state:
+            raise SessionError("codex-session-already-started")
+        rpc = CodexRpc(shutil.which("codex"), max_bytes=remaining_bytes)
         session.state["rpc"] = rpc
-        session.state["transcript"] = []
+        session.state.setdefault("transcript", [])
         try:
             rpc.call("initialize", {"clientInfo": {"name": "modbus_skill_tests", "version": "1.0"}, "capabilities": {"experimentalApi": True}}, deadline=session.state["deadline"])
             rpc.send({"method": "initialized", "params": {}})
@@ -622,10 +780,57 @@ class CodexSessionAdapter(SessionAdapter):
             }, deadline=session.state["deadline"])
             session.state["thread_id"] = result["thread"]["id"]
             session.state["actual_model"] = result.get("model")
+            session.state["thread_first_turn"] = True
         except (RpcError, KeyError) as exc:
-            rpc.close()
-            session.state.pop("rpc", None)
+            self._release_rpc(session)
             raise PreflightUnavailable(str(exc)) from exc
+        return session
+
+    def _release_rpc(self, session: TrialSession) -> None:
+        rpc = session.state.pop("rpc", None)
+        if rpc is None:
+            return
+        try:
+            rpc.close()
+        finally:
+            reader = getattr(rpc, "reader", None)
+            if reader is not None:
+                reader.join(timeout=1)
+            session.state["output_bytes_used"] = session.state.get("output_bytes_used", 0) + rpc.bytes_read
+
+    def continue_session(self, session: TrialSession, user_text: str | None) -> TrialSession:
+        previous_session = session.session_id
+        previous_thread = session.state.get("thread_id")
+        # End the old server before inspecting or exposing durable work to a
+        # fresh thread. Never reset the original counters, deadline or transcript.
+        self._release_rpc(session)
+        case_path = unique_case_path(session)
+        session.durable_case = case_path.parent
+        before = work_file_hashes(session)
+        case_before = _read_json(case_path)
+        try:
+            self.start(session)
+            if session.state["thread_id"] == previous_thread:
+                raise SessionError("resume-reused-thread-id")
+            after = work_file_hashes(session)
+            if before != after:
+                raise SessionError("restart-changed-durable-artifacts")
+        except BaseException:
+            self._release_rpc(session)
+            raise
+        session.session_id = str(uuid.uuid4())
+        session.interrupted = False
+        session.terminal = False
+        record_transition(session, {
+            "kind": "session-resume", "actor": "test-harness",
+            "evidence_version": "recovery-v2", "adapter": self.name, "case_before": case_before,
+            "session_id": session.session_id, "previous_session_id": previous_session,
+            "previous_thread_id": previous_thread, "thread_id": session.state["thread_id"],
+            "fresh_server": True, "durable_case": str(case_path.relative_to(session.work)),
+            "artifact_hashes_before": before, "artifact_hashes_after": after,
+            "deadline": session.state["deadline"], "output_bytes_used": session.state["output_bytes_used"],
+            "turn_count": session.turn_count, "tool_calls": session.tool_calls,
+        })
         return session
 
     def turn(self, session: TrialSession, user_text: str | None) -> list[dict[str, Any]]:
@@ -634,12 +839,13 @@ class CodexSessionAdapter(SessionAdapter):
         rpc = session.state["rpc"]
         before = len(session.events)
         session.turn_count += 1
-        if session.turn_count > int(self.budget["max_turns"]):
+        limits = session.state["budget"]
+        if session.turn_count > int(limits["max_turns"]):
             raise SessionError("turn-budget-exceeded")
         session.awaiting_user = False
         session.terminal = False
         inputs = [{"type": "text", "text": user_text or "Continue the current task from its saved artifacts."}]
-        if session.turn_count == 1:
+        if session.state.pop("thread_first_turn", False):
             skill = session.scenario["entry_policy"]["skill"]
             inputs.append({"type": "skill", "name": skill, "path": str(session.plugin_root / "skills" / skill / "SKILL.md")})
             session.events.append({"kind": "skill-selected", "skill": skill, "invocation": session.scenario["entry_policy"]["invocation"]})
@@ -658,11 +864,13 @@ class CodexSessionAdapter(SessionAdapter):
                     if kind == "agentMessage":
                         text = item.get("text", "")
                         texts.append(text)
-                        session.events.append({"kind": "agent-message", "text": text})
+                        session.events.append({"kind": "agent-message", "text": text, "phase": item.get("phase")})
                     elif kind == "commandExecution":
                         session.tool_calls += 1
                         session.events.append({"kind": "tool-call", "command": item.get("command"), "exit_code": item.get("exitCode")})
-                        if session.tool_calls > int(self.budget["max_tool_calls"]):
+                        observe_case_inspection(session, item)
+                        observe_case_resume(session, item)
+                        if session.tool_calls > int(limits["max_tool_calls"]):
                             raise SessionError("tool-call-budget-exceeded")
                 if method == "turn/completed":
                     if params.get("turn", {}).get("status") != "completed":
@@ -720,15 +928,15 @@ class CodexSessionAdapter(SessionAdapter):
                                        "winner": payload.get("winner") or payload.get("selected_layout")})
 
     def cleanup(self, session: TrialSession) -> dict[str, Any]:
-        rpc = session.state.pop("rpc", None)
-        if rpc:
-            rpc.close()
-        return super().cleanup(session)
+        try:
+            self._release_rpc(session)
+        finally:
+            result = super().cleanup(session)
+        return result
 
 
 def interrupt_and_continue(adapter: SessionAdapter, session: TrialSession) -> TrialSession:
-    if not session.interrupted:
-        return session
+    session.interrupted = True
     previous = session.session_id
     resumed = adapter.continue_session(session, None)
     if resumed.session_id == previous:
