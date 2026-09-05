@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -579,30 +580,140 @@ class FakeSessionAdapter(SessionAdapter):
 class CodexSessionAdapter(SessionAdapter):
     name = "codex"
 
+    def __init__(self, *, model: str | None = None, budget: Mapping[str, Any] | None = None):
+        self.model = model
+        self.budget = dict(budget or {"max_seconds": 120, "max_turns": 8, "max_tool_calls": 20, "max_output_bytes": 2_000_000})
+
     def preflight(self) -> dict[str, Any]:
         executable = shutil.which("codex")
         if not executable:
             raise PreflightUnavailable("codex-cli")
-        schema = subprocess.run(
-            [executable, "app-server", "generate-json-schema", "--experimental"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if schema.returncode != 0:
-            raise PreflightUnavailable("codex-app-server-schema")
-        text = schema.stdout + schema.stderr
-        for capability in ("skills/list", "thread/start", "turn/start"):
-            if capability not in text and capability.replace("/", ".") not in text:
-                raise PreflightUnavailable(f"codex-capability:{capability}")
         return {"ok": True, "adapter": self.name, "executable": Path(executable).name}
 
     def start(self, session: TrialSession) -> TrialSession:
+        from .codex_rpc import CodexRpc, RpcError
+
         self.preflight()
-        raise PreflightUnavailable("codex-fresh-session-not-wired")
+        if hash_tree(session.plugin_root) != session.source_plugin_hash:
+            raise SessionError("installed plugin changed before worker start")
+        session.state["deadline"] = time.monotonic() + int(self.budget["max_seconds"])
+        rpc = CodexRpc(shutil.which("codex"), max_bytes=int(self.budget["max_output_bytes"]))
+        session.state["rpc"] = rpc
+        session.state["transcript"] = []
+        try:
+            rpc.call("initialize", {"clientInfo": {"name": "modbus_skill_tests", "version": "1.0"}, "capabilities": {"experimentalApi": True}}, deadline=session.state["deadline"])
+            rpc.send({"method": "initialized", "params": {}})
+            # Only the work directory is writable. Fixture/plugin reads do not
+            # grant access to siblings containing grading data or other trials.
+            profile = {
+                "filesystem": {":minimal": "read", str(Path(shutil.which("codex")).resolve().parent): "read", str(session.plugin_root): "read", str(session.fixtures): "read", str(session.work): "write"},
+                "network": {"enabled": False},
+            }
+            result = rpc.call("thread/start", {
+                "cwd": str(session.work), "ephemeral": True,
+                "approvalPolicy": "never", "permissions": "modbus-test",
+                "model": self.model,
+                "config": {"permissions": {"modbus-test": profile}, "features": {"apps": False, "connectors": False}},
+                "developerInstructions": (
+                    "Complete the user's Modbus task using the supplied plugin and fixtures. "
+                    "Write generated results only in the current work directory. "
+                    "This is an isolated offline test: no device/network access, credentials, installs, or changes to the plugin. "
+                    "Do not consult grading data or other trials. Ask for missing facts normally; a simulated user will respond. "
+                    f"Plugin: {session.plugin_root}. Fixtures: {session.fixtures}."
+                ),
+            }, deadline=session.state["deadline"])
+            session.state["thread_id"] = result["thread"]["id"]
+            session.state["actual_model"] = result.get("model")
+        except (RpcError, KeyError) as exc:
+            rpc.close()
+            session.state.pop("rpc", None)
+            raise PreflightUnavailable(str(exc)) from exc
+        return session
 
     def turn(self, session: TrialSession, user_text: str | None) -> list[dict[str, Any]]:
-        raise PreflightUnavailable("codex-fresh-session-not-wired")
+        from .codex_rpc import RpcError
+
+        rpc = session.state["rpc"]
+        before = len(session.events)
+        session.turn_count += 1
+        if session.turn_count > int(self.budget["max_turns"]):
+            raise SessionError("turn-budget-exceeded")
+        session.awaiting_user = False
+        session.terminal = False
+        inputs = [{"type": "text", "text": user_text or "Continue the current task from its saved artifacts."}]
+        if session.turn_count == 1:
+            skill = session.scenario["entry_policy"]["skill"]
+            inputs.append({"type": "skill", "name": skill, "path": str(session.plugin_root / "skills" / skill / "SKILL.md")})
+            session.events.append({"kind": "skill-selected", "skill": skill, "invocation": session.scenario["entry_policy"]["invocation"]})
+        session.state["transcript"].append({"role": "user", "text": user_text})
+        texts: list[str] = []
+        try:
+            rpc.call("turn/start", {"threadId": session.state["thread_id"], "input": inputs}, deadline=session.state["deadline"])
+            while True:
+                message = rpc.pending.pop(0) if rpc.pending else rpc.next(session.state["deadline"])
+                session.state["transcript"].append(message)
+                method = message.get("method")
+                params = message.get("params", {})
+                if method == "item/completed":
+                    item = params.get("item", {})
+                    kind = item.get("type")
+                    if kind == "agentMessage":
+                        text = item.get("text", "")
+                        texts.append(text)
+                        session.events.append({"kind": "agent-message", "text": text})
+                    elif kind == "commandExecution":
+                        session.tool_calls += 1
+                        session.events.append({"kind": "tool-call", "command": item.get("command"), "exit_code": item.get("exitCode")})
+                        if session.tool_calls > int(self.budget["max_tool_calls"]):
+                            raise SessionError("tool-call-budget-exceeded")
+                if method == "turn/completed":
+                    if params.get("turn", {}).get("status") != "completed":
+                        raise SessionError("model-turn-failed")
+                    break
+        except RpcError as exc:
+            raise SessionError(str(exc)) from exc
+        self._observe_artifacts(session)
+        final = texts[-1] if texts else ""
+        session.state["final_text"] = final
+        recommendation = re.search(r"Recommended next:\s*`?([a-z-]+)", final)
+        if recommendation:
+            session.events.append({"kind": "recommendation", "recommended_skill": recommendation.group(1)})
+        if "?" in final:
+            session.awaiting_user = True
+            session.events.append({"kind": "question", "scope": "group", "prompt": final})
+        else:
+            session.terminal = True
+        session.terminal_reason = "awaiting-user" if session.awaiting_user else "completed"
+        return session.events[before:]
+
+    def _observe_artifacts(self, session: TrialSession) -> None:
+        session.artifacts.clear()
+        for path in sorted(session.work.rglob("*")):
+            if not path.is_file() or path.is_symlink() or "__pycache__" in path.parts:
+                continue
+            data = path.read_bytes()
+            session.artifacts.append({"name": path.name, "path": str(path.relative_to(session.work)), "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
+            if path.suffix != ".json":
+                continue
+            try:
+                payload = json.loads(data)
+            except ValueError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if path.name == "compile-result.json":
+                session.events.append({"kind": "compiler-state", "state": payload.get("state")})
+            for hold in payload.get("holds", []):
+                if isinstance(hold, dict):
+                    session.events.append({"kind": "hold", "code": hold.get("code")})
+            if payload.get("schema_version") == "modbus-map-diff/v1":
+                session.events.append({"kind": "comparison", "moved": payload.get("moved", [])})
+
+    def cleanup(self, session: TrialSession) -> dict[str, Any]:
+        rpc = session.state.pop("rpc", None)
+        if rpc:
+            rpc.close()
+        return super().cleanup(session)
 
 
 def interrupt_and_continue(adapter: SessionAdapter, session: TrialSession) -> TrialSession:

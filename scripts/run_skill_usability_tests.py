@@ -75,9 +75,24 @@ def run_campaign(
     mode: str,
     output: Path,
     campaign_path: Path | None = None,
+    scenario_ids: list[str] | None = None,
+    repetitions_override: int | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     campaign = load_campaign(campaign_path)
-    adapter = make_adapter(mode)
+    if scenario_ids:
+        unknown = set(scenario_ids) - set(campaign["scenarios"])
+        if unknown:
+            raise RunnerError("unknown scenario selection")
+        campaign["scenarios"] = [name for name in campaign["scenarios"] if name in scenario_ids]
+        campaign["loaded_scenarios"] = [item for item in campaign["loaded_scenarios"] if item["scenario_id"] in scenario_ids]
+    if repetitions_override is not None:
+        if not 1 <= repetitions_override <= 20:
+            raise RunnerError("repetitions must be 1 through 20")
+        campaign["real_model_repetitions"] = repetitions_override
+    if model:
+        campaign["worker_model"] = model
+    adapter = make_adapter(mode, model=campaign["worker_model"], budget=campaign["budget"])
     repetitions = 1
     if mode == "real-model":
         repetitions = int(campaign.get("real_model_repetitions") or campaign.get("repetitions") or 1)
@@ -94,6 +109,7 @@ def run_campaign(
                     parent=parent,
                     budget=campaign["budget"],
                     repetition=repetition,
+                    evidence_root=output / "raw" if mode == "real-model" else None,
                 )
                 plugin_hash = plugin_hash or trial.get("plugin_hash")
                 trials.append(trial)
@@ -113,10 +129,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("deterministic", "real-model"), default="deterministic")
     parser.add_argument("--output", required=True)
     parser.add_argument("--campaign", default=str(CAMPAIGN_PATH))
+    parser.add_argument("--scenario", action="append", help="Run a named subset; report coverage reflects that subset only")
+    parser.add_argument("--repetitions", type=int)
+    parser.add_argument("--model", help="Explicit real-session model, recorded in the report")
     args = parser.parse_args(argv)
     try:
         output = validate_output_path(Path(args.output))
-        report = run_campaign(mode=args.mode, output=output, campaign_path=Path(args.campaign))
+        report = run_campaign(mode=args.mode, output=output, campaign_path=Path(args.campaign), scenario_ids=args.scenario, repetitions_override=args.repetitions, model=args.model)
     except (ContractError, RunnerError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

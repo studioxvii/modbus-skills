@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -75,7 +76,7 @@ class SkillUsabilityReportingTests(unittest.TestCase):
     def test_real_model_without_codex_is_not_run(self) -> None:
         campaign = load_campaign()
         adapter = CodexSessionAdapter()
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, mock.patch("skill_usability.sessions.shutil.which", return_value=None):
             trial = run_trial(
                 campaign["loaded_scenarios"][0],
                 adapter=adapter,

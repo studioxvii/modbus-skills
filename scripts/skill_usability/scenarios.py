@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+import json
+import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -65,6 +67,7 @@ def run_trial(
     parent: Path,
     budget: Mapping[str, Any],
     repetition: int = 1,
+    evidence_root: Path | None = None,
 ) -> dict[str, Any]:
     directory = campaign_dir or CAMPAIGN_DIR
     started = time.monotonic()
@@ -76,7 +79,7 @@ def run_trial(
         session = seed_workspace(scenario, campaign_dir=directory, parent=parent)
         adapter.start(session)
     except PreflightUnavailable as exc:
-        return evaluate_trial(
+        result = evaluate_trial(
             scenario=scenario,
             events=[],
             artifacts=[],
@@ -85,8 +88,11 @@ def run_trial(
             execution_status="not-run",
             missing_capability=exc.capability,
         )
+        if session:
+            adapter.cleanup(session)
+        return {**result, "scenario_id": scenario["scenario_id"], "repetition": repetition}
     except SessionError as exc:
-        return evaluate_trial(
+        result = evaluate_trial(
             scenario=scenario,
             events=[],
             artifacts=[],
@@ -95,6 +101,9 @@ def run_trial(
             execution_status="not-run",
             missing_capability=str(exc),
         )
+        if session:
+            adapter.cleanup(session)
+        return {**result, "scenario_id": scenario["scenario_id"], "repetition": repetition}
 
     actor = BoundedUserActor(scenario)
     pending_text: str | None = None
@@ -151,9 +160,9 @@ def run_trial(
     except PreflightUnavailable as exc:
         execution_status = "blocked"
         missing = exc.capability
-    except SessionError:
+    except (SessionError, ContractError) as exc:
         execution_status = "blocked"
-        missing = "session-error"
+        missing = str(exc)
 
     snapshot = adapter.snapshot(session) if session else None
     result = evaluate_trial(
@@ -165,6 +174,12 @@ def run_trial(
         execution_status=execution_status,
         missing_capability=missing,
     )
+    if session and evidence_root:
+        trial_dir = evidence_root / f"{scenario['scenario_id']}-{repetition}"
+        trial_dir.mkdir(parents=True, exist_ok=False)
+        (trial_dir / "transcript.json").write_text(json.dumps(session.state.get("transcript", session.events), indent=2) + "\n", encoding="utf-8")
+        if snapshot:
+            shutil.copytree(snapshot, trial_dir / "output")
     cleanup = adapter.cleanup(session) if session else {"cleaned": True}
     if cleanup.get("cleaned") is False:
         result["status"] = "failed"
@@ -177,14 +192,18 @@ def run_trial(
             "event_count": len(session.events) if session else 0,
             "plugin_hash": session.loaded_plugin_hash if session else None,
             "workspace_isolated": True,
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "tool_calls": session.tool_calls if session else 0,
+            "actual_model": session.state.get("actual_model") if session else None,
+            "final_words": len(session.state.get("final_text", "").split()) if session else 0,
         }
     )
     return result
 
 
-def make_adapter(mode: str) -> SessionAdapter:
+def make_adapter(mode: str, *, model: str | None = None, budget: Mapping[str, Any] | None = None) -> SessionAdapter:
     if mode == "real-model":
-        return CodexSessionAdapter()
+        return CodexSessionAdapter(model=model, budget=budget)
     if mode != "deterministic":
         raise ContractError(f"unknown mode: {mode}")
     return FakeSessionAdapter()
