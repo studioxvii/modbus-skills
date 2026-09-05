@@ -204,6 +204,11 @@ def _extract_pdf_table_rows_in_process(
             for page_number, page in enumerate(document.pages, start=1):
                 if selected is not None and page_number not in selected:
                     continue
+                # Table cells and header recovery need this reader's glyphs.
+                # Image/vector geometry alone cannot supply register text;
+                # do not use another reader's empty output as this test.
+                if not page.chars:
+                    continue
                 for table_index, table in enumerate(page.find_tables()):
                     cells, header_recovery = _recover_offset_header(page, table)
                     parsed = parse_pdf_table_evidence(
