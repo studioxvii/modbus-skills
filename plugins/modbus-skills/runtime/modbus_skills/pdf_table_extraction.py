@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Mapping, Sequence
 from fractions import Fraction
+from hashlib import file_digest
 import json
+import math
 import re
 from pathlib import Path
 import subprocess
@@ -197,6 +200,7 @@ def _extract_pdf_table_rows_in_process(
     evidence = {"records": [], "quarantined_records": []}
     try:
         with pdfplumber.open(path) as document:
+            source_sha256 = None
             if selected is None and len(document.pages) > _MAX_GRID_PAGES:
                 raise PdfTableExtractionError(
                     f"automatic grid extraction is limited to {_MAX_GRID_PAGES} PDF pages"
@@ -230,6 +234,21 @@ def _extract_pdf_table_rows_in_process(
                             for claim in row.get("_claims", []):
                                 if claim.get("column_index") == header_recovery["column_index"]:
                                     claim["header_evidence"] = header_evidence
+                    geometry = _prepare_description_cell_geometry(page, table, cells)
+                    for row in parsed["records"]:
+                        proof = _description_access_cell_evidence(
+                            page, table, cells, row, "", geometry=geometry
+                        )
+                        if proof is not None:
+                            if source_sha256 is None:
+                                position = document.stream.tell()
+                                document.stream.seek(0)
+                                source_sha256 = file_digest(document.stream, "sha256").hexdigest()
+                                document.stream.seek(position)
+                            proof["source_sha256"] = source_sha256
+                            for claim in row.get("_claims", []):
+                                if claim.get("field") == "description":
+                                    claim["body_cell_evidence"] = proof
                     evidence["records"].extend(parsed["records"])
                     evidence["quarantined_records"].extend(
                         parsed["quarantined_records"]
@@ -238,6 +257,10 @@ def _extract_pdf_table_rows_in_process(
                         raise PdfTableExtractionError(
                             f"grid extraction exceeds {_MAX_GRID_RECORDS} records"
                         )
+            if source_sha256 is not None:
+                document.stream.seek(0)
+                if file_digest(document.stream, "sha256").hexdigest() != source_sha256:
+                    raise PdfTableExtractionError("PDF changed during grid extraction")
     except PdfTableExtractionError:
         raise
     except Exception as exc:
@@ -245,6 +268,128 @@ def _extract_pdf_table_rows_in_process(
             "pdfplumber could not extract bounded table geometry"
         ) from exc
     return evidence
+
+
+def _prepare_description_cell_geometry(
+    page: Any, table: Any, cells: Sequence[Sequence[Any]],
+) -> dict[str, Any]:
+    """Index original glyphs by every intersected row, without clipping them."""
+    header = _find_header(cells)
+    prepared: dict[str, Any] = {"header": header, "header_glyphs": {}}
+    if header[1] is None or any(len(header[1].get(field, ())) != 1
+                                for field in ("description", "access")):
+        return prepared
+    # pdfplumber's rows property sorts/regroups all cells on each access.
+    # Retain this table-local result, including the original ambiguous cells.
+    prepared["rows"] = table.rows
+    bands = []
+    for row in prepared["rows"]:
+        boxes = [box for box in row.cells if box is not None]
+        if not boxes:
+            return prepared
+        top, bottom = min(box[1] for box in boxes), max(box[3] for box in boxes)
+        if (not math.isfinite(top) or not math.isfinite(bottom) or top >= bottom
+                or (bands and bands[-1][1] > top)):
+            # Merged/overlapping/unproved bands use the original full-page scan.
+            return prepared
+        bands.append((top, bottom))
+    tops, bottoms = [b[0] for b in bands], [b[1] for b in bands]
+    by_row: list[list[Any]] = [[] for _ in bands]
+    for char in page.chars:
+        top, bottom = char["top"], char["bottom"]
+        if not math.isfinite(top) or not math.isfinite(bottom) or top > bottom:
+            return prepared
+        # Inclusive edges retain all ambiguous/touching glyphs for the unchanged
+        # ownership checks. Original boxes and page order are retained verbatim.
+        for index in range(bisect_left(bottoms, top), bisect_right(tops, bottom)):
+            by_row[index].append(char)
+    prepared["glyphs_by_row"] = by_row
+    return prepared
+
+
+def _description_access_cell_evidence(
+    page: Any, table: Any, cells: Sequence[Sequence[Any]],
+    record: Mapping[str, Any], source_sha256: str,
+    *, geometry: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Prove two literal adjacent columns from their own drawn cells/glyphs.
+
+    No inference from whitespace gaps, access-looking suffixes, inherited cells,
+    or another reader's text. Multiline/crossing/ambiguous geometry stays unproved.
+    """
+    header_index, columns, _extras, _confident = (
+        geometry["header"] if geometry is not None else _find_header(cells)
+    )
+    if columns is None or any(len(columns.get(field, ())) != 1
+                              for field in ("description", "access")):
+        return None
+    description_index = columns["description"][0][0]
+    access_index = columns["access"][0][0]
+    row_index = record["_source"]["row"]
+    rows = geometry["rows"] if geometry is not None else table.rows
+    if access_index != description_index + 1 or row_index >= len(rows):
+        return None
+    body, header = rows[row_index].cells, rows[header_index].cells
+    if access_index >= min(len(body), len(header)):
+        return None
+    boxes = [body[description_index], body[access_index]]
+    header_boxes = [header[description_index], header[access_index]]
+    if any(box is None for box in [*boxes, *header_boxes]):
+        return None
+    if (boxes[0][2] != boxes[1][0] or boxes[0][1::2] != boxes[1][1::2]
+            or any((box[0], box[2]) != (head[0], head[2])
+                   for box, head in zip(boxes, header_boxes))):
+        return None
+
+    def glyphs_for(box: Any, row_boxes: Sequence[Any], literal: str, row_number: int, *, is_header: bool = False):
+        glyphs = []
+        chars = (geometry["glyphs_by_row"][row_number]
+                 if geometry is not None and "glyphs_by_row" in geometry else page.chars)
+        for char in chars:
+            if not char["text"].strip():
+                continue
+            x0, x1, top, bottom = char["x0"], char["x1"], char["top"], char["bottom"]
+            cx, cy = (x0 + x1) / 2, (top + bottom) / 2
+            if not (box[0] <= cx <= box[2] and box[1] <= cy <= box[3]):
+                # A body glyph crossing into the cell is not uniquely owned.
+                if not is_header and x0 < box[2] and x1 > box[0] and top < box[3] and bottom > box[1]:
+                    return None
+                continue
+            owners = sum(b is not None and b[0] <= cx <= b[2] and b[1] <= cy <= b[3]
+                         for b in row_boxes)
+            if (owners != 1 or not char.get("upright", True)
+                    or x0 < box[0] or x1 > box[2]
+                    or (not is_header and (top < box[1] or bottom > box[3]))):
+                return None
+            glyphs.append({"text": char["text"], "bbox": [x0, top, x1, bottom]})
+        if not glyphs or max(g["bbox"][1] for g in glyphs) >= min(g["bbox"][3] for g in glyphs):
+            return None
+        glyphs.sort(key=lambda g: g["bbox"][0])
+        if "".join(g["text"] for g in glyphs) != re.sub(r"\s+", "", literal):
+            return None
+        return glyphs
+
+    proof_cells = []
+    for field, index, box, head in zip(("description", "access"),
+                                     (description_index, access_index), boxes, header_boxes):
+        literal, label = _clean(_cell(cells[row_index], index)), _clean(_cell(cells[header_index], index))
+        if not literal or literal != record.get(field):
+            return None
+        glyphs = glyphs_for(box, body, literal, row_index)
+        if geometry is not None and index in geometry["header_glyphs"]:
+            header_glyphs = geometry["header_glyphs"][index]
+        else:
+            header_glyphs = glyphs_for(head, header, label, header_index, is_header=True)
+            if geometry is not None:
+                geometry["header_glyphs"][index] = header_glyphs
+        if glyphs is None or header_glyphs is None:
+            return None
+        proof_cells.append({"field": field, "column_index": index, "raw_value": literal,
+                            "raw_header": label, "bbox": list(box), "glyphs": glyphs,
+                            "header_bbox": list(head), "header_glyphs": header_glyphs})
+    return {"source_sha256": source_sha256, "source_locator": {
+                key: record["_source"][key] for key in ("page", "row", "region")},
+            "method": "same-source-drawn-cells-and-glyphs/v1", "cells": proof_cells}
 
 
 def _recover_offset_header(page: Any, table: Any) -> tuple[list[list[Any]], dict[str, Any] | None]:
