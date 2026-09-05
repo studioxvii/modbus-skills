@@ -4,8 +4,12 @@ Use this contract in every Modbus skill.
 
 - Continue through safe, local, read-only, deterministic steps without asking for
   permission or pausing after each stage.
-- Verify artifact structure, counts, hashes, ranges, identities, and invariants with
-  code. Report the result; do not ask the user to confirm what the artifacts prove.
+- Use the runtime's validators, receipts, and case inspector to verify artifact
+  structure, counts, hashes, ranges, identities, and invariants. Inspect the requested
+  result and holds, but do not duplicate successful built-in checks with scratch
+  validators or repeated full-file reads. Add a focused check when a requested
+  property is not covered or evidence disagrees. Report what is proved; do not ask
+  the user to repeat these checks.
 - Review large inputs as one bounded scope. Group exceptions by shared cause or
   required decision. Never default to page-by-page, row-by-row, point-by-point, or
   file-by-file confirmation.

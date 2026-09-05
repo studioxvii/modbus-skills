@@ -19,6 +19,12 @@ directly evidenced OEM point IDs or exact point names. Put direct matches in
 `excluded`. Never treat category words such as "temperatures" or "alarms" as runtime
 selectors by themselves.
 
+If supplied JSON already exposes a readable list of OEM points with explicit IDs,
+names, and source references, inspect that list directly for the selection instead
+of reparsing it just to rediscover those fields. Keep the JSON as the source input;
+the compiler still validates it and binds selections to the derived OEM map. This
+does not make an arbitrary wrapper, duplicate name, or unsupported field trustworthy.
+
 For a PDF, the bounded inspection command is:
 
 ```bash
@@ -151,6 +157,9 @@ not permission to select any point:
 Run `python3 <skill-dir>/scripts/run.py --case <case-directory> --resume <reply.json>`.
 Do not replay source parsing on resume. Inspect the resulting receipt and user-map
 bundle; the compiler validates the decision and the indexed input artifacts.
+The successful resume receipt and requested output check normally finish verification;
+do not repeat the case inspection or recompute all input hashes after that unless the
+receipt or output exposes a discrepancy.
 
 `provide-corrected-source` is not a resume. Copy the original request, replace the
 source path or typed source data, choose a new empty case directory, and start a new

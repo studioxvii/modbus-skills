@@ -20,7 +20,10 @@ Follow `../../references/interaction-contract.md`.
    conventions across that scope; it does not override a nonblank source claim.
    `--defaults` takes a JSON file, for example
    `{"address_convention": "protocol-offset"}` after that convention is confirmed.
-   Rerun with `--defaults <confirmed-defaults.json>`; preserve the source candidates.
+   Rerun with `--defaults <confirmed-defaults.json>`. To refresh the normalized output
+   you created for this same scope, also pass `--overwrite`; otherwise choose a new
+   output path. Never overwrite the source candidates. Check the command succeeded
+   before treating an existing output as the corrected result.
 
 ## Output files
 

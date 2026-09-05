@@ -12,7 +12,9 @@ Follow `../../references/interaction-contract.md`.
 
 ## Process
 
-1. Read `references/request.md`.
+1. Read `references/request.md` and the interaction contract together. Use supplied
+   skill, source, and case paths directly; a full plugin or case-directory inventory
+   is unnecessary for a supported request.
 2. Select an available Python 3.11+ executable. PDF input also requires `pdfplumber`;
    if it is unavailable, report the missing dependency and stop instead of installing
    software during the workflow. Structured input needs only the standard library.
@@ -22,6 +24,9 @@ Follow `../../references/interaction-contract.md`.
    selects points.
 4. Run `<selected-python> <skill-dir>/scripts/run.py --request <request.json> --output <case-directory>`.
 5. Inspect the result plus the user-map holds and target statuses against the user's requested outcome. `offline-complete` is valid only when source coverage is complete, selected PDF fields have confirmed source evidence, and selected points have no blocking holds. Return the state, elapsed time, artifact paths, exclusions, and one useful next step; never treat `next_action: none` alone as proof of completion.
+   If a new case awaits selection, the result and grouped selection packet are the
+   relevant handoff evidence. Do not reread the full OEM map or run a second integrity
+   inspection of the just-created case unless those artifacts expose a discrepancy.
 6. When the result needs a decision, present its complete grouped packet once, encode
    the reply in a new request, and rerun the same case. Do not invent fields or bypass
    case, source, packet, or artifact hashes.
