@@ -18,6 +18,9 @@ Follow `../../references/interaction-contract.md`.
 4. Ask once for all independent blocking engineering choices, then rerun once.
    An explicitly confirmed `--defaults` address convention fills absent or blank
    conventions across that scope; it does not override a nonblank source claim.
+   `--defaults` takes a JSON file, for example
+   `{"address_convention": "protocol-offset"}` after that convention is confirmed.
+   Rerun with `--defaults <confirmed-defaults.json>`; preserve the source candidates.
 
 ## Output files
 

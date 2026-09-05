@@ -12,6 +12,9 @@ Use this contract in every Modbus skill.
 - Ask once, with all necessary context, only when a missing choice materially changes
   the result, low-confidence evidence must be accepted, a live device action is next,
   or an external/native application must be operated.
+- When a missing answer blocks the remaining offline work, ask the grouped question
+  and end the turn. Do not sleep or poll for the reply, or repeat the unanswered
+  question; continue when the reply arrives.
 - Do not ask about the actor, file location, output folder, or test structure when the
   request or repository already answers it. Use the repository's existing layout and
   the smallest safe default.
