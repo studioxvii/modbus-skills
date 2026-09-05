@@ -702,7 +702,18 @@ def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
         resolution = resolve_address(raw, args.source_convention, area)
         target: int | str | None = None
         findings = [finding.to_dict() for finding in resolution.findings]
-        if resolution.resolved:
+        canonical_offset = point.get("protocol_offset")
+        consistent = canonical_offset is None or (
+            isinstance(canonical_offset, int) and not isinstance(canonical_offset, bool)
+            and 0 <= canonical_offset <= 65535
+            and canonical_offset == resolution.protocol_offset
+        )
+        if not consistent:
+            findings.append({
+                "code": "address-remap-source-conflict", "severity": "hold", "blocking": True,
+                "message": "Canonical offset and source address disagree; resolve the source evidence before conversion.",
+            })
+        if resolution.resolved and consistent:
             assert resolution.protocol_offset is not None
             if args.target_convention == "protocol-offset":
                 target = resolution.protocol_offset
@@ -718,7 +729,7 @@ def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
             "source": {"value": raw, "convention": args.source_convention},
             "protocol_offset": resolution.protocol_offset,
             "target": {"value": target, "convention": args.target_convention},
-            "status": "converted" if resolution.resolved else "held",
+            "status": "converted" if resolution.resolved and consistent else "held",
             "findings": findings,
         })
     collisions = [
@@ -1170,9 +1181,9 @@ def _handle_byte_order(args: argparse.Namespace) -> dict[str, Any]:
         "candidates": len(result["candidates"]),
         "output": Path(args.output).name,
         "next_action": {
-            "skill": "apply-review",
+            "skill": "capture-sample" if missing_identity else "apply-review",
             "uses": Path(args.output).name,
-            "produces": "a hash-bound layout decision",
+            "produces": "a sample with complete identity" if missing_identity else "a hash-bound layout decision",
         },
     }
 

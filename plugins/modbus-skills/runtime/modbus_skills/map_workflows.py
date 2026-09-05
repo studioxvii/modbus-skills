@@ -1866,6 +1866,8 @@ def review_parse_evidence(
 ) -> dict[str, Any]:
     """Build a compact exception-first queue from map evidence and findings."""
 
+    if "points" not in canonical_map and "records" not in canonical_map:
+        raise MapWorkflowError("Map evidence must contain an explicit points or records array.")
     candidate_input = "points" not in canonical_map and "records" in canonical_map
     points = canonical_map.get("records", ()) if candidate_input else canonical_map.get("points", ())
     if not isinstance(points, Sequence) or isinstance(points, (str, bytes, bytearray)):

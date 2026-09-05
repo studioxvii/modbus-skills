@@ -16,7 +16,8 @@ Follow `../../references/interaction-contract.md`.
 1. Read `references/probe-request.md`.
 2. Require route, unit identifier, register area, protocol offset, word count, and target.
 3. Run `python3 <skill-dir>/scripts/run.py --request <probe.json> --output <directory>`.
-4. Confirm the probe pack uses only function codes 01 through 04.
+4. Confirm the probe pack uses only function codes 01 through 04 and permits one
+   physical attempt, with no automatic retry after a timeout or failed response.
 5. Present the complete probe pack and one scoped live-read confirmation gate,
    then stop. Do not enable the target tool or perform the live Modbus read.
 6. After confirmation, the operator or enabled target tool performs the bounded

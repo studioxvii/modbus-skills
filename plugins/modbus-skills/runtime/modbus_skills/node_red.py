@@ -290,7 +290,7 @@ def export_node_red(
                 "g": primary_group_id,
                 "modbusSkillsRole": "sequencer",
                 "name": "02 Sequence read blocks",
-                "func": _sequencer_function(block_specs, len(routes)),
+                "func": _sequencer_function(block_specs, len(routes), retry_limit=0 if mode == "probe" else 1),
                 "modbusSkillsBlocks": block_specs,
                 "outputs": len(routes) + 1,
                 "timeout": 0,
@@ -415,6 +415,7 @@ def export_node_red(
                     plan_digest,
                     [block["block_id"] for block in block_specs],
                     sorted({block["unit_id"] for block in block_specs}),
+                    retry_limit=0 if mode == "probe" else 1,
                 ),
                 "outputs": 2,
                 "timeout": 0,
@@ -740,7 +741,7 @@ def export_node_red(
                 "type": "comment",
                 "z": flow_id,
                 "name": "RETRY & WATCHDOG · bounded recovery",
-                "info": "One retry per failed block; watchdog is reset only after a validated response.",
+                "info": ("No probe retries." if mode == "probe" else "One retry per failed block.") + " Watchdog is reset only after a validated response.",
                 "x": 560,
                 "y": retry_y - 35,
                 "wires": [],
@@ -1004,7 +1005,7 @@ msg.payload = `<!doctype html><html><head><meta charset=\"utf-8\">` +
 return msg;"""
 
 
-def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int) -> str:
+def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int, *, retry_limit: int = 1) -> str:
     return (
         f"const blocks = {stable_json(block_specs, pretty=False)};\n"
         f"const routeCount = {route_count};\n"
@@ -1014,14 +1015,14 @@ def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int) -> 
         "  values[index] = value;\n"
         "  return values;\n"
         "};\n"
-        "const retryLimit = 1;\n"
+        f"const retryLimit = {retry_limit};\n"
         "const finalize = (state) => {\n"
         "  flow.set('modbusSkillsRunning', false);\n"
         "  flow.set('modbusSkillsQueue', []);\n"
         "  flow.set('modbusSkillsActiveBlockId', null);\n"
         "  return output(statusIndex, {\n"
         "    modbusSkillsFinalize: true,\n"
-        "    payload: {state, request_count: blocks.length, max_in_flight: 1, retry_limit: 1}\n"
+        f"    payload: {{state, request_count: blocks.length, max_in_flight: 1, retry_limit: {retry_limit}}}\n"
         "  });\n"
         "};\n"
         "const send = (block, attempt) => {\n"
@@ -1129,6 +1130,7 @@ def _capture_function(
     plan_digest: str,
     block_ids: list[str],
     unit_ids: list[int],
+    *, retry_limit: int = 1,
 ) -> str:
     return (
         f"const mapHash = {stable_json(map_digest, pretty=False)};\n"
@@ -1147,7 +1149,7 @@ def _capture_function(
         "    runtime_metadata: {\n"
         f"      target: 'node-red', adapter_version: {stable_json(ADAPTER_VERSION, pretty=False)},\n"
         "      terminal_state: msg.payload && msg.payload.state, queue_depth: 0,\n"
-        "      max_in_flight: 1, retry_limit: 1\n"
+        f"      max_in_flight: 1, retry_limit: {retry_limit}\n"
         "    },\n"
         "    samples: flow.get('modbusSkillsCapture') || []\n"
         "  };\n"
@@ -1183,7 +1185,7 @@ def _capture_function(
         "const existing = flow.get('modbusSkillsCapture') || [];\n"
         "existing.push(...samples);\n"
         "flow.set('modbusSkillsCapture', existing);\n"
-        "const retry = !successful && Number(request.attempt || 0) < 1;\n"
+        f"const retry = !successful && Number(request.attempt || 0) < {retry_limit};\n"
         "if (!retry) {\n"
         "  const completedRequestIds = flow.get('modbusSkillsCompletedRequestIds') || [];\n"
         "  if (!completedRequestIds.includes(requestId)) completedRequestIds.push(requestId);\n"
@@ -1271,7 +1273,7 @@ def _readme(*, mode: str, environment: list[str]) -> str:
         else
         "After you enable the tab, click `01 Start bounded plan` once. The flow "
         "sends the next request only after the current request returns or times "
-        "out. Probe mode is manual one-shot and does not poll."
+        "out. Probe mode is manual one-shot and does not poll or retry."
     )
     return f"""# Node-RED {mode.title()} Flow
 
@@ -1302,7 +1304,7 @@ endpoint is safe for the selected mode.
 Set `MODBUS_CAPTURE_PATH` to the local path for `capture.json`. The flow writes
 one complete `capture/v1` document only after the queue drains or the run is
 cancelled. The flow uses one shared reader per route, keeps one request in
-flight, and retries a failed block at most once.
+flight. {"Final mode retries a failed block at most once." if mode == "final" else "Probe mode makes one physical attempt per block, with no retry."}
 
 The derive nodes keep an immutable copy of the raw values. They also attach
 point datatype, byte-order, scaling, and engineering-unit metadata. For each
