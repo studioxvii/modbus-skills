@@ -990,30 +990,40 @@ def _physical_row_identity(record: Mapping[str, Any]) -> tuple[int, str] | None:
 
 def _merge_scope_compatible(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     """Do not associate claims across known area or physical table boundaries."""
-    physical_row = _physical_row_identity(left)
-    right_physical_row = _physical_row_identity(right)
+    return _merge_scopes_compatible(_merge_scope(left), _merge_scope(right))
+
+
+def _merge_scope(record: Mapping[str, Any]) -> tuple[Any, ...]:
+    values = tuple(
+        None if record.get(field) in (None, "") else
+        re.sub(r"\s+", " ", str(record[field]).strip()).casefold().replace("_", "-")
+        for field in ("area", "unit_id", "route_id")
+    )
+    source = record.get("_source", {})
+    table = None
+    if isinstance(source, Mapping):
+        for field in ("table_index", "table", "table_id"):
+            if source.get(field) not in (None, ""):
+                table = str(source[field])
+                break
+        if table is None:
+            match = re.search(r"(?:^|:)t(\d+)(?=:|$)", str(source.get("region", "")))
+            table = match.group(1) if match else None
+    return _physical_row_identity(record), values, table
+
+
+def _merge_scopes_compatible(left: tuple[Any, ...], right: tuple[Any, ...]) -> bool:
+    physical_row, values, table = left
+    right_physical_row, right_values, right_table = right
     if physical_row is not None and right_physical_row is not None:
         # Two interpretations of the same located table row are not two
         # separate device points merely because their scope claims differ.
         # Associate them so the material conflicts below retain both claims.
         return physical_row == right_physical_row
-    for field in ("area", "unit_id", "route_id"):
-        a, b = left.get(field), right.get(field)
-        if a not in (None, "") and b not in (None, "") and not _equivalent(field, a, b):
+    for a, b in zip(values, right_values, strict=True):
+        if a is not None and b is not None and a != b:
             return False
-
-    def table(record: Mapping[str, Any]) -> str | None:
-        source = record.get("_source", {})
-        if not isinstance(source, Mapping):
-            return None
-        for field in ("table_index", "table", "table_id"):
-            if source.get(field) not in (None, ""):
-                return str(source[field])
-        match = re.search(r"(?:^|:)t(\d+)(?=:|$)", str(source.get("region", "")))
-        return match.group(1) if match else None
-
-    a, b = table(left), table(right)
-    return a is None or b is None or a == b
+    return table is None or right_table is None or table == right_table
 
 
 def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1021,60 +1031,61 @@ def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -
     quarantined: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
     unmatched_right = set(range(len(coordinate)))
-    left_names: dict[tuple[int, str], list[dict[str, Any]]] = {}
-    left_addresses: dict[tuple[int, str], list[dict[str, Any]]] = {}
-    for record in strict:
-        left_names.setdefault(_name_identity(record), []).append(record)
-        left_addresses.setdefault(_address_identity(record), []).append(record)
-    for left in strict:
-        compatible_right = [
-            index for index in unmatched_right
-            if _merge_scope_compatible(left, coordinate[index])
-        ]
-        exact = [
-            index
-            for index in compatible_right
-            if _identity(coordinate[index]) == _identity(left)
-        ]
-        physical_row = _physical_row_identity(left)
-        same_physical_row = [
-            index for index in compatible_right
-            if physical_row is not None
-            and _physical_row_identity(coordinate[index]) == physical_row
-        ]
+    left_identities = [_identity(row) for row in strict]
+    right_identities = [_identity(row) for row in coordinate]
+    left_scopes = [_merge_scope(row) for row in strict]
+    right_scopes = [_merge_scope(row) for row in coordinate]
+
+    def index_keys(keys: Sequence[Any]) -> dict[Any, list[int]]:
+        buckets: dict[Any, list[int]] = {}
+        for index, key in enumerate(keys):
+            buckets.setdefault(key, []).append(index)
+        return buckets
+
+    left_names = index_keys([(page, name) for page, _address, name in left_identities])
+    left_addresses = index_keys([(page, address) for page, address, _name in left_identities])
+    left_physical = index_keys([scope[0] for scope in left_scopes])
+    right_exact = index_keys(right_identities)
+    right_names = index_keys([(page, name) for page, _address, name in right_identities])
+    right_addresses = index_keys([(page, address) for page, address, _name in right_identities])
+    right_physical = index_keys([scope[0] for scope in right_scopes])
+    for left_index, left in enumerate(strict):
+        identity = left_identities[left_index]
+        scope = left_scopes[left_index]
+
+        def available(bucket: Sequence[int]) -> list[int]:
+            return [index for index in bucket if index in unmatched_right
+                    and _merge_scopes_compatible(scope, right_scopes[index])]
+
+        physical_row = scope[0]
         match_index = None
         if (
-            len(same_physical_row) == 1
-            and sum(_physical_row_identity(row) == physical_row for row in strict) == 1
-            and sum(_physical_row_identity(row) == physical_row for row in coordinate) == 1
+            physical_row is not None
+            and len(left_physical[physical_row]) == 1
+            and len(right_physical.get(physical_row, ())) == 1
         ):
-            match_index = same_physical_row[0]
+            same_physical_row = available(right_physical[physical_row])
+            if same_physical_row:
+                match_index = same_physical_row[0]
         if match_index is None:
+            exact = available(right_exact.get(identity, ()))
             match_index = exact[0] if len(exact) == 1 else None
-        address_key = _address_identity(left)
-        same_address = [
-            index for index in compatible_right
-            if _address_identity(coordinate[index]) == address_key
-        ]
-        if (
-            match_index is None
-            and address_key[1]
-            and sum(_merge_scope_compatible(left, row) for row in left_addresses[address_key]) == 1
-            and len(same_address) == 1
-        ):
-            match_index = same_address[0]
-        name_key = _name_identity(left)
-        same_name = [
-            index for index in compatible_right
-            if _name_identity(coordinate[index]) == name_key
-        ]
-        if (
-            match_index is None
-            and name_key[1]
-            and sum(_merge_scope_compatible(left, row) for row in left_names[name_key]) == 1
-            and len(same_name) == 1
-        ):
-            match_index = same_name[0]
+        address_key = identity[0], identity[1]
+        if match_index is None and address_key[1]:
+            same_address = available(right_addresses.get(address_key, ()))
+            if len(same_address) == 1 and sum(
+                _merge_scopes_compatible(scope, left_scopes[index])
+                for index in left_addresses[address_key]
+            ) == 1:
+                match_index = same_address[0]
+        name_key = identity[0], identity[2]
+        if match_index is None and name_key[1]:
+            same_name = available(right_names.get(name_key, ()))
+            if len(same_name) == 1 and sum(
+                _merge_scopes_compatible(scope, left_scopes[index])
+                for index in left_names[name_key]
+            ) == 1:
+                match_index = same_name[0]
         if match_index is None:
             accepted.append(dict(left))
             continue
@@ -1088,7 +1099,7 @@ def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -
                 continue
             if not _equivalent(field, left[field], right[field]):
                 row_conflicts.append({"field": field, "claims": [left[field], right[field]]})
-        left_address, right_address = _identity(left)[1], _identity(right)[1]
+        left_address, right_address = identity[1], right_identities[match_index][1]
         if (
             left_address and right_address
             and not _equivalent("address", left_address, right_address)
@@ -1104,7 +1115,6 @@ def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -
         merged["_claims"] = [*left.get("_claims", []), *right.get("_claims", [])]
         if row_conflicts:
             quarantined.append(merged)
-            identity = _identity(left)
             conflicts.append({"identity": {"page": identity[0], "address": identity[1], "name": identity[2]}, "fields": row_conflicts, "source_regions": [left["_source"]["region"], right["_source"]["region"]]})
         else:
             accepted.append(merged)
