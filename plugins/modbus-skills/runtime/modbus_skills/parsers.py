@@ -196,6 +196,181 @@ _KNOWN_BYTE_ORDERS = {
 
 _XML_UNSAFE = re.compile(br"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
 _MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+_SCALE_NOTE_LIMIT = 256
+_SCALE_NOTE_CHARS = 4096
+_SCALE_ASSOCIATION_LIMIT = 100000
+_SCALE_RAW_NOTE_BYTES = 16 * 1024
+_SCALE_EVIDENCE_BYTES = 8 * 1024 * 1024
+_SCALE_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+_SCALE_EQUATION = re.compile(
+    rf"(?P<selector>.+?)\s+engineering value\s*=\s*raw\s*(?P<operator>[*/×÷])\s*"
+    rf"(?P<operand>{_SCALE_NUMBER})(?:\.(?=\s|$)|(?=\s|$))", re.IGNORECASE,
+)
+_SCALE_CUE = re.compile(
+    r"^(.+?\s+engineering value\s*=\s*raw\b|(?:integer\s+)?scaling\s+for\b|"
+    r".+?\s+conversion direction is (?:unknown|unspecified)\b)", re.IGNORECASE,
+)
+
+
+def _xlsx_scale_note(value: Any, location: Mapping[str, Any], *, row_local: bool = False) -> dict[str, Any] | None:
+    """Recognize bounded scalar statements, never arbitrary divide prose."""
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    if not _SCALE_CUE.match(text):
+        return None
+    if len(value) > _SCALE_RAW_NOTE_BYTES or len(value.encode("utf-8")) > _SCALE_RAW_NOTE_BYTES:
+        raise ParseError("XLSX scalar conversion literal exceeds the 16 KiB raw UTF-8 evidence limit.")
+    if len(text) > _SCALE_NOTE_CHARS:
+        raise ParseError("XLSX scalar conversion statement exceeds the 4096 character evidence limit.")
+    clauses: list[dict[str, Any]] = []
+    position = 0
+    while position < len(text):
+        match = _SCALE_EQUATION.match(text, position)
+        if not match:
+            break
+        clauses.append(match.groupdict())
+        position = match.end()
+        while position < len(text) and text[position].isspace():
+            position += 1
+    if position != len(text):
+        clauses = []
+        compact = re.fullmatch(
+            rf"(?:Integer\s+)?scaling for (.+?)\s*\(\s*([*/×÷])\s*({_SCALE_NUMBER})\s*\)\.?",
+            text, re.IGNORECASE,
+        )
+        unknown = re.fullmatch(
+            rf"(.+?) conversion direction is (?:unknown|unspecified): factor {_SCALE_NUMBER} "
+            r"may be a multiplier or divisor\.?", text, re.IGNORECASE,
+        )
+        if compact:
+            clauses = [{"selector": compact[1], "operator": compact[2], "operand": compact[3]}]
+        elif unknown:
+            clauses = [{"selector": unknown[1], "direction": "unknown"}]
+        else:
+            # A single explicit selector remains source evidence even when the
+            # operation has unsupported terms. Never let a Multiplier heading
+            # exempt that named point merely because the formula is unresolved.
+            named = re.match(r"(.+?)\s+(?:engineering value\s*=\s*raw\b|conversion direction is (?:unknown|unspecified)\b)", text, re.IGNORECASE)
+            if named and len(re.findall(r"engineering value\s*=\s*raw\b|conversion direction is", text, re.IGNORECASE)) == 1:
+                clauses = [{"selector": named[1], "direction": "unknown"}]
+            else:
+                named_compact = re.fullmatch(r"(?:Integer\s+)?scaling for ([^()]+?)\s*\([^()]*\)\.?", text, re.IGNORECASE)
+                if named_compact:
+                    # Preserve the complete exact subject only. Configured,
+                    # malformed or multiple operands do not become arithmetic.
+                    clauses = [{"selector": named_compact[1], "direction": "unknown"}]
+    for clause in clauses:
+        if "operator" in clause:
+            clause["operator"] = "divide" if clause["operator"] in {"/", "÷"} else "multiply"
+    return {"literal": value, "source_locator": dict(location), "row_local": row_local,
+            "clauses": clauses, "scope": "stated" if clauses else "unresolved",
+            "unparsed_named_equations": not clauses and "engineering value" in text.casefold()}
+
+
+def _xlsx_scale_claims(
+    records: list[dict[str, Any]], notes: list[dict[str, Any]],
+    tables: Mapping[str, tuple[list[Any], list[str], int]],
+) -> None:
+    """Bind exact names/physical rows once; unresolved scope stays conservative."""
+    if not notes:
+        return
+    # Charge complete escaped notes once, not on every point attachment. Four
+    # provisioned copies, 32 bytes per formatted line of nesting allowance, and
+    # 1024 bytes for bounded binding/scope metadata deliberately overestimate
+    # the note-bearing association graph. This is not a whole-artifact cap:
+    # unrelated point fields and other artifact content are outside this budget.
+    note_costs: dict[int, int] = {}
+    for note in notes:
+        serialized = json.dumps(note, ensure_ascii=True, sort_keys=True, indent=2)
+        note_costs[id(note)] = len(serialized.encode("utf-8")) + 32 * (serialized.count("\n") + 1) + 1024
+    evidence_bytes = sum(note_costs.values())
+    if evidence_bytes > _SCALE_EVIDENCE_BYTES:
+        raise ParseError("XLSX conversion-note evidence exceeds the 8 MiB derived evidence budget before point association.")
+    by_name: dict[str, list[int]] = {}
+    by_row: dict[tuple[str, int], int] = {}
+    generic: list[int] = []
+    generic_sheets: set[str] = set()
+    columns: dict[str, tuple[int, Any, int]] = {}
+    for sheet, (raw_headers, headers, header_row) in tables.items():
+        if "scale" in headers:
+            index = headers.index("scale")
+            columns[sheet] = (index, raw_headers[index], header_row)
+            if _header_key(raw_headers[index], index, resolve_aliases=False) == "scale":
+                generic_sheets.add(sheet)
+    for index, record in enumerate(records):
+        location = record["_source"]
+        by_row[(location["sheet"], location["row"])] = index
+        name = record.get("name")
+        if isinstance(name, str) and name.strip():
+            by_name.setdefault(" ".join(name.split()).casefold(), []).append(index)
+        column = columns.get(location["sheet"])
+        if column and location["sheet"] in generic_sheets and record.get("scale") not in (None, ""):
+            generic.append(index)
+    attached: dict[int, list[dict[str, Any]]] = {}
+    association_count = 0
+
+    def attach(index: int, evidence: dict[str, Any], original_note: dict[str, Any]) -> None:
+        nonlocal association_count, evidence_bytes
+        association_count += 1
+        if association_count > _SCALE_ASSOCIATION_LIMIT:
+            raise ParseError(f"XLSX exceeds the {_SCALE_ASSOCIATION_LIMIT} point/conversion-note evidence association limit.")
+        evidence_bytes += 4 * note_costs[id(original_note)]
+        if evidence_bytes > _SCALE_EVIDENCE_BYTES:
+            raise ParseError(
+                "XLSX conversion-note associations exceed the 8 MiB derived evidence budget; "
+                f"no candidate is returned ({association_count} associations considered)."
+            )
+        attached.setdefault(index, []).append(evidence)
+    for note in notes:
+        local = note["source_locator"]
+        if note["row_local"]:
+            targets = [by_row[(local["sheet"], local["row"])]] if (local["sheet"], local["row"]) in by_row else []
+            # A row-local cell cannot establish the scope of other named points.
+            for index in targets:
+                name = " ".join(str(records[index].get("name", "")).split()).casefold()
+                consistent_selector = all(" ".join(clause["selector"].split()).casefold() == name for clause in note["clauses"])
+                attach(index, {**note, "binding": "physical-row",
+                               "scope": note["scope"] if consistent_selector else "unresolved"}, note)
+            continue
+        resolved: list[tuple[int, dict[str, Any]]] = []
+        for clause in note["clauses"]:
+            targets = by_name.get(" ".join(clause["selector"].split()).casefold(), [])
+            if len(targets) != 1:
+                resolved = []
+                break
+            resolved.append((targets[0], clause))
+        if resolved:
+            for index, clause in resolved:
+                attach(index, {**note, "clauses": [clause], "binding": "exact-unique-name"}, note)
+        else:
+            possible = set(generic)
+            if note.get("unparsed_named_equations"):
+                possible.update(index for index, record in enumerate(records)
+                                if record.get("scale") not in (None, ""))
+            for clause in note["clauses"]:
+                possible.update(by_name.get(" ".join(clause["selector"].split()).casefold(), []))
+            for index in sorted(possible):
+                attach(index, {**note, "scope": "unresolved", "binding": "possible-workbook-scale-scope"}, note)
+    for index, evidence in attached.items():
+        record = records[index]
+        location = record["_source"]
+        column = columns.get(location["sheet"])
+        if not column:
+            record.setdefault("_claims", []).append({
+                "parser_id": "structured.xlsx-scale/v1", "field": "scale",
+                "scale_source": "absent-column", "source_locator": dict(location),
+                "conversion_notes": evidence,
+            })
+            continue
+        column_index, raw_header, header_row = column
+        record.setdefault("_claims", []).append({
+            "parser_id": "structured.xlsx-scale/v1", "field": "scale", "value": record.get("scale"),
+            "raw_header": str(raw_header), "raw_value": record.get("scale"),
+            "source_locator": {**location, "column": column_index + 1},
+            "header_locator": {**location, "row": header_row, "column": column_index + 1},
+            "conversion_notes": evidence,
+        })
 
 
 def _result(
@@ -217,7 +392,7 @@ def _result(
     }
 
 
-def _header_key(value: Any, column_index: int) -> str:
+def _header_key(value: Any, column_index: int, *, resolve_aliases: bool = True) -> str:
     text = "" if value is None else str(value).strip()
     lower = text.casefold()
     zero_based = bool(
@@ -240,6 +415,8 @@ def _header_key(value: Any, column_index: int) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", snake_text.lower()).strip("_")
     if not normalized:
         return f"column_{column_index + 1}"
+    if not resolve_aliases:
+        return normalized
     if normalized in _HEADER_ALIASES:
         aliased = _HEADER_ALIASES[normalized]
     else:
@@ -778,7 +955,7 @@ def _xlsx_shared_strings(archive: zipfile.ZipFile) -> list[str]:
     return strings
 
 
-def _xlsx_sheet_paths(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
+def _xlsx_sheet_paths(archive: zipfile.ZipFile, *, hidden_sheets: set[str] | None = None) -> list[tuple[str, str]]:
     names = set(archive.namelist())
     if {"xl/workbook.xml", "xl/_rels/workbook.xml.rels"}.issubset(names):
         workbook = _xlsx_xml(archive, "xl/workbook.xml")
@@ -807,6 +984,8 @@ def _xlsx_sheet_paths(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
         if _local_name(sheet.tag) != "sheet":
             continue
         name = sheet.attrib.get("name", f"Sheet{len(output) + 1}")
+        if hidden_sheets is not None and sheet.attrib.get("state") in {"hidden", "veryHidden"}:
+            hidden_sheets.add(name)
         relation_id = next((value for key, value in sheet.attrib.items() if _local_name(key) == "id"), None)
         if relation_id and relation_id in relation_targets:
             path = relation_targets[relation_id]
@@ -1047,12 +1226,21 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
     warnings: list[dict[str, Any]] = []
     assumptions: list[dict[str, Any]] = []
     source_holds: list[dict[str, Any]] = []
+    scale_notes: list[dict[str, Any]] = []
+    scale_tables: dict[str, tuple[list[Any], list[str], int]] = {}
+
+    def keep_scale_note(note: dict[str, Any] | None) -> None:
+        if note is not None:
+            if len(scale_notes) >= _SCALE_NOTE_LIMIT:
+                raise ParseError("XLSX exceeds the 256 scalar conversion statement evidence limit.")
+            scale_notes.append(note)
     with archive_context as archive:
         total_size = sum(item.file_size for item in archive.infolist())
         if total_size > _MAX_XLSX_UNCOMPRESSED_BYTES:
             raise ParseError("XLSX uncompressed content exceeds the 50 MiB safety limit.")
         shared_strings = _xlsx_shared_strings(archive)
-        sheets = _xlsx_sheet_paths(archive)
+        hidden_sheets: set[str] = set()
+        sheets = _xlsx_sheet_paths(archive, hidden_sheets=hidden_sheets)
         for sheet_name, sheet_path in sheets:
             root = _xlsx_xml(archive, sheet_path)
             rows = list(_xlsx_rows(root, shared_strings))
@@ -1086,6 +1274,21 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
             headers, header_warnings = _xlsx_headers(header_values, non_empty[:header_index])
             compound_columns, area_columns = _compound_header_columns(header_values, headers)
             if not _sheet_has_register_header(headers):
+                # A bounded scalar statement needs conversion-topic context;
+                # merely dividing a display or mentioning a number is not one.
+                for row_number, values, has_formula in non_empty:
+                    if sheet_name in hidden_sheets or not any(
+                        isinstance(value, str) and value.strip().casefold() in {"scaling", "conversion"}
+                        for value in values
+                    ):
+                        continue
+                    for column, value in enumerate(values, 1):
+                        note = _xlsx_scale_note(value, {
+                            "format": "xlsx", "sheet": sheet_name, "row": row_number, "column": column,
+                        })
+                        if note is not None and has_formula:
+                            note.update({"scope": "unresolved", "cached_formula_row": True})
+                        keep_scale_note(note)
                 warnings.append(
                     {
                         "code": "skipped_non_register_worksheet",
@@ -1098,6 +1301,8 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                     }
                 )
                 continue
+            scale_tables[sheet_name] = (list(header_values), headers, header_row_number)
+            note_columns = [index for index, header in enumerate(headers) if header in {"notes", "description"}] if sheet_name not in hidden_sheets else []
             warnings.extend({**entry, "sheet": sheet_name, "row": header_row_number} for entry in header_warnings)
             if skipped_titles:
                 assumptions.append(
@@ -1159,12 +1364,22 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                         }
                     )
                     continue
+                for column in note_columns:
+                    note = _xlsx_scale_note(padded[column], {**location, "column": column + 1}, row_local=True)
+                    if note is not None and has_formula:
+                        note.update({"scope": "unresolved", "cached_formula_row": True})
+                    keep_scale_note(note)
                 if area_columns:
                     source_holds.extend(_compound_area_conflicts(
                         area_columns, padded, location, header_row=header_row_number,
                     ))
                 warnings.extend(_enum_warnings(record, location))
                 records.append(record)
+    _xlsx_scale_claims(records, scale_notes, scale_tables)
+    if scale_notes:
+        assumptions.append({"code": "xlsx-scalar-conversion-evidence",
+                            "message": "Retained bounded source conversion statements; direction and scope are not inferred.",
+                            "notes": scale_notes})
     return _result(
         records,
         source_format="xlsx",
