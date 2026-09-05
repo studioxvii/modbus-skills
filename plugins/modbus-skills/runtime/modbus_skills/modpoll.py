@@ -627,6 +627,10 @@ def _gavinying_preflight(
 ) -> tuple[Finding, ...]:
     findings: list[Finding] = []
     for block_index, block in enumerate(blocks):
+        if mode == "final" and block_area(block) in {"coil", "discrete-input"}:
+            findings.append(Finding("error", "MODPOLL_SCALAR_BITS_UNSUPPORTED",
+                "gavinying decodes discrete references as byte groups, not individual point values. Use raw probe mode or a scalar-capable profile.",
+                f"requests[{block_index}]"))
         block_path = f"requests[{block_index}]"
         unit = block_unit_id(block)
         if unit is not None and not 1 <= unit <= 254:

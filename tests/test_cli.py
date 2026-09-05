@@ -38,7 +38,9 @@ class CliIntegrationTests(unittest.TestCase):
             code = run_cli(command, [str(value) for value in arguments])
         self.assertEqual(0, code, stderr.getvalue())
         self.assertEqual("", stderr.getvalue())
-        return json.loads(stdout.getvalue())
+        receipt = json.loads(stdout.getvalue())
+        self.assertIn("next_action", receipt)
+        return receipt
 
     def prepare_map_and_plan(self) -> tuple[Path, Path, Path]:
         parsed = self.root / "candidate.json"

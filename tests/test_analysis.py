@@ -67,6 +67,19 @@ class CaptureAnalysisTests(unittest.TestCase):
         self.assertEqual(1, result["communications"]["error_count"])
         self.assertEqual(1, len(result["rejected_samples"]))
 
+    def test_skipped_checks_are_not_reported_as_passing(self) -> None:
+        result = analyze_capture({"samples": [{"point_id": "p", "timestamp": "2026-01-01T00:00:00Z", "value": 10}]})
+        point = result["points"]["p"]
+        self.assertIsNone(point["stale"])
+        for name in ("stale", "range", "rate_of_change", "flatline", "missing_intervals", "counter"):
+            self.assertEqual("skipped", point["checks"][name]["status"])
+            self.assertTrue(point["checks"][name]["reason"])
+        configured = analyze_capture(self.capture, now="2026-01-01T00:01:40Z")["points"]["temperature"]["checks"]
+        self.assertEqual("finding", configured["stale"]["status"])
+        self.assertEqual(15, configured["stale"]["thresholds"]["after_seconds"])
+        self.assertEqual("finding", configured["range"]["status"])
+        self.assertEqual({"minimum": 0, "maximum": 100}, configured["range"]["thresholds"])
+
     def test_analysis_is_deterministic_without_wall_clock(self) -> None:
         small = {
             "points": [{"point_id": "p", "stale_after_seconds": 1}],

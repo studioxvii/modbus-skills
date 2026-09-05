@@ -199,6 +199,11 @@ def run_cli(command: str, argv: Sequence[str] | None = None) -> int:
             raise CliError(f"unknown command: {command}")
         args = _parser(resolved).parse_args(list(argv or ()))
         receipt = _HANDLERS[resolved](args)
+        receipt.setdefault("next_action", {
+            "kind": "inspect-result",
+            "uses": str(getattr(args, "output", "")),
+            "reason": "Inspect the artifact's status and holds before declaring the requested outcome complete or offering downstream work.",
+        })
         print(stable_json({"command": resolved, **receipt}), end="")
         return 0
     except CliError as exc:
