@@ -14,6 +14,7 @@ IDENTITY_FIELDS = (
     "protocol_offset",
     "logical_point_id",
 )
+_MAP_SCHEMAS = frozenset({"modbus-map/v1", "modbus-runtime-map/v1"})
 
 DEFAULT_COMPARE_FIELDS = (
     "name",
@@ -42,7 +43,9 @@ class MapComparisonError(ValueError):
 
 def _points(value: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     if isinstance(value, Mapping):
-        candidate = value.get("points", value.get("records", value.get("registers", ())))
+        if "schema_version" in value and (not isinstance(value["schema_version"], str) or value["schema_version"] not in _MAP_SCHEMAS):
+            raise MapComparisonError("Compared map schema_version must be modbus-map/v1 or modbus-runtime-map/v1.")
+        candidate = value.get("points", value.get("records", value.get("registers")))
     else:
         candidate = value
     if not isinstance(candidate, Sequence) or isinstance(candidate, (str, bytes, bytearray)):
@@ -102,7 +105,17 @@ def _move_identity(identity: Mapping[str, Any]) -> tuple[Any, ...]:
 def _index(points: Iterable[Mapping[str, Any]]) -> dict[tuple[Any, ...], list[Mapping[str, Any]]]:
     output: dict[tuple[Any, ...], list[Mapping[str, Any]]] = defaultdict(list)
     for point in points:
-        output[composite_identity(point)].append(point)
+        identity = composite_identity(point)
+        route, unit, area, offset, logical_id = identity
+        invalid = []
+        if not isinstance(route, str) or not route.strip(): invalid.append("route_id")
+        if isinstance(unit, bool) or not isinstance(unit, int) or not 1 <= unit <= 247: invalid.append("unit_id")
+        if not isinstance(area, str) or area not in {"coil", "discrete-input", "holding-register", "input-register"}: invalid.append("area")
+        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 65535: invalid.append("protocol_offset")
+        if not isinstance(logical_id, str) or not logical_id.strip(): invalid.append("logical_point_id")
+        if invalid:
+            raise MapComparisonError("Comparison is held: composite identity is unresolved or invalid in " + ", ".join(invalid) + ".")
+        output[identity].append(point)
     return dict(output)
 
 
@@ -121,6 +134,10 @@ def compare_maps(
     fields = tuple(compare_fields or DEFAULT_COMPARE_FIELDS)
     if any(not isinstance(field, str) or not field for field in fields):
         raise MapComparisonError("Comparison field names must be non-empty strings.")
+    if (isinstance(before, Mapping) and isinstance(after, Mapping)
+            and "schema_version" in before and "schema_version" in after
+            and before["schema_version"] != after["schema_version"]):
+        raise MapComparisonError("Compared map schemas do not match.")
     old_index = _index(_points(before))
     new_index = _index(_points(after))
     all_identities = sorted(set(old_index) | set(new_index), key=_sort_key)

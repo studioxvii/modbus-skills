@@ -698,6 +698,15 @@ def _applied_remap_points(
 def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
     source_map = _read_json(args.input)
     points = _map_points(source_map)
+    source_holds: list[dict[str, Any]] = []
+    if isinstance(source_map, Mapping):
+        for field in ("holds", "source_holds"):
+            values = source_map.get(field, ())
+            if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)) or any(not isinstance(value, Mapping) for value in values):
+                raise CliError(f"remap source {field} must be an array of hold objects")
+            for value in values:
+                if value not in source_holds:
+                    source_holds.append(dict(value))
     conversions: list[dict[str, Any]] = []
     collision_index: dict[tuple[Any, ...], list[str]] = defaultdict(list)
     for index, point in enumerate(points):
@@ -758,11 +767,13 @@ def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
         for collision in collisions
     ]
     ready = not any(item["status"] == "held" for item in conversions) and not collisions
+    remaining_holds = [*source_holds, *_blocking_findings(findings), *collision_holds]
     raw_result: dict[str, Any] = {
         "contract": "modbus-address-remap/v1",
         "source_convention": args.source_convention,
         "target_convention": args.target_convention,
-        "status": "ready" if ready else "held",
+        "status": "ready" if ready and not any(hold.get("blocking") is not False for hold in remaining_holds) else "held",
+        "applied": ready,
         "conversions": conversions,
         "collisions": collisions,
     }
@@ -782,7 +793,7 @@ def _handle_remap(args: argparse.Namespace) -> dict[str, Any]:
         },
         assumptions=[],
         findings=findings,
-        holds=[*_blocking_findings(findings), *collision_holds],
+        holds=remaining_holds,
     )
     _write_json(args.output, result, overwrite=args.overwrite)
     return {"status": result["status"], "points": len(conversions), "output": Path(args.output).name}
@@ -1380,19 +1391,13 @@ def _handle_tool_pack(args: argparse.Namespace) -> dict[str, Any]:
     request_path = Path(args.request)
     request = _mapping(_read_json(args.request, label="tool-pack request"), "tool-pack request")
     base = request_path.parent
-    canonical = _ensure_workflow_envelope(
-        _request_value(
-            request.get("canonical_map", request.get("map")),
-            base,
-            "canonical map",
-        ),
-        "modbus-map/v1",
+    # Preserve the exact objects bound by the plan. Adding an envelope here
+    # changes their semantic hashes after planning, even for unchanged inputs.
+    canonical = _request_value(
+        request.get("canonical_map", request.get("map")), base, "canonical map",
     )
-    plan = _ensure_workflow_envelope(
-        _request_value(
-            request.get("read_plan", request.get("plan")), base, "read plan"
-        ),
-        "modbus-read-plan/v1",
+    plan = _request_value(
+        request.get("read_plan", request.get("plan")), base, "read plan",
     )
     targets = request.get("targets")
     if not isinstance(targets, Sequence) or isinstance(targets, (str, bytes, bytearray)):
