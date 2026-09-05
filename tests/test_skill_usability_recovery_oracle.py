@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -65,7 +66,7 @@ class RecoveryOracleTests(unittest.TestCase):
         self.assertTrue(result["dimensions"]["grouped_decisions"])
         self.assertTrue(result["recovery_evidence"]["proven"])
         self.assertEqual("same-case-resumed", result["recovery_evidence"]["disposition"])
-        self.assertIn("recovery-v2", result["oracle_version"])
+        self.assertEqual("recovery-v2", result["recovery_evidence"]["version"])
 
     def test_restart_labels_without_continuity_or_receipts_cannot_pass(self):
         for mutation in ("generic", "same-thread", "not-fresh", "hash-change", "old-state", "no-receipt", "wrong-resume", "missing-resume", "no-invocation", "repeated-parse"):
@@ -123,6 +124,20 @@ class RecoveryOracleTests(unittest.TestCase):
         self.assertEqual("blocked-preserved", result["recovery_evidence"]["disposition"])
         self.assertFalse(any(event["kind"] == "recovery" for event in events))
         self.assertEqual("blocked", self.evaluate(scenario, session, events, execution="blocked")["status"])
+
+    def test_bytecode_flag_and_past_tense_blocked_handoff_keep_exact_runtime_proof(self):
+        scenario, session, events = self.make_case("08-stale-tampered")
+        inspector = session.plugin_root / "skills/compile-user-map/scripts/inspect_case.py"
+        command = [sys.executable, "-B", str(inspector), str(session.durable_case)]
+        completed = subprocess.run(command, cwd=session.work, text=True, capture_output=True, check=False)
+        before = len(session.events)
+        observe_case_inspection(session, {"id": "actual-bytecode-flag", "command": shlex.join(command),
+            "exitCode": completed.returncode, "aggregatedOutput": completed.stdout + completed.stderr})
+        self.assertEqual(before + 1, len(session.events))
+        events = [event for event in events if event["kind"] != "case-integrity-observation"]
+        events.insert(-1, session.events[-1])
+        events[-1]["text"] = "The case failed integrity verification; I couldn't resume it. The case and outputs remain unchanged."
+        self.assertEqual("passed", self.evaluate(scenario, session, events)["status"])
 
     def test_forged_messages_usage_errors_and_destroyed_files_do_not_prove_recovery(self):
         for mutation in ("final-only", "generic-recovery", "usage-error", "wrong-hash", "wrong-case", "trusted-changed", "case-reset", "false-completion"):

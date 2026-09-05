@@ -214,6 +214,10 @@ def _python_command(item: Mapping[str, Any]) -> list[str]:
     trusted = {Path(sys.executable).resolve(), Path(shutil.which("python3") or sys.executable).resolve()}
     if executable is None or Path(executable).resolve() not in trusted:
         return []
+    if len(command) > 1 and command[1] == "-B":
+        # This interpreter flag only suppresses bytecode writes; it does not
+        # replace the trusted script with arbitrary Python code.
+        command = [command[0], *command[2:]]
     return command
 
 
@@ -794,6 +798,12 @@ class CodexSessionAdapter(SessionAdapter):
             session.state["thread_id"] = result["thread"]["id"]
             session.state["actual_model"] = result.get("model")
             session.state["thread_first_turn"] = True
+            # The application may create empty protected control directories at
+            # thread start. Record these before the worker's first turn instead
+            # of attributing them to a user-visible skill output.
+            if "initial_workspace_state" not in session.state:
+                from .handoff_evidence import tree_state
+                session.state["initial_workspace_state"] = tree_state(session.work)
         except (RpcError, KeyError) as exc:
             self._release_rpc(session)
             raise PreflightUnavailable(str(exc)) from exc
@@ -885,6 +895,14 @@ class CodexSessionAdapter(SessionAdapter):
                         observe_case_resume(session, item)
                         if session.tool_calls > int(limits["max_tool_calls"]):
                             raise SessionError("tool-call-budget-exceeded")
+                    elif kind not in {"userMessage", "reasoning", "plan", "contextCompaction"}:
+                        # File edits and other tool modalities consume the same
+                        # budget as shell commands; they are not free actions.
+                        session.tool_calls += 1
+                        session.events.append({"kind": "noncommand-tool", "tool_type": kind,
+                                               "item_id": item.get("id")})
+                        if session.tool_calls > int(limits["max_tool_calls"]):
+                            raise SessionError("tool-call-budget-exceeded")
                 if method == "turn/completed":
                     if params.get("turn", {}).get("status") != "completed":
                         raise SessionError("model-turn-failed")
@@ -901,9 +919,15 @@ class CodexSessionAdapter(SessionAdapter):
     def _observe_final(self, session: TrialSession, final: str) -> None:
         # Markdown decoration is presentation, not part of the skill name.
         plain = re.sub(r"[*`_]", "", final)
+        plain = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", plain)
         recommendation = re.search(r"Recommended next:\s*([a-z-]+)", plain, re.IGNORECASE)
+        if not recommendation:
+            recommendation = re.search(
+                r"(?:^|\n)\s*(?:Use|Run|Choose|Start with|I recommend|You should use)\s+(?:the\s+)?\$?([a-z][a-z-]+)",
+                plain, re.IGNORECASE)
         if recommendation:
-            session.events.append({"kind": "recommendation", "recommended_skill": recommendation.group(1)})
+            recommended = recommendation.group(1).lower()
+            session.events.append({"kind": "recommendation", "recommended_skill": None if recommended == "none" else recommended})
         if "?" in final or re.search(r"\b(?:please (?:provide|confirm|choose)|reply (?:with|yes|no)|send me)\b", plain, re.IGNORECASE):
             session.awaiting_user = True
             session.events.append({"kind": "question", "scope": "group", "prompt": final})
