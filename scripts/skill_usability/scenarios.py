@@ -19,6 +19,7 @@ from .sessions import (
     TrialSession,
     interrupt_and_continue,
     seed_workspace,
+    tamper_durable_case,
 )
 
 
@@ -78,108 +79,88 @@ def run_trial(
     session: TrialSession | None = None
     execution_status = "completed"
     missing = None
+    worker_started = False
+    failure_codes: set[str] = set()
+    result: dict[str, Any] = {}
     try:
-        adapter.preflight()
-        session = seed_workspace(scenario, campaign_dir=directory, parent=parent)
-        adapter.start(session)
-    except PreflightUnavailable as exc:
-        result = evaluate_trial(
-            scenario=scenario,
-            events=[],
-            artifacts=[],
-            snapshot=None,
-            terminal_reason="not-run",
-            execution_status="not-run",
-            missing_capability=exc.capability,
-        )
-        if session:
-            adapter.cleanup(session)
-        return {**result, "scenario_id": scenario["scenario_id"], "repetition": repetition}
-    except SessionError as exc:
-        result = evaluate_trial(
-            scenario=scenario,
-            events=[],
-            artifacts=[],
-            snapshot=None,
-            terminal_reason="not-run",
-            execution_status="not-run",
-            missing_capability=str(exc),
-        )
-        if session:
-            adapter.cleanup(session)
-        return {**result, "scenario_id": scenario["scenario_id"], "repetition": repetition}
+        try:
+            adapter.preflight()
+            session = seed_workspace(scenario, campaign_dir=directory, parent=parent)
+            session.state["deadline"] = started + int(budget.get("max_seconds", 120))
+            adapter.start(session)
+            worker_started = True
+            actor = BoundedUserActor(scenario)
+            steps = list(scenario.get("transitions", ()))
 
-    actor = BoundedUserActor(scenario)
-    pending_text: str | None = None
-    try:
-        for step in scenario.get("transitions", ()):
-            kind = step["kind"]
-            if kind == "supply-capture":
-                source = session.fixtures / Path(str(scenario["fixtures"][0]["path"])).name
-                if step.get("fixture_id"):
-                    match = next(
-                        item for item in scenario["fixtures"] if item["id"] == step["fixture_id"]
-                    )
-                    source = session.fixtures / Path(match["path"]).name
-                target = session.work / "capture.json"
-                target.write_bytes(source.read_bytes())
-                session.events.append({"kind": "external-gate", "fixture": source.name})
-                continue
-            if kind == "tamper":
-                # The scripted worker applies the tamper on the next turn.
-                pending_text = actor.prompt("resume") if "resume" in actor.prompts else pending_text
-                continue
-            if kind == "interrupt":
-                if session.interrupted:
+            def check_deadline() -> None:
+                if time.monotonic() >= session.state["deadline"]:
+                    raise SessionError("budget-exceeded")
+
+            def turn(text: str) -> list[dict[str, Any]]:
+                check_deadline()
+                if session.turn_count >= int(budget.get("max_turns", 8)):
+                    raise SessionError("turn-budget-exceeded")
+                events = adapter.turn(session, text)
+                check_deadline()
+                if session.tool_calls > int(budget.get("max_tool_calls", 20)):
+                    raise SessionError("tool-call-budget-exceeded")
+                word_limit = scenario.get("attention_budget", {}).get("max_final_words")
+                if adapter.name == "codex" and word_limit is not None:
+                    words = len(session.state.get("final_text", "").split())
+                    if words > int(word_limit):
+                        failure_codes.add("final-output-budget-exceeded")
+                        raise SessionError("final-output-budget-exceeded")
+                return events
+
+            for index, step in enumerate(steps):
+                check_deadline()
+                kind = step["kind"]
+                if kind == "supply-capture":
+                    source = session.fixtures / Path(str(scenario["fixtures"][0]["path"])).name
+                    if step.get("fixture_id"):
+                        match = next(item for item in scenario["fixtures"] if item["id"] == step["fixture_id"])
+                        source = session.fixtures / Path(match["path"]).name
+                    (session.work / "capture.json").write_bytes(source.read_bytes())
+                    session.events.append({"kind": "external-gate", "fixture": source.name})
+                elif kind == "tamper":
+                    if step.get("artifact") != "case.json":
+                        raise SessionError("unsupported-tamper-artifact")
+                    tamper_durable_case(session)
+                elif kind == "interrupt":
                     session = interrupt_and_continue(adapter, session)
-                continue
-            if kind in {"prompt", "reply-if-asked"}:
-                if kind == "prompt":
-                    pending_text = actor.prompt(str(step["prompt_id"]))
-                elif session.awaiting_user:
-                    pending_text = actor.reply(session.events)
-                    if pending_text is None:
-                        continue
-                    session.events.append({"kind": "actor-response", "prompt_ids": sorted(actor.used)})
-                else:
-                    continue
-                events = adapter.turn(session, pending_text)
-                pending_text = None
-                if session.interrupted:
-                    session = interrupt_and_continue(adapter, session)
-                    continue
-                if session.terminal:
-                    break
-                if session.awaiting_user and kind != "reply-if-asked":
-                    reply = actor.reply(events)
-                    if reply:
+                elif kind in {"prompt", "reply-if-asked"}:
+                    if kind == "prompt":
+                        text = actor.prompt(str(step["prompt_id"]))
+                    elif session.awaiting_user:
+                        text = actor.reply(session.events)
+                        if text is None:
+                            continue
                         session.events.append({"kind": "actor-response", "prompt_ids": sorted(actor.used)})
-                        adapter.turn(session, reply)
-                if time.monotonic() - started > int(budget.get("max_seconds", 120)):
-                    session.terminal = True
-                    session.terminal_reason = "budget-exceeded"
-                    break
-                if session.turn_count > int(budget.get("max_turns", 8)):
-                    session.terminal = True
-                    session.terminal_reason = "budget-exceeded"
-                    break
-        if session and not session.terminal and pending_text:
-            adapter.turn(session, pending_text)
-    except PreflightUnavailable as exc:
-        execution_status = "blocked"
-        missing = exc.capability
-    except (SessionError, ContractError, OSError, ValueError, TypeError) as exc:
-        execution_status = "blocked"
-        missing = str(exc)
+                    else:
+                        continue
+                    events = turn(text)
+                    # A terminal turn is not a terminal scenario. In particular,
+                    # run explicit fault/restart transitions before any reply.
+                    if index == len(steps) - 1 and session.awaiting_user and kind != "reply-if-asked":
+                        reply = actor.reply(events)
+                        if reply:
+                            session.events.append({"kind": "actor-response", "prompt_ids": sorted(actor.used)})
+                            turn(reply)
+                else:
+                    raise SessionError("unsupported-scenario-transition")
+        except Exception as exc:
+            execution_status = "blocked" if worker_started else "not-run"
+            missing = exc.capability if isinstance(exc, PreflightUnavailable) else str(exc)
+            if session:
+                session.terminal_reason = missing
 
-    try:
         snapshot = adapter.snapshot(session) if session else None
         result = evaluate_trial(
             scenario=scenario,
             events=session.events if session else [],
             artifacts=session.artifacts if session else [],
             snapshot=snapshot,
-            terminal_reason=session.terminal_reason if session else "blocked",
+            terminal_reason=session.terminal_reason if session else "not-run",
             execution_status=execution_status,
             missing_capability=missing,
         )
@@ -189,11 +170,17 @@ def run_trial(
             (trial_dir / "transcript.json").write_text(json.dumps(session.state.get("transcript", session.events), indent=2) + "\n", encoding="utf-8")
             if snapshot:
                 shutil.copytree(snapshot, trial_dir / "output")
-    except (OSError, ValueError, TypeError) as exc:
+    except Exception as exc:
         result = {"status": "blocked", "issue_codes": ["evidence-evaluation-error:" + type(exc).__name__],
                   "dimensions": {}, "terminal_reason": "blocked"}
     finally:
-        cleanup = adapter.cleanup(session) if session else {"cleaned": True}
+        try:
+            cleanup = adapter.cleanup(session) if session else {"cleaned": True}
+        except Exception:
+            cleanup = {"cleaned": False, "issue": "cleanup-failed"}
+    if failure_codes:
+        result["status"] = "failed"
+        result["issue_codes"] = sorted(set(result.get("issue_codes", ())) | failure_codes)
     if cleanup.get("cleaned") is False:
         result["status"] = "failed"
         result["issue_codes"] = sorted(set(result.get("issue_codes", ()) ) | {"cleanup-failed"})

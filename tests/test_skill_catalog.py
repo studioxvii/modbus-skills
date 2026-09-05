@@ -76,7 +76,7 @@ class SkillCatalogTests(unittest.TestCase):
             shutil.copytree(
                 ROOT,
                 fixture_root,
-                ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"),
+                ignore=shutil.ignore_patterns(".git", ".venv*", "__pycache__", "artifacts", "private", ".worktrees", "node_modules"),
             )
 
             root_license = fixture_root / "LICENSE"

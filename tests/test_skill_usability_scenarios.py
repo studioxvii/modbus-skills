@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from skill_usability.contracts import load_campaign  # noqa: E402
 from skill_usability.oracles import evaluate_trial  # noqa: E402
 from skill_usability.scenarios import BoundedUserActor, run_trial  # noqa: E402
-from skill_usability.sessions import FakeSessionAdapter, ScriptedWorker, TrialSession  # noqa: E402
+from skill_usability.sessions import FakeSessionAdapter, ScriptedWorker, SessionError, TrialSession  # noqa: E402
 
 
 class UnsafeWorker(ScriptedWorker):
@@ -46,6 +46,119 @@ class WrongRouteWorker(ScriptedWorker):
 
 
 class SkillUsabilityScenarioTests(unittest.TestCase):
+    def test_terminal_turn_does_not_skip_interrupt_or_reply_before_restart(self):
+        class Probe(FakeSessionAdapter):
+            def __init__(self):
+                self.actions = []
+
+            def turn(self, session, text):
+                self.actions.append("turn")
+                session.turn_count += 1
+                session.terminal = True
+                session.awaiting_user = True
+                session.events.append({"kind": "question", "prompt": "Selection?"})
+                return session.events[-1:]
+
+            def continue_session(self, session, text):
+                self.actions.append("restart")
+                self.asserted_deadline = session.state["deadline"]
+                return super().continue_session(session, text)
+
+        adapter = Probe()
+        with mock.patch.object(BoundedUserActor, "reply", return_value=None) as reply:
+            self._run("04-interrupt-resume", adapter)
+        self.assertEqual(["turn", "restart", "turn"], adapter.actions)
+        # Only the last turn may solicit a further permitted actor reply.
+        self.assertEqual(1, reply.call_count)
+
+    def test_terminal_turn_does_not_skip_real_harness_tamper(self):
+        class Probe(FakeSessionAdapter):
+            def __init__(self):
+                self.observed_states = []
+
+            def turn(self, session, text):
+                self.session = session
+                session.turn_count += 1
+                case = session.work / "case.json"
+                trusted = session.work / "trusted.json"
+                if session.turn_count == 1:
+                    case.write_text('{"state":"complete"}')
+                    trusted.write_text('{"point":123}')
+                else:
+                    self.observed_states.append(json.loads(case.read_text())["state"])
+                    self.asserted_trusted = trusted.read_text()
+                session.terminal = True
+                return []
+
+        adapter = Probe()
+        result = self._run("08-stale-tampered", adapter)
+        self.assertEqual(["tampered"], adapter.observed_states)
+        self.assertEqual('{"point":123}', adapter.asserted_trusted)
+        tamper = next(event for event in adapter.session.events if event["kind"] == "tamper")
+        self.assertNotEqual(tamper["before_sha256"], tamper["after_sha256"])
+        self.assertFalse(any(event["kind"] == "recovery" for event in adapter.session.events))
+        self.assertNotEqual("passed", result["status"])
+        self.assertFalse(adapter.session.workspace.exists())
+
+    def test_missing_tamper_case_stops_before_resume_and_still_cleans(self):
+        adapter = FakeSessionAdapter()
+
+        def turn(session, _text):
+            session.turn_count += 1
+            session.terminal = True
+            return []
+
+        with mock.patch.object(adapter, "turn", side_effect=turn) as turns, mock.patch.object(
+            adapter, "cleanup", wraps=adapter.cleanup
+        ) as cleanup:
+            result = self._run("08-stale-tampered", adapter)
+        self.assertEqual(1, turns.call_count)
+        self.assertNotEqual("passed", result["status"])
+        self.assertEqual("durable-case-missing", cleanup.call_args.args[0].terminal_reason)
+        self.assertFalse(cleanup.call_args.args[0].workspace.exists())
+
+    def test_start_restart_and_evaluation_failures_always_cleanup(self):
+        for failure in ("start", "continue_session", "evaluation"):
+            with self.subTest(failure=failure):
+                adapter = FakeSessionAdapter()
+                target = (mock.patch("skill_usability.scenarios.evaluate_trial", side_effect=RuntimeError("unsupported observation"))
+                          if failure == "evaluation" else mock.patch.object(adapter, failure, side_effect=SessionError("failure")))
+                with target, mock.patch.object(adapter, "cleanup", wraps=adapter.cleanup) as cleanup:
+                    result = self._run("04-interrupt-resume", adapter)
+                self.assertNotEqual("passed", result["status"])
+                cleanup.assert_called_once()
+                self.assertFalse(cleanup.call_args.args[0].workspace.exists())
+
+    def test_declared_actual_final_word_gate_retains_words_and_evidence(self):
+        class OutputProbe(FakeSessionAdapter):
+            name = "codex"
+
+            def turn(self, session, text):
+                session.turn_count += 1
+                session.terminal = True
+                session.state["final_text"] = "one two three four"
+                session.state["transcript"] = [{"text": session.state["final_text"]}]
+                session.events.append({"kind": "recommendation", "recommended_skill": "compile-user-map"})
+                return session.events
+
+        campaign = load_campaign()
+        for limit in (None, 3, 4):
+            with self.subTest(limit=limit), tempfile.TemporaryDirectory() as temporary:
+                scenario = json.loads(json.dumps(campaign["loaded_scenarios"][0]))
+                scenario["attention_budget"].pop("max_final_words", None)
+                if limit is not None:
+                    scenario["attention_budget"]["max_final_words"] = limit
+                result = run_trial(scenario, adapter=OutputProbe(), parent=Path(temporary), budget=campaign["budget"],
+                                   evidence_root=Path(temporary) / "evidence")
+                self.assertEqual(4, result["final_words"])
+                transcript = next((Path(temporary) / "evidence").rglob("transcript.json"))
+                self.assertEqual("one two three four", json.loads(transcript.read_text())[0]["text"])
+                if limit == 3:
+                    self.assertEqual("failed", result["status"])
+                    self.assertIn("final-output-budget-exceeded", result["issue_codes"])
+                else:
+                    self.assertNotIn("final-output-budget-exceeded", result["issue_codes"])
+
     def test_actor_never_repeats_a_correction_or_invents_unknown_facts(self):
         scenario = load_campaign()["loaded_scenarios"][2]
         actor = BoundedUserActor(scenario)

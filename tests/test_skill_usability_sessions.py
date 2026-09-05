@@ -19,12 +19,161 @@ from skill_usability.sessions import (  # noqa: E402
     ScriptedWorker,
     SessionError,
     hash_tree,
+    interrupt_and_continue,
     seed_workspace,
     stripped_worker_env,
+    tamper_durable_case,
+    work_file_hashes,
 )
 
 
 class SkillUsabilitySessionTests(unittest.TestCase):
+    def test_real_adapter_restart_closes_rpc_and_starts_fresh_thread_with_remaining_budgets(self):
+        scenario = load_campaign()["loaded_scenarios"][3]
+        budget = {"max_seconds": 120, "max_turns": 8, "max_tool_calls": 20, "max_output_bytes": 1000}
+        with tempfile.TemporaryDirectory() as temporary:
+            session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+            (session.work / "case.json").write_text('{"state":"complete"}')
+            (session.work / "trusted.json").write_text('{"trusted":true}')
+            before = work_file_hashes(session)
+            first = mock.Mock(bytes_read=125, pending=[], reader=None)
+            second = mock.Mock(bytes_read=75, pending=[], reader=None)
+            first.call.side_effect = [{}, {"thread": {"id": "thread-one"}, "model": "test-model"}]
+            second.call.side_effect = [{}, {"thread": {"id": "thread-two"}, "model": "test-model"}]
+            created = []
+
+            def create(*_args, **kwargs):
+                if created:
+                    first.close.assert_called_once()
+                created.append(kwargs["max_bytes"])
+                return first if len(created) == 1 else second
+
+            adapter = CodexSessionAdapter(budget=budget)
+            with mock.patch("skill_usability.sessions.shutil.which", return_value="/usr/bin/codex"), mock.patch(
+                "skill_usability.codex_rpc.CodexRpc", side_effect=create
+            ), mock.patch("skill_usability.sessions.time.monotonic", return_value=10):
+                adapter.start(session)
+                deadline = session.state["deadline"]
+                transcript = session.state["transcript"]
+                transcript.append({"durable": "prior turn"})
+                session.turn_count = 2
+                session.tool_calls = 7
+                previous = session.session_id
+                session.terminal = True
+                # Real workers never set the scripted interrupted flag.
+                self.assertFalse(session.interrupted)
+                interrupt_and_continue(adapter, session)
+                self.assertEqual([1000, 875], created)
+                self.assertEqual(deadline, session.state["deadline"])
+                self.assertEqual(2, session.turn_count)
+                self.assertEqual(7, session.tool_calls)
+                self.assertIs(transcript, session.state["transcript"])
+                self.assertEqual({"durable": "prior turn"}, transcript[0])
+                self.assertEqual(before, work_file_hashes(session))
+                self.assertNotEqual(previous, session.session_id)
+                self.assertEqual("thread-two", session.state["thread_id"])
+                self.assertTrue(session.state["thread_first_turn"])
+                self.assertFalse(session.terminal)
+                for rpc in (first, second):
+                    self.assertEqual(["initialize", "thread/start"], [call.args[0] for call in rpc.call.call_args_list])
+                    self.assertTrue(all(call.kwargs["deadline"] == deadline for call in rpc.call.call_args_list))
+                self.assertTrue(adapter.cleanup(session)["cleaned"])
+            second.close.assert_called_once()
+            self.assertEqual(200, session.state["output_bytes_used"])
+            self.assertFalse(session.workspace.exists())
+
+    def test_restart_cannot_reset_exhausted_deadline_or_output_budget(self):
+        scenario = load_campaign()["loaded_scenarios"][3]
+        for deadline, used, expected in ((9, 10, "time-budget"), (20, 100, "output-budget")):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as temporary:
+                session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+                (session.work / "case.json").write_text('{}')
+                old = mock.Mock(bytes_read=used, reader=None)
+                session.state.update({"rpc": old, "deadline": deadline, "thread_id": "old", "transcript": [{"old": True}]})
+                adapter = CodexSessionAdapter(budget={"max_seconds": 120, "max_output_bytes": 100})
+                with mock.patch("skill_usability.sessions.shutil.which", return_value="/usr/bin/codex"), mock.patch(
+                    "skill_usability.codex_rpc.CodexRpc"
+                ) as factory, mock.patch("skill_usability.sessions.time.monotonic", return_value=10):
+                    with self.assertRaisesRegex(SessionError, expected):
+                        adapter.continue_session(session, None)
+                    factory.assert_not_called()
+                old.close.assert_called_once()
+                self.assertEqual(deadline, session.state["deadline"])
+                self.assertEqual([{"old": True}], session.state["transcript"])
+                adapter.cleanup(session)
+
+    def test_restart_failure_releases_new_rpc_without_claiming_resume(self):
+        scenario = load_campaign()["loaded_scenarios"][3]
+        with tempfile.TemporaryDirectory() as temporary:
+            session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+            (session.work / "case.json").write_text('{}')
+            old = mock.Mock(bytes_read=1, reader=None)
+            new = mock.Mock(bytes_read=2, reader=None)
+            new.call.side_effect = [{}, {"thread": {"id": "same"}}]
+            session.state.update({"rpc": old, "thread_id": "same"})
+            adapter = CodexSessionAdapter()
+            with mock.patch("skill_usability.sessions.shutil.which", return_value="/usr/bin/codex"), mock.patch(
+                "skill_usability.codex_rpc.CodexRpc", return_value=new
+            ):
+                with self.assertRaisesRegex(SessionError, "reused-thread"):
+                    adapter.continue_session(session, None)
+            old.close.assert_called_once()
+            new.close.assert_called_once()
+            self.assertNotIn("rpc", session.state)
+            self.assertFalse(any(event["kind"] == "session-resume" for event in session.events))
+            adapter.cleanup(session)
+
+    def test_tamper_is_unique_scoped_and_preserves_all_other_hashes(self):
+        scenario = load_campaign()["loaded_scenarios"][7]
+        with tempfile.TemporaryDirectory() as temporary:
+            session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+            case = session.work / "saved" / "case.json"
+            case.parent.mkdir()
+            case.write_text('{"state":"complete","case_id":"synthetic"}')
+            trusted = case.parent / "output.json"
+            trusted.write_text('{"trusted":true}')
+            before = work_file_hashes(session)
+            session.state["transcript"] = []
+            tamper_durable_case(session)
+            after = work_file_hashes(session)
+            self.assertNotEqual(before["saved/case.json"], after["saved/case.json"])
+            self.assertEqual(before["saved/output.json"], after["saved/output.json"])
+            event = session.events[-1]
+            self.assertEqual(before["saved/case.json"], event["before_sha256"])
+            self.assertEqual(after["saved/case.json"], event["after_sha256"])
+            self.assertEqual("test-harness", event["actor"])
+            self.assertEqual(["tamper"], [event["kind"] for event in session.events])
+            self.assertEqual(event, session.state["transcript"][-1]["event"])
+
+    def test_missing_ambiguous_invalid_or_symlink_case_never_mutates(self):
+        scenario = load_campaign()["loaded_scenarios"][7]
+        for mode in ("missing", "ambiguous", "invalid", "symlink"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+                outside = session.workspace / "case.json"
+                outside.write_text('{"state":"complete"}')
+                if mode == "symlink":
+                    (session.work / "case.json").symlink_to(outside)
+                elif mode != "missing":
+                    (session.work / "case.json").write_text('{}' if mode == "invalid" else outside.read_text())
+                    if mode == "ambiguous":
+                        (session.work / "other").mkdir()
+                        (session.work / "other/case.json").write_text(outside.read_text())
+                before = work_file_hashes(session)
+                with self.assertRaises(SessionError):
+                    tamper_durable_case(session)
+                self.assertEqual(before, work_file_hashes(session))
+                self.assertEqual('{"state":"complete"}', outside.read_text())
+                self.assertFalse(session.events)
+
+    def test_seed_failure_removes_partial_workspace(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch(
+            "skill_usability.sessions.copy_plugin", side_effect=OSError("copy failed")
+        ):
+            with self.assertRaises(OSError):
+                seed_workspace({}, campaign_dir=ROOT / "tests/skill_usability", parent=Path(temporary))
+            self.assertEqual([], list(Path(temporary).iterdir()))
+
     def test_markdown_recommendation_and_non_question_mark_request(self):
         scenario = load_campaign()["loaded_scenarios"][0]
         with tempfile.TemporaryDirectory() as temporary:
