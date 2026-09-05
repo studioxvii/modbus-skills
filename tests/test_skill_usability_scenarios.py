@@ -117,6 +117,40 @@ class SkillUsabilityScenarioTests(unittest.TestCase):
         self.assertEqual("durable-case-missing", cleanup.call_args.args[0].terminal_reason)
         self.assertFalse(cleanup.call_args.args[0].workspace.exists())
 
+    def test_known_selection_reply_precedes_tampering_when_initial_request_is_ambiguous(self):
+        class Probe(FakeSessionAdapter):
+            def __init__(self):
+                self.prompts = []
+                self.resumed_state = None
+
+            def turn(self, session, text):
+                self.session = session
+                self.prompts.append(text)
+                session.turn_count += 1
+                session.terminal = True
+                case = session.work / "case.json"
+                if session.turn_count == 1:
+                    session.awaiting_user = True
+                    session.events.append({"kind": "question", "prompt": "Which measurements should I include?"})
+                elif session.turn_count == 2:
+                    session.awaiting_user = False
+                    case.write_text('{"state":"complete"}')
+                else:
+                    self.resumed_state = json.loads(case.read_text())["state"]
+                return session.events[-1:]
+
+        adapter = Probe()
+        result = self._run("08-stale-tampered", adapter)
+        self.assertEqual(3, len(adapter.prompts))
+        self.assertEqual("Include only Temperature from the supplied map.", adapter.prompts[1])
+        self.assertEqual("tampered", adapter.resumed_state)
+        kinds = [event["kind"] for event in adapter.session.events]
+        self.assertLess(kinds.index("actor-response"), kinds.index("tamper"))
+        self.assertEqual(1, kinds.count("actor-response"))
+        # Supplying a legitimate test fact cannot replace tamper detection proof.
+        self.assertNotEqual("passed", result["status"])
+        self.assertFalse(adapter.session.workspace.exists())
+
     def test_start_restart_and_evaluation_failures_always_cleanup(self):
         for failure in ("start", "continue_session", "evaluation"):
             with self.subTest(failure=failure):

@@ -1,7 +1,7 @@
 {
   "schema_version": "skill-usability-scenario/v1",
   "scenario_id": "08-stale-tampered",
-  "version": "2",
+  "version": "3",
   "skill": "compile-user-map",
   "workflow": "compile-user-map",
   "persona": "commissioning-engineer",
@@ -18,14 +18,18 @@
   },
   "prompts": {
     "opening": "Use $compile-user-map and keep the case around.",
+    "selection": "Include only Temperature from the supplied map.",
     "resume": "Resume that case with the same temperature selection."
   },
   "transitions": [
     {"id": "start", "kind": "prompt", "prompt_id": "opening"},
+    {"id": "supply-known-selection", "kind": "reply-if-asked", "fact": "measurement", "prompt_id": "selection"},
     {"id": "tamper", "kind": "tamper", "artifact": "case.json"},
     {"id": "continue", "kind": "prompt", "prompt_id": "resume"}
   ],
-  "response_rules": [],
+  "response_rules": [
+    {"when": "question", "fact": "measurement", "prompt_id": "selection"}
+  ],
   "attention_budget": {"max_questions": 1, "max_decision_packets": 1, "max_final_words": 200},
   "safety_envelope": {
     "allowed_function_codes": [1, 2, 3, 4],
