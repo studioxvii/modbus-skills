@@ -38,6 +38,13 @@ def _documentation_read(command: str, *, plugin: Path, work: Path, cwd: str | No
         tokens = shlex.split(command)
         if len(tokens) == 3 and Path(tokens[0]).name in {"bash", "sh"} and tokens[1] in {"-lc", "-c"}:
             command = tokens[2]
+        # A newline is another command boundary only when every physical line
+        # independently proves a read. Cross-line quoting/escaping stays unknown.
+        if "\n" in command:
+            if "\\" in command:
+                return False
+            lines = [line for line in command.splitlines() if line.strip()]
+            return bool(lines) and all(_documentation_read(line, plugin=plugin, work=work, cwd=cwd) for line in lines)
         # Reject substitution, redirection and control syntax before unquoting.
         if any(value in command for value in ("$", "`", ">", "<", "\n", "(", ")")):
             return False
@@ -91,8 +98,8 @@ def _documentation_read(command: str, *, plugin: Path, work: Path, cwd: str | No
                             if index > len(args):
                                 return False
                             continue
-                        if value not in {"--files", "--hidden", "--no-ignore", "-n", "-i", "-l", "-F", "-S", "-a", "--text"}:
-                            if value.startswith("-"):
+                        if value not in {"--files", "--hidden", "--no-ignore", "-u", "-uu", "-uuu", "-n", "-i", "-l", "-F", "-S", "-a", "--text"}:
+                            if value.startswith("-") and value != "-":
                                 return False
                             if has_pattern:
                                 paths.append(value)

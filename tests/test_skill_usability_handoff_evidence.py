@@ -64,6 +64,15 @@ class HandoffEvidenceTests(unittest.TestCase):
             message["params"]["item"]["cwd"] = "/etc"
         self.assertFalse(self.observe(transcript)["proven"])
 
+    def test_multiline_reads_and_unrestricted_listing_remain_bounded(self):
+        for command in ("cat ../plugin/SKILL.md\nls -la .\n", "rg --files -uu .",
+                        "rg --files - hidden ."):
+            self.assertTrue(self.observe(self.rpc(command))["proven"], command)
+        for command in ("cat ../plugin/SKILL.md\ntouch output.txt", "rg --files -uu /etc",
+                        "cat ../plugin/SKILL.md\\\n; touch output.txt",
+                        "cat '../plugin/SKILL.md\n/etc/passwd'", "rg --files -uuu --pre evil ."):
+            self.assertFalse(self.observe(self.rpc(command))["proven"], command)
+
     def test_noncommand_tools_and_incomplete_operations_never_pass(self):
         for kind in ("fileChange", "webSearch", "mcpToolCall", "dynamicToolCall", "unknownFutureTool"):
             with self.subTest(kind=kind):
