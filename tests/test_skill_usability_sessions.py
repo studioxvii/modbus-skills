@@ -24,10 +24,31 @@ from skill_usability.sessions import (  # noqa: E402
     stripped_worker_env,
     tamper_durable_case,
     work_file_hashes,
+    worker_python_reads,
 )
 
 
 class SkillUsabilitySessionTests(unittest.TestCase):
+    def test_virtual_environment_access_is_read_only_and_not_parent_repository(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            venv = root / "venv"
+            venv.mkdir()
+            (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+            library = venv / "lib/site-packages"
+            with mock.patch("skill_usability.sessions.sys.prefix", str(venv)), mock.patch(
+                "skill_usability.sessions.sys.base_prefix", "/usr"
+            ), mock.patch("skill_usability.sessions.sys.executable", str(venv / "bin/python")), mock.patch(
+                "skill_usability.sessions.sysconfig.get_path", return_value=str(library)
+            ):
+                permissions = worker_python_reads()
+                self.assertEqual({str(venv / "bin/python"), str(venv / "pyvenv.cfg"), str(library)}, set(permissions))
+                self.assertEqual({"read"}, set(permissions.values()))
+                self.assertNotIn(str(root), permissions)
+                with mock.patch("skill_usability.sessions.sysconfig.get_path", return_value=str(root)):
+                    with self.assertRaisesRegex(PreflightUnavailable, "outside-virtual"):
+                        worker_python_reads()
+
     def test_real_adapter_restart_closes_rpc_and_starts_fresh_thread_with_remaining_budgets(self):
         scenario = load_campaign()["loaded_scenarios"][3]
         budget = {"max_seconds": 120, "max_turns": 8, "max_tool_calls": 20, "max_output_bytes": 1000}

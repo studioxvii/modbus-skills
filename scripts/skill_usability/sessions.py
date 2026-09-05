@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 import uuid
@@ -43,6 +44,20 @@ class PreflightUnavailable(SessionError):
     def __init__(self, capability: str) -> None:
         super().__init__(capability)
         self.capability = capability
+
+
+def worker_python_reads() -> dict[str, str]:
+    """Expose the existing evaluator interpreter, never its enclosing repository."""
+    paths = {str(Path(sys.executable).absolute()): "read"}
+    prefix = Path(sys.prefix).resolve()
+    if sys.prefix != sys.base_prefix and (prefix / "pyvenv.cfg").is_file():
+        paths[str(prefix / "pyvenv.cfg")] = "read"
+        for key in ("purelib", "platlib"):
+            path = Path(sysconfig.get_path(key)).resolve()
+            if not path.is_relative_to(prefix):
+                raise PreflightUnavailable("python-library-outside-virtual-environment")
+            paths[str(path)] = "read"
+    return paths
 
 
 def hash_tree(root: Path) -> str:
@@ -785,6 +800,7 @@ class CodexSessionAdapter(SessionAdapter):
             raise SessionError("codex-output-budget-exceeded")
         if "rpc" in session.state:
             raise SessionError("codex-session-already-started")
+        python_reads = worker_python_reads()
         rpc = CodexRpc(shutil.which("codex"), max_bytes=remaining_bytes)
         session.state["rpc"] = rpc
         session.state.setdefault("transcript", [])
@@ -797,6 +813,7 @@ class CodexSessionAdapter(SessionAdapter):
                 "filesystem": {":minimal": "read", str(Path(shutil.which("codex")).resolve().parent): "read", str(session.plugin_root): "read", str(session.fixtures): "read", str(session.work): "write"},
                 "network": {"enabled": False},
             }
+            profile["filesystem"].update(python_reads)
             result = rpc.call("thread/start", {
                 "cwd": str(session.work), "ephemeral": True,
                 "approvalPolicy": "never", "permissions": "modbus-test",
@@ -807,7 +824,9 @@ class CodexSessionAdapter(SessionAdapter):
                     "Write generated results only in the current work directory. "
                     "This is an isolated offline test: no device/network access, credentials, installs, or changes to the plugin. "
                     "Do not consult grading data or other trials. Ask for missing facts normally; a simulated user will respond. "
-                    f"Plugin: {session.plugin_root}. Fixtures: {session.fixtures}."
+                    f"Plugin: {session.plugin_root}. Fixtures: {session.fixtures}. "
+                    f"Available test Python interpreter: {sys.executable}. Use this existing executable for Python wrappers; "
+                    "its installed runtime libraries are readable, not writable. Do not install dependencies."
                 ),
             }, deadline=session.state["deadline"])
             session.state["thread_id"] = result["thread"]["id"]
