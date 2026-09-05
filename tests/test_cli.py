@@ -458,7 +458,7 @@ class CliIntegrationTests(unittest.TestCase):
             byte_evidence,
         )
         self.assertEqual(12, byte_receipt["candidates"])
-        self.assertEqual("apply-review", byte_receipt["next_action"]["skill"])
+        self.assertEqual("capture-sample", byte_receipt["next_action"]["skill"])
         incomplete_evidence = json.loads(byte_evidence.read_text(encoding="utf-8"))
         self.assertIn(
             "byte-order-sample-identity-incomplete",
@@ -516,6 +516,22 @@ class CliIntegrationTests(unittest.TestCase):
         )
         self.assertEqual("ready", custom_receipt["status"])
         self.assertIn("tank_level", (custom / "rendered-output.txt").read_text(encoding="utf-8"))
+
+    def test_remap_rejects_invalid_or_conflicting_canonical_offsets(self) -> None:
+        canonical, _, _ = self.prepare_map_and_plan()
+        source = json.loads(canonical.read_text())
+        for index, offset in enumerate((65536, -1, 1, True, "0")):
+            source["points"][0]["protocol_offset"] = offset
+            candidate = self.root / f"inconsistent-{index}.json"
+            candidate.write_text(json.dumps(source))
+            output = self.root / f"held-{index}.json"
+            receipt = self.run_command("remap-addresses", "--input", candidate,
+                "--from", "protocol-offset", "--to", "modicon-reference", "--output", output)
+            self.assertEqual("held", receipt["status"])
+            result = json.loads(output.read_text())
+            self.assertNotIn("points", result)
+            self.assertIn("address-remap-source-conflict", {hold["code"] for hold in result["holds"]})
+            self.assertEqual(offset, json.loads(candidate.read_text())["points"][0]["protocol_offset"])
 
     def test_remap_to_offsets_keeps_modicon_display_address(self) -> None:
         canonical, _, _ = self.prepare_map_and_plan()

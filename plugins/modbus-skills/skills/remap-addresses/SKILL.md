@@ -15,7 +15,8 @@ Follow `../../references/interaction-contract.md`.
 1. Require the source and target conventions.
 2. Require an explicit register area when notation does not prove it.
 3. Run `python3 <skill-dir>/scripts/run.py --input <map.json> --from <convention> --to <convention> --output <preview.json>`.
-4. Validate invalid offsets and collisions across the whole map.
+4. Validate offsets, source/canonical agreement, and collisions across the whole map.
+   A conflicting source token must not silently replace a canonical offset.
 5. When the requested conventions are explicit and the preview is collision-free,
    apply the conversion without another confirmation. Ask once only for ambiguity or
    a lossy/colliding result.

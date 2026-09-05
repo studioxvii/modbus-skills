@@ -32,6 +32,7 @@ decision path. Verified items require no human response.
 ## Stop
 
 - Never ask page by page, row by row, or point by point.
+- Reject an object with no explicit points or records array; it is not a verified empty map.
 - Do not turn plausibility into confirmation.
 - Stop for writes, broadcasts, discovery, or unbounded polling.
 

@@ -141,6 +141,9 @@ _REGISTER_HEADER_KEYS = frozenset(
     }
 )
 _KNOWN_AREAS = {
+    "discrete-input",
+    "input-register",
+    "holding-register",
     "coil",
     "coils",
     "discrete input",

@@ -1,3 +1,3 @@
 device,default_1,1,,
-poll,holding_register,40100,2,BE_BE
-ref,discharge_pressure,40100,float32,r,bar,0.1
+poll,holding_register,100,2,BE_BE
+ref,discharge_pressure,100,float32,r,bar,0.1

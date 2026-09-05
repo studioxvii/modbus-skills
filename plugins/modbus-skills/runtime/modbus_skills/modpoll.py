@@ -60,11 +60,12 @@ _PROCONX_AREA_TYPE = {
     "holding-register": "4",
 }
 _PROCONX_FINAL_TYPE_SUFFIX = {
-    "int16": ":int16",
-    "uint16": ":uint16",
-    "float16": ":float16",
-    "int32": ":int32",
-    "uint32": ":uint32",
+    "int16": "",
+    "uint16": "",
+    "int32": ":i32",
+    "uint32": ":i32",
+    "int64": ":i64",
+    "uint64": ":i64",
     "float32": ":f32",
     "float64": ":f64",
     "double": ":f64",
@@ -446,7 +447,7 @@ def _proconx_preflight(
                     suffix = _PROCONX_FINAL_TYPE_SUFFIX.get(
                         (datatype or "").strip().lower()
                     )
-                    if suffix is None and not (datatype or "").startswith("string"):
+                    if suffix is None:
                         findings.append(
                             Finding(
                                 "error",
@@ -492,6 +493,26 @@ def _proconx_preflight(
                     block_path,
                 )
             )
+        if mode == "final" and len({point_datatype(point) for point in points}) > 1:
+            findings.append(Finding(
+                "error", "MODPOLL_BLOCK_DATATYPE_CONFLICT",
+                "One proconX command cannot decode mixed datatypes; use separate homogeneous read blocks or probe mode.",
+                block_path,
+            ))
+        width = (point_word_count(points[0]) or 1) if mode == "final" and points else 1
+        quantity = block_quantity(block) or 0
+        if quantity % width or not 1 <= quantity // width <= 125:
+            findings.append(Finding("error", "MODPOLL_COUNT_UNSUPPORTED",
+                "proconX requires 1 through 125 complete typed values per command.", block_path))
+        if mode == "final" and points:
+            start = block_start(block)
+            ordered = sorted(points, key=lambda point: point_protocol_offset(point) or 0)
+            if quantity != len(ordered) * width or any(
+                point_word_count(point) != width or point_protocol_offset(point) != start + index * width
+                for index, point in enumerate(ordered)
+            ):
+                findings.append(Finding("error", "MODPOLL_TYPED_BLOCK_GAPS",
+                    "Final typed values must cover the block without gaps or unequal widths; use probe mode for raw words.", block_path))
     return tuple(findings)
 
 
@@ -512,17 +533,27 @@ def _proconx_command(
     assert start is not None
     assert quantity is not None
     zero_prefix, reference = _proconx_reference(area, start)
-    type_flag = _proconx_type_flag(area, mode=mode, points=tuple(points))
+    points = tuple(points)
+    type_flag = _proconx_type_flag(area, mode=mode, points=points)
+    flags = ""
+    if mode == "final" and points and area in {"holding-register", "input-register"}:
+        datatype = (point_datatype(points[0]) or "").lower()
+        width = point_word_count(points[0]) or 1
+        quantity //= width
+        if datatype.startswith("uint"):
+            flags += " -u"
+        if width > 1:
+            flags += " -f" if datatype.startswith("float") or datatype == "double" else " -i"
     return (
         f"modpoll -m tcp -p \"{port_var}\" -a {unit} {zero_prefix}-r {reference} "
-        f"-c {quantity} -t {type_flag} -1 \"{host_var}\""
+        f"-c {quantity} -t {type_flag}{flags} -1 \"{host_var}\""
     )
 
 
 def _proconx_reference(area: str, protocol_offset: int) -> tuple[str, str]:
     if area in {"coil", "discrete-input"}:
         return "-0 ", str(protocol_offset)
-    return "", str(_TRADITIONAL_BASE[area] + protocol_offset)
+    return "-0 ", str(protocol_offset)
 
 
 def _proconx_type_flag(
@@ -699,7 +730,7 @@ def _gavinying_csv(
                 }
                 if orders:
                     endian = sorted(orders)[0]
-            display_start = _TRADITIONAL_BASE[area] + start
+            display_start = start
             write_csv_row(
                 writer,
                 ["poll", _GAVINYING_AREA[area], display_start, quantity, endian]
@@ -739,7 +770,7 @@ def _gavinying_csv(
                         [
                             "ref",
                             safe_slug(point_name(point, identifier), fallback=identifier).replace("-", "_"),
-                            _TRADITIONAL_BASE[area] + point_start,
+                            point_start,
                             datatype,
                             "r",
                             "" if unit_text is None else unit_text,
@@ -1487,7 +1518,9 @@ def _proconx_readme(mode: str) -> str:
 
 These files target the proconX ``modpoll`` CLI documented at modbusdriver.com.
 Each line in ``commands.txt`` performs one bounded read using ``-m tcp`` and
-``-1 host`` syntax. Discrete areas use ``-0`` with a zero-based reference.
+``-1 host`` syntax. All areas use ``-0`` with a zero-based PDU reference.
+Final commands require homogeneous datatype blocks. Counts represent typed
+values, not register words; multiword ABCD layouts use explicit endian flags.
 
 This target is BETA. Native Modpoll verification was not run, so native verification is unavailable.
 The cross-platform ``pymodbus-read-once.py`` fallback runs one selected compiled

@@ -4,12 +4,18 @@
 
 Generate the documented open-source `device`, `poll`, and `ref` CSV collections.
 Use with the gavinying/modpoll CLI, not proconX FieldTalk modpoll.
+Both `poll` and `ref` addresses are zero-based PDU offsets. Do not add a
+30000/40000 register-area prefix; the CSV area field already selects the table.
 
 ## `proconx-cli`
 
 Generate one bounded proconX FieldTalk `modpoll` command per compiled read block.
 Use when the installed tool is proconX modpoll from modbusdriver.com. This profile
 does not emit gavinying CSV files.
+Use `-0` for PDU addressing in every area. Final blocks must contain one datatype,
+with no gaps or partial values. The command count is typed values, not words.
+Unsupported types or mixed blocks remain held; probe mode reads raw words.
+Do not copy gavinying datatype strings into proconX command flags.
 
 ## `witte-desktop`
 

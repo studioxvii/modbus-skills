@@ -36,6 +36,7 @@ Completion requires every candidate to share one `sample_id`; the evidence selec
 ## Stop
 
 - Stop when no raw words or complete sample identity exist.
+- Incomplete sample identity routes back to `capture-sample`, not to applying a layout.
 - Stop for coil or packed-bit numbering; do not treat it as ABCD/BADC/CDAB/DCBA.
 - Do not select a winning layout.
 - Stop for writes, broadcasts, discovery, or unbounded polling.

@@ -102,8 +102,8 @@ class ModpollExporterTests(unittest.TestCase):
         expected = (FIXTURES / "gavinying-modpoll.csv").read_text(encoding="utf-8")
         config = text(result, "default.csv")
         self.assertEqual(expected, config)
-        self.assertIn("poll,holding_register,40100,2,BE_BE", config)
-        self.assertIn("ref,discharge_pressure,40100,float32,r,bar,0.1", config)
+        self.assertIn("poll,holding_register,100,2,BE_BE", config)
+        self.assertIn("ref,discharge_pressure,100,float32,r,bar,0.1", config)
         self.assertNotIn(",rw,", config)
         self.assertNotIn("mqtt", text(result, "commands.txt").lower())
 
@@ -207,11 +207,11 @@ class ModpollExporterTests(unittest.TestCase):
         result = export_modpoll(canonical_map, read_plan, profile="gavinying-cli")
         self.assertEqual("generated", result.status)
         config = text(result, "lab.csv")
-        # coil traditional base 0, discrete-input traditional base 10000.
+        # Both tables use PDU offsets; the area is a separate CSV field.
         self.assertIn("poll,coil,0,1,BE_BE", config)
         self.assertIn("ref,pump_run,0,bool,r,,", config)
-        self.assertIn("poll,discrete_input,10005,1,BE_BE", config)
-        self.assertIn("ref,alarm_bit,10005,bool,r,,", config)
+        self.assertIn("poll,discrete_input,5,1,BE_BE", config)
+        self.assertIn("ref,alarm_bit,5,bool,r,,", config)
         # Read-only: no writable references are emitted.
         self.assertNotIn(",rw,", config)
 
@@ -251,11 +251,33 @@ class ModpollExporterTests(unittest.TestCase):
             commands,
         )
         self.assertIn(
-            'modpoll -m tcp -p "${MODBUS_LAB_PORT}" -a 1 -r 40000 -c 2 -t 4:f32 -1 "${MODBUS_LAB_HOST}"',
+            'modpoll -m tcp -p "${MODBUS_LAB_PORT}" -a 1 -0 -r 0 -c 1 -t 4:f32 -f -1 "${MODBUS_LAB_HOST}"',
             commands,
         )
         self.assertIn("gavinying-cli", text(result, "README.md"))
-        self.assertIn("40000", text(result, "read-plan.csv"))
+        self.assertNotIn("40000", text(result, "read-plan.csv"))
+
+    def test_all_areas_keep_pdu_offset_zero_in_both_cli_profiles(self) -> None:
+        for area in ("coil", "discrete-input", "input-register", "holding-register"):
+            discrete = area in {"coil", "discrete-input"}
+            canonical_map, read_plan = inputs(point(area=area, protocol_offset=0,
+                datatype="bool" if discrete else "uint16", word_span=1, scale=None))
+            csv_rows = list(csv.reader(StringIO(text(export_modpoll(canonical_map, read_plan, profile="gavinying-cli"), "default.csv"))))
+            self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "poll"))
+            self.assertEqual("0", next(row[2] for row in csv_rows if row[0] == "ref"))
+            command = text(export_modpoll(canonical_map, read_plan, profile="proconx-cli"), "commands.txt")
+            self.assertIn("-0 -r 0 -c 1", command)
+            self.assertNotIn(":uint16", command)
+
+    def test_proconx_mixed_types_and_unsupported_float16_are_held(self) -> None:
+        for values in (
+            [point(protocol_offset=0, datatype="uint16", word_span=1), point(logical_point_id="second", protocol_offset=1)],
+            [point(datatype="float16", word_span=1)],
+        ):
+            canonical_map, read_plan = inputs(*values)
+            result = export_modpoll(canonical_map, read_plan, profile="proconx-cli")
+            self.assertEqual("held", result.status)
+            self.assertFalse(any(artifact.path.endswith("commands.txt") for artifact in result.artifacts))
 
     def test_witte_desktop_uses_documented_read_automation_only(self) -> None:
         canonical_map, read_plan = inputs()

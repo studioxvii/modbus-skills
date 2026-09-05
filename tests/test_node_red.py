@@ -325,8 +325,33 @@ if (routed.at(-1).payload.state !== 'cancelled' || store.get('modbusSkillsRunnin
         result = export_node_red(canonical_map, read_plan, mode="probe")
         self.assertEqual("generated", result.status)
         flow = json.loads(artifact_text(result, "flow.json"))
-        sequencer = next(node for node in flow if node.get("name") == "02 Sequence read blocks" and node["type"] == "function")
-        self.assertIn('"datatype":null', sequencer["func"])
+        sequencer = next(node["func"] for node in flow if node.get("name") == "02 Sequence read blocks")
+        capture = next(node["func"] for node in flow if node.get("name") == "07 Build capture/v1")
+        self.assertIn("const retryLimit = 0;", sequencer)
+        self.assertIn("retry_limit: 0", capture)
+        self.assertIn('"datatype":null', sequencer)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js required")
+    def test_probe_failure_drains_without_a_second_physical_read(self) -> None:
+        canonical, plan = inputs()
+        flow_nodes = json.loads(artifact_text(export_node_red(canonical, plan, mode="probe"), "flow.json"))
+        seq = next(node["func"] for node in flow_nodes if node.get("name") == "02 Sequence read blocks")
+        cap = next(node["func"] for node in flow_nodes if node.get("name") == "07 Build capture/v1")
+        harness = f"""
+const store = new Map();
+const flow = {{get: k => store.get(k), set: (k,v) => store.set(k,v)}};
+const env = {{get: () => null}};
+const seq = msg => Function('msg','flow','env', {json.dumps(seq)})(msg, flow, env);
+const cap = msg => Function('msg','flow','env', {json.dumps(cap)})(msg, flow, env);
+const request = seq({{payload: {{action:'start'}}}}).find(Boolean).modbusSkillsRequest;
+if (request.max_attempts !== 1) throw Error('more than one attempt allowed');
+const response = cap({{modbusSkillsRequest:request, modbusSkillsReadError:{{reason:'timeout'}}}})[1];
+if (response.modbusSkillsRetry) throw Error('probe retry requested');
+const result = seq(response);
+if (result.some(x => x && x.modbusSkillsRequest)) throw Error('second physical read emitted');
+if (result.at(-1).payload.state !== 'drained') throw Error('probe did not stop');
+"""
+        subprocess.run(["node", "-e", harness], check=True, capture_output=True, timeout=5)
 
     def test_probe_one_read_feeds_all_four_32_bit_byte_order_candidates(self) -> None:
         raw_point = point(

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins" / "modbus-skills" / "runtime"))
 
 from modbus_skills.map_workflows import (  # noqa: E402
+    MapWorkflowError,
     diagnose_map,
     lint_map,
     normalize_map,
@@ -24,6 +25,14 @@ FIXTURES = ROOT / "tests" / "fixtures" / "maps"
 
 
 class NormalizeMapTests(unittest.TestCase):
+    def test_empty_object_is_not_verified_map_evidence(self) -> None:
+        with self.assertRaises(MapWorkflowError):
+            review_parse_evidence({})
+
+    def test_canonical_area_spelling_is_recognized_by_parser(self) -> None:
+        result = parse_json('[{"area": "holding-register", "protocol_offset": 0}]')
+        self.assertNotIn("unrecognized_area", {finding["code"] for finding in result["warnings"]})
+
     def test_datatype_width_must_match_explicit_register_span(self) -> None:
         result = normalize_map(
             [
