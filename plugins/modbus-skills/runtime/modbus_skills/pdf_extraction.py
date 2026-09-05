@@ -26,6 +26,7 @@ from .pdf_table_extraction import (
     _address_record_fields,
     _address_with_area,
     _parse_pdf_address,
+    _parse_source_offset,
     _parse_register_area,
     extract_pdf_table_evidence,
 )
@@ -43,6 +44,7 @@ _CONTINUATION_ROW = re.compile(
 
 
 _HEADER_ALIASES = PDF_HEADER_ALIASES
+_ADDRESS_FIELDS = ("address", "protocol_offset", "display_address", "source_offset")
 _MATERIAL_FIELDS = frozenset(
     {"address", "protocol_offset", "display_address", "name", "area", "word_count", "datatype", "access"}
 )
@@ -112,7 +114,7 @@ def _header(line: str) -> list[str] | None:
         return None
     names = [_layout_field(item, index) for index, item in enumerate(raw)]
     semantic = {name for name in names if not name.startswith("_extra:")}
-    if not ({"address", "protocol_offset", "display_address"} & semantic) or not (
+    if not (set(_ADDRESS_FIELDS) & semantic) or not (
         {"name", "description"} & semantic
     ):
         return None
@@ -156,7 +158,14 @@ def _layout_header_at(
     token_semantic = {
         field for _x, field, _raw in token_columns if not field.startswith("_extra:")
     }
-    if ({"address", "protocol_offset", "display_address"} & token_semantic) and (
+    if not token_semantic and lines[start].strip().casefold() not in {
+        "protocol", "display", "holding", "read",
+    }:
+        # Do not absorb a running title into the next real header. Otherwise
+        # "Example 8123 Modbus Notes" + "Name ... Offset" silently turns Name
+        # into an unknown extra column and substitutes Description for it.
+        return None
+    if (set(_ADDRESS_FIELDS) & token_semantic) and (
         {"name", "description"} & token_semantic
     ):
         best = ((len(token_semantic), 0), start, token_columns)
@@ -182,7 +191,7 @@ def _layout_header_at(
             raw = " ".join(str(value) for value in cluster["parts"])
             columns.append((int(cluster["x"]), _layout_field(raw, index), raw))
         semantic = {field for _x, field, _raw in columns if not field.startswith("_extra:")}
-        if not ({"address", "protocol_offset", "display_address"} & semantic) or not (
+        if not (set(_ADDRESS_FIELDS) & semantic) or not (
             {"name", "description"} & semantic
         ):
             continue
@@ -257,6 +266,26 @@ def parse_layout_rows(
                 )
                 if headerless is not None:
                     records.append(headerless)
+                elif _unresolved_tabular_row(line):
+                    # A missed plausible table row is not proof that the page is
+                    # exhausted. Preserve it as one localized source exception;
+                    # do not guess column inheritance from the preceding page.
+                    rejected.append(
+                        {
+                            "code": "pdf-row-structure-unresolved",
+                            "page": page_number,
+                            "line": line_number,
+                            "parser_id": parser_id,
+                            "_source": {
+                                "format": "pdf",
+                                "page": page_number,
+                                "line": line_number,
+                                "region": f"p{page_number}:l{line_number}",
+                                "parser_id": parser_id,
+                                "excerpt": line.strip()[:300],
+                            },
+                        }
+                    )
                 continue
             cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
             segments = _layout_segments(line)
@@ -281,13 +310,17 @@ def parse_layout_rows(
             address_field = next(
                 (
                     field
-                    for field in ("address", "protocol_offset", "display_address")
+                    for field in _ADDRESS_FIELDS
                     if values.get(field)
                 ),
                 None,
             )
             address = values.get(address_field, "") if address_field else ""
-            parsed_address = _parse_pdf_address(address)
+            parsed_address = (
+                _parse_source_offset(address)
+                if address_field == "source_offset"
+                else _parse_pdf_address(address)
+            )
             if parsed_address is None or parsed_address.get("status") != "single":
                 rejected.append(
                     {
@@ -317,9 +350,11 @@ def parse_layout_rows(
                 field: value
                 for field, value in values.items()
                 if not field.startswith("_extra:")
-                and field not in {"address", "protocol_offset", "display_address"}
+                and field not in _ADDRESS_FIELDS
             }
             record.update(_address_record_fields(parsed_address))
+            if values.get("source_offset"):
+                record["source_offset"] = values["source_offset"]
             if address_field == "protocol_offset":
                 record.pop("display_address", None)
                 record["address_convention"] = "protocol-offset"
@@ -348,6 +383,18 @@ def parse_layout_rows(
             }
             records.append(record)
     return records, rejected
+
+
+def _unresolved_tabular_row(line: str) -> bool:
+    """Recognize residual multi-column row evidence, not arbitrary prose numbers."""
+    segments = _layout_segments(line)
+    if len(segments) < 3 or re.search(r"[.…·]{3,}", line):
+        return False
+    if re.match(r"^\s*\d+\s*:", line):
+        return False
+    if any(value.strip().casefold() == "reserved" for _x, value in segments):
+        return False
+    return _named_address_row_count([line]) > 0
 
 
 def _headerless_tokens(line: str) -> list[str]:
@@ -486,6 +533,14 @@ def _headerless_layout_row(
         ),
         None,
     )
+    if (
+        datatype_token is None
+        and address_index > 0
+        and len(_layout_segments(line)) < 2
+    ):
+        # A single-spaced title such as "Example 8123 Modbus Notes" has a
+        # number and a keyword, but no address-leading or tabular row evidence.
+        return None
     # Require a datatype cue so enum/bit legend lines (``0 No / 1 Yes``) are not
     # promoted into register rows when no table header is locked.
     if datatype_token is None and len(segments) < 3:
@@ -649,13 +704,17 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
             address_field = next(
                 (
                     field
-                    for field in ("address", "protocol_offset", "display_address")
+                    for field in _ADDRESS_FIELDS
                     if values.get(field)
                 ),
                 None,
             )
             address = values.get(address_field, "") if address_field else ""
-            parsed_address = _parse_pdf_address(address)
+            parsed_address = (
+                _parse_source_offset(address)
+                if address_field == "source_offset"
+                else _parse_pdf_address(address)
+            )
             if parsed_address is None or parsed_address.get("status") != "single":
                 continue
             area, area_error = _parse_register_area(values.get("area"))
@@ -684,9 +743,11 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
                 field: value
                 for field, value in values.items()
                 if not field.startswith("_extra:")
-                and field not in {"address", "protocol_offset", "display_address"}
+                and field not in _ADDRESS_FIELDS
             }
             record.update(_address_record_fields(parsed_address))
+            if values.get("source_offset"):
+                record["source_offset"] = values["source_offset"]
             if address_field == "protocol_offset":
                 record.pop("display_address", None)
                 record["address_convention"] = "protocol-offset"
@@ -744,6 +805,14 @@ def _bbox_header_at(
     line_items: Sequence[tuple[float, list[tuple[float, float, float, str]]]],
     start: int,
 ) -> tuple[int, list[tuple[float, str, str]]] | None:
+    first_line = " ".join(word[3] for word in line_items[start][1])
+    if not any(
+        not field.startswith("_extra:")
+        for _x, field, _raw in _tokenized_header(first_line)
+    ) and first_line.strip().casefold() not in {
+        "protocol", "display", "holding", "read",
+    }:
+        return None
     best: tuple[tuple[int, int], int, list[tuple[float, str, str]]] | None = None
     for end in range(start, min(start + 3, len(line_items))):
         clusters: list[dict[str, Any]] = []
@@ -776,7 +845,7 @@ def _bbox_header_at(
             raw = " ".join(str(value) for value in cluster["parts"])
             columns.append((float(cluster["x"]), _layout_field(raw, index), raw))
         semantic = {field for _x, field, _raw in columns if not field.startswith("_extra:")}
-        if not ({"address", "protocol_offset", "display_address"} & semantic) or not (
+        if not (set(_ADDRESS_FIELDS) & semantic) or not (
             {"name", "description"} & semantic
         ):
             continue
@@ -1132,6 +1201,8 @@ def _source_coverage(
     independently_supported = sum(len(parsers) >= 2 for parsers in parser_sets)
     return {
         "status": "complete" if complete else "unknown",
+        "scope": "detected-pages-and-recognized-row-candidates",
+        "full_source_fidelity": "not-asserted",
         "accepted_row_count": len(records),
         "rejected_row_count": len(rejected),
         "quarantined_row_count": len(quarantined),
