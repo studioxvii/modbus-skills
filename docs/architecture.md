@@ -31,7 +31,7 @@ sets and bytes, removes the one documented Claude adapter before comparing skill
 content, rejects host-specific tokens in shared Markdown, and verifies identical
 Apache license and notice files.
 
-Operational skills give one to three relevant handoffs after completion. They do not repeat the complete catalog. The shared [`user-paths.md`](../plugins/modbus-skills/references/user-paths.md) file is the source for high-level routing. The workflow catalog remains the machine-readable source for detailed chains and gates.
+Operational skills give one to three relevant handoffs after completion. They do not repeat the complete catalog. The shared [`user-paths.md`](../plugins/modbus-skills/references/user-paths.md) file is the source for high-level routing. The workflow catalog remains the machine-readable source for detailed chains and gates. For a visual router, workflow chains, artifact graph, and per-skill `run.py` execution map, see [`skill-execution-map.md`](skill-execution-map.md).
 
 `compile-user-map` is the primary OEM-source outcome. Its deterministic runtime accepts
 a supported local source or an existing `modbus-oem-map/v1`, plus a typed selection and
