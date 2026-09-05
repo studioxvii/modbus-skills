@@ -26,6 +26,10 @@ _DEPLOYMENT_ONLY_HOLDS = frozenset(
     {"point.route-id-unresolved", "point.unit-id-unresolved"}
 )
 _MAX_SOURCE_BYTES = 100_000_000
+_STRUCTURED_ARTIFACT_COLLECTIONS = {
+    "candidate-map/v1": "records",
+    "modbus-map/v1": "points",
+}
 _OEM_POINT_FIELDS = (
     "name",
     "description",
@@ -236,13 +240,38 @@ def _parse_structured_source(
             decoded = json.loads(data.decode("utf-8-sig"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             decoded = None
-        if isinstance(decoded, Mapping) and any(
-            isinstance(decoded.get(field), list) for field in ("records", "points")
-        ):
-            return {
-                **dict(decoded),
-                "format": str(decoded.get("format") or "json"),
-            }
+        if isinstance(decoded, Mapping) and "schema_version" in decoded:
+            schema = decoded["schema_version"]
+            if not isinstance(schema, str) or schema not in _STRUCTURED_ARTIFACT_COLLECTIONS:
+                raise SourceIntakeError("JSON source artifact schema must be candidate-map/v1 or modbus-map/v1")
+            collection = _STRUCTURED_ARTIFACT_COLLECTIONS[schema]
+            records = decoded.get(collection)
+            if not isinstance(records, list) or any(not isinstance(record, Mapping) for record in records):
+                raise SourceIntakeError(f"JSON source artifact {collection} must be an array of objects")
+            if any(field in decoded for field in {"records", "points", "registers", "data"} - {collection}):
+                raise SourceIntakeError("JSON source artifact must contain only its schema's record collection")
+            for field in ("warnings", "rejected_rows", "assumptions", "findings", "holds", "source_holds", "source_findings"):
+                if field in decoded and not isinstance(decoded[field], list):
+                    raise SourceIntakeError(f"JSON source artifact {field} must be an array")
+            preserved = []
+            for record in records:
+                item = dict(record)
+                if schema == "modbus-map/v1":
+                    # Normalization consumes candidate provenance names. Do not
+                    # reparse canonical fields (notably engineering `offset`)
+                    # as raw table headers or replace their original locators.
+                    if "source_location" in item:
+                        if not isinstance(item["source_location"], Mapping):
+                            raise SourceIntakeError("canonical source_location must be an object")
+                        item["_source"] = dict(item["source_location"])
+                    if "source_claims" in item:
+                        if not isinstance(item["source_claims"], list) or any(not isinstance(claim, Mapping) for claim in item["source_claims"]):
+                            raise SourceIntakeError("canonical source_claims must be an array of objects")
+                        item["_claims"] = list(item["source_claims"])
+                preserved.append(item)
+            return {**dict(decoded), collection: preserved, "format": str(decoded.get("format") or "json")}
+    # A raw records/points wrapper is a source collection, not proof that its
+    # row keys are canonical. Use the same aliases/rejections as parse-map.
     return parse_source(
         data,
         source_format=source_format,
