@@ -125,8 +125,9 @@ def compile_source_descriptor(
             parsed = _parse_structured_source(
                 data, source_format=source_format, filename=path.name, delimiter=delimiter
             )
-        workflow_defaults = _infer_workflow_defaults(parsed, defaults)
-        canonical = normalize_map(parsed, defaults=workflow_defaults)
+        # Numeric addresses do not establish an area, address basis, or byte
+        # layout. Only explicit source evidence and supplied defaults may do so.
+        canonical = normalize_map(parsed, defaults=defaults)
     except (PdfExtractionError, ParseError, MapWorkflowError) as exc:
         raise SourceIntakeError(str(exc)) from exc
 
@@ -198,41 +199,6 @@ def source_request_identity(descriptor: Mapping[str, Any]) -> dict[str, Any]:
     result = {str(key): value for key, value in descriptor.items() if key != "path"}
     result.update({"filename": path.name, "source_sha256": stable_input_hash(data)})
     return result
-
-
-def _infer_workflow_defaults(
-    parsed: Mapping[str, Any],
-    defaults: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Infer binding-free map defaults when a tabular source uses plain numeric addresses."""
-
-    merged = dict(defaults)
-    if merged.get("area") and merged.get("address_convention"):
-        return merged
-    records = parsed.get("records", ())
-    if not isinstance(records, Sequence) or isinstance(records, (str, bytes, bytearray)):
-        return merged
-    sample = [record for record in records[:200] if isinstance(record, Mapping)]
-    if not sample:
-        return merged
-    if any(record.get("area") not in (None, "") for record in sample):
-        return merged
-    with_numeric_address = 0
-    for record in sample:
-        address = record.get("address")
-        if isinstance(address, bool):
-            continue
-        if isinstance(address, (int, float)):
-            with_numeric_address += 1
-            continue
-        if isinstance(address, str) and address.strip().isdigit():
-            with_numeric_address += 1
-    if with_numeric_address < max(1, int(len(sample) * 0.8)):
-        return merged
-    merged.setdefault("area", "holding-register")
-    merged.setdefault("address_convention", "protocol-offset")
-    merged.setdefault("byte_order", "ABCD")
-    return merged
 
 
 def _read_bounded_source(path: Path) -> bytes:

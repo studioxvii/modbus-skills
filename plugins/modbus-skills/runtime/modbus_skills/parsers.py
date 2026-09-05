@@ -44,7 +44,7 @@ _HEADER_ALIASES = {
     "register_number": "protocol_offset",
     "register_s_decimal_0_based": "protocol_offset",
     "register_s_decimal_1_based": "display_address",
-    "offset": "protocol_offset",
+    "offset": "source_offset",
     "display_address": "display_address",
     "reference_number": "display_address",
     "modicon_reference": "display_address",
@@ -247,7 +247,7 @@ def _header_key(value: Any, column_index: int) -> str:
         aliased = _HEADER_ALIASES.get(stripped, normalized)
     # Preserve 0-based vs 1-based address semantics when both columns alias
     # to the same generic address field.
-    if aliased in {"address", "display_address", "protocol_offset", "register"}:
+    if aliased in {"address", "display_address", "protocol_offset", "register", "source_offset"}:
         if zero_based and not one_based:
             return "protocol_offset"
         if one_based and not zero_based and aliased == "address":
@@ -261,6 +261,9 @@ def _unique_headers(values: Sequence[Any]) -> tuple[list[str], list[dict[str, An
     counts: dict[str, int] = {}
     for index, value in enumerate(values):
         key = _header_key(value, index)
+        if key == "source_offset":
+            warnings.append({"code": "ambiguous_offset_header", "column": index + 1,
+                             "message": "Offset is ambiguous between register address and engineering bias; the raw value is preserved as source_offset."})
         counts[key] = counts.get(key, 0) + 1
         if counts[key] > 1:
             replacement = f"{key}_{counts[key]}"
@@ -293,6 +296,9 @@ def _canonicalize_mapping(record: Mapping[str, Any]) -> tuple[dict[str, Any], li
     warnings: list[dict[str, Any]] = []
     for index, (raw_key, value) in enumerate(record.items()):
         key = _header_key(raw_key, index)
+        if key == "source_offset":
+            warnings.append({"code": "ambiguous_offset_header", "field": str(raw_key),
+                             "message": "Offset is ambiguous between register address and engineering bias; the raw value is preserved as source_offset."})
         if key in output:
             suffix = 2
             while f"{key}_{suffix}" in output:

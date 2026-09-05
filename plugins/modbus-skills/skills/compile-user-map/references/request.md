@@ -92,6 +92,11 @@ Do not request route, unit, byte order, target, or page selection before the run
 reports that the missing value blocks a requested output. An offline user map does not
 require device binding.
 
+Numeric-looking register columns alone do not establish the register area,
+zero/one-based convention, or byte layout. Keep those fields unresolved unless
+the source documents them or a scoped, explicit `source.defaults` confirms them.
+Do not fill a layout merely to make the offline result look complete.
+
 ## Resume
 
 Include the existing case reference and exactly one typed input requested by its
