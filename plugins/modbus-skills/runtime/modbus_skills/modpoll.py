@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from fractions import Fraction
 from io import StringIO
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 import xml.etree.ElementTree as ET
+
+from . import gavinying_launcher
 
 from .exporters import (
     AREA_FUNCTION_CODES,
@@ -185,6 +190,7 @@ def _export_gavinying(
     blocks = tuple(blocks_from_plan(read_plan))
     if not has_errors(findings):
         findings.extend(_gavinying_preflight(canonical_map, blocks, mode=mode))
+        findings.extend(_gavinying_name_collisions(canonical_map, blocks))
     if has_errors(findings):
         return held_result(
             TARGET,
@@ -217,19 +223,28 @@ def _export_gavinying(
             Artifact.text(path, "text/csv", csv_text, "gavinying-modpoll-config")
         )
         prefix = env_prefix_for_route(route, multiple_routes=multiple_routes)
+        launcher_name = f"{safe_slug(route, fallback='default')}-read-final.py"
+        setup = _gavinying_launcher_setup(canonical_map, read_plan, route, route_blocks, filename, csv_text)
+        launcher_text = Path(gavinying_launcher.__file__).read_text(encoding="utf-8").replace(
+            "COMPILED_SETUP = None", "COMPILED_SETUP = json.loads(" + repr(stable_json(setup)) + ")", 1
+        )
+        artifacts.append(Artifact.text(
+            f"modpoll/gavinying-cli/{launcher_name}", "text/x-python", launcher_text,
+            "validated-gavinying-final-launcher"))
         command_lines.append(
-            "modpoll --once --tcp \"${"
+            "python3 \"" + launcher_name + "\" --host \"${"
             + prefix
-            + "_HOST}\" --tcp-port \"${"
+            + "_HOST}\" --port \"${"
             + prefix
-            + "_PORT}\" --config \""
-            + filename
-            + "\""
+            + "_PORT}\" --confirm-read READ"
         )
         route_files.append(
             {
                 "route_id": route,
                 "config": path,
+                "launcher": f"modpoll/gavinying-cli/{launcher_name}",
+                "result": f"{setup['output_directory']}/result.json",
+                "max_runtime_seconds": setup["max_runtime_seconds"],
                 "host_environment": f"{prefix}_HOST",
                 "port_environment": f"{prefix}_PORT",
             }
@@ -261,6 +276,9 @@ def _export_gavinying(
             "format": "gavinying-modpoll-csv",
             "format_documentation": "https://gavinying.github.io/modpoll/configure.html",
             "routes": route_files,
+            "primary_output": "validated-full-precision-json-envelope",
+            "console_float_precision": "approximate: native console rounds to 3 decimal places",
+            "launcher_platform_requirement": "POSIX directory-fd and O_NOFOLLOW secure publication",
             "native_verification": native_verification_not_run("Modpoll"),
         },
     )
@@ -633,6 +651,59 @@ def _proconx_read_plan_csv(blocks: Iterable[Mapping[str, Any]]) -> str:
             ],
         )
     return buffer.getvalue()
+
+
+def _gavinying_name_collisions(
+    canonical_map: Mapping[str, Any], blocks: Iterable[Mapping[str, Any]],
+) -> tuple[Finding, ...]:
+    findings: list[Finding] = []
+    routes: dict[str, str] = {}
+    references: set[tuple[str, int | None, str]] = set()
+    for index, block in enumerate(blocks):
+        route = block_route_id(block)
+        slug = safe_slug(route, fallback="default").casefold()
+        if slug in routes and routes[slug] != route:
+            findings.append(Finding("error", "modpoll.route-collision",
+                "Route names collide in native config/output filenames; use distinct route names.", f"requests[{index}]"))
+        routes[slug] = route
+        for point_index, point in enumerate(points_for_block(canonical_map, block, index)):
+            identifier = point_id(point, point_index) or f"point-{point_index + 1}"
+            name = safe_slug(point_name(point, identifier), fallback=identifier).replace("-", "_")
+            key = (route, block_unit_id(block), name)
+            if key in references:
+                findings.append(Finding("error", "modpoll.reference-collision",
+                    "Point names collide in the native device's exported reference keys; use distinct names.", f"requests[{index}].points[{point_index}]"))
+            references.add(key)
+    return tuple(findings)
+
+
+def _gavinying_launcher_setup(
+    canonical_map: Mapping[str, Any], read_plan: Mapping[str, Any], route: str,
+    blocks: list[tuple[int, Mapping[str, Any]]], filename: str, csv_text: str,
+) -> dict[str, Any]:
+    expected: dict[str, dict[str, Any]] = {}
+    current_device = ""
+    for row in csv.reader(StringIO(csv_text)):
+        if row[0] == "device":
+            current_device = row[1]
+            expected[current_device] = {}
+        elif row[0] == "ref":
+            expected[current_device][row[1]] = {
+                "datatype": row[3], "scale": float(row[6]) if row[6] else 1,
+            }
+    return {
+        "schema_version": "gavinying-final-setup/v1", "route_id": route,
+        "map_sha256": canonical_map_hash(canonical_map), "plan_sha256": read_plan_hash(read_plan),
+        "config_filename": filename, "config_sha256": hashlib.sha256(csv_text.encode("utf-8")).hexdigest(),
+        "output_directory": f"{safe_slug(route, fallback='default')}-native-result",
+        # Native defaults: up to four3s attempts plus0.5s per poll. This external
+        # safety budget never changes or certifies the client's retry behavior.
+        "max_runtime_seconds": min(300, max(20, len(blocks) * 13 + 5)),
+        "expected": expected,
+        "requests": [{"request_id": block_id(block, index), "unit_id": block_unit_id(block),
+                      "function_code": block_function_code(block), "start_offset": block_start(block),
+                      "quantity": block_quantity(block)} for index, block in blocks],
+    }
 
 
 def _gavinying_preflight(
@@ -1679,8 +1750,48 @@ def _gavinying_readme(mode: str) -> str:
     return f"""# gavinying/modpoll {mode.title()} Configuration
 
 The CSV files use the documented `device`, `poll`, and `ref` records. Each
-reference is read-only. The command reference uses `--once` so the first run is
-bounded.
+reference is read-only. Run the generated route launcher from `commands.txt`.
+It invokes native `modpoll --once` with the documented `--export` option exactly
+once; it does not change native retry settings or add acquisition requests.
+
+The primary engineering output is the validated full-precision JSON envelope at
+`<route>-native-result/result.json`, not the native console table. Gavinying1.6.0
+console float values are rounded to3decimal places and are approximate. Identity
+integer JSON values retain their integer digits, including uint64; consumers
+must not cast them through floating point.
+
+The launcher requires Python3.11+ on POSIX with directory-fd and O_NOFOLLOW
+support. Unsupported safe-publication environments fail before connecting.
+Use `--modpoll` for the installed executable and `--output-directory` for an
+explicit private output location when needed. Review the endpoint and compiled
+requests before executing the command's `--confirm-read READ` acknowledgement.
+
+Each output directory belongs to one exact compiled setup. Foreign directories,
+symlinks, name collisions and concurrent/stale locks fail closed. A changed setup
+needs a fresh explicitly selected directory; do not delete someone else's lock
+or result. Only one fixed result envelope and ownership marker are retained;
+fresh private staging and temporary publication files are cleaned after the run.
+The envelope is atomically replaced with running/failed/succeeded status. Only
+`status=succeeded` with `values_current=true` contains accepted current values.
+Running/failed envelopes contain no prior values. Stdout is one compact
+`gavinying-final-invocation/v1` receipt with status, published, result_path,
+run_id, binding_sha256 and value_count (plus a bounded error on failure), not
+values or native diagnostics. Require a successful exit and published succeeded
+receipt whose run_id, binding_sha256 and status match the result envelope.
+Preflight, argument, lock or publication failures may leave a prior/another
+invocation's file untouched: published=false never makes that file current.
+An arbitrary old file's values_current flag is not freshness proof.
+
+Native exit0 or an existing JSON file never proves a successful read/export.
+Missing/null/nonfinite/unexpected references, wrong numeric types, stale files,
+native failure and timeout/output caps produce a failed result. Raw native JSON
+has no freshness/status/source binding; the launcher adds these plus source,
+config and read-plan hashes. Native stdout/stderr are bounded diagnostics in the
+envelope. The per-route external deadline is recorded in `manifest.json` (at most
+300seconds); it is a safety cap, not proof of native stopping or cadence.
+One ordinary SIGTERM/SIGINT is handled with child cleanup and a failed envelope
+when publication remains possible. SIGKILL or power loss cannot guarantee
+cleanup; retained locks/staging fail closed and must not be guessed away.
 
 This target is BETA. Native Modpoll verification was not run, so native verification is unavailable.
 If Modpoll is not available, install PyModbus and use `pymodbus-read-once.py` for

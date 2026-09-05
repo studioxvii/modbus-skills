@@ -10,7 +10,7 @@ The user asks for Modpoll, Witte Modbus Poll, gavinying CSV, or a Modpoll probe/
 
 - The profile folder under `modpoll/` - Start here. It contains the CSV, XML, or command files used to configure the selected Modpoll product.
 - The profile `README.md` - Short operator instructions for those files.
-- `pymodbus-read-once.py` - Optional cross-platform FC01-04 fallback. It requires one compiled request, endpoint, port, and matching unit ID.
+- Gavinying `<route>-read-final.py` - Bounded native launcher; one owned output directory retains a single atomic `result.json` status-and-values envelope. Stdout is a compact invocation receipt; values and bounded diagnostics stay in the envelope. Require successful exit and `published=true`, and match receipt `run_id`, `binding_sha256` and `succeeded` status to the envelope with `values_current=true`. Preflight/lock failures can leave a prior file untouched; its flag alone is not freshness proof. Native exit0, rounded stdout, null/stale JSON or a retained prior file is not success.
 
 ## Example request
 
