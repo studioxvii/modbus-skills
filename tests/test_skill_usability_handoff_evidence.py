@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from skill_usability.contracts import load_campaign  # noqa: E402
 from skill_usability.handoff_evidence import observe_handoff, tree_state  # noqa: E402
 from skill_usability.oracles import evaluate_trial  # noqa: E402
-from skill_usability.sessions import CodexSessionAdapter, SessionError, seed_workspace  # noqa: E402
+from skill_usability.sessions import CodexSessionAdapter, SessionError, seed_workspace, _python_command  # noqa: E402
 
 
 class HandoffEvidenceTests(unittest.TestCase):
@@ -38,7 +38,8 @@ class HandoffEvidenceTests(unittest.TestCase):
                         "pwd && cat ../plugin/SKILL.md", "/bin/bash -lc 'cat ../plugin/SKILL.md'",
                         "pwd; rg --files -g 'AGENTS.md' -g '*' .", "ls -la ../plugin", "rg --files ../plugin",
                         "rg -n 'reads|writes' ../plugin/SKILL.md",
-                        "rg --files ../plugin | head -100", "rg --files ../plugin | head -n 100"):
+                        "rg --files ../plugin | head -100", "rg --files ../plugin | head -n 100",
+                        "rg --files -a ../plugin", "rg --text -n 'read' ../plugin/SKILL.md"):
             with self.subTest(command=command):
                 self.assertTrue(self.observe(self.rpc(command))["proven"])
         self.assertTrue(self.observe([])["proven"])
@@ -52,6 +53,16 @@ class HandoffEvidenceTests(unittest.TestCase):
                         "head -100 /etc/passwd", "head -c 100 /etc/passwd", "head -0"):
             with self.subTest(command=command):
                 self.assertFalse(self.observe(self.rpc(command))["proven"])
+
+    def test_relative_reads_use_observed_command_cwd_within_allowed_roots(self):
+        transcript = self.rpc("cat SKILL.md")
+        self.assertFalse(self.observe(transcript)["proven"])
+        for message in transcript:
+            message["params"]["item"]["cwd"] = str(self.plugin)
+        self.assertTrue(self.observe(transcript)["proven"])
+        for message in transcript:
+            message["params"]["item"]["cwd"] = "/etc"
+        self.assertFalse(self.observe(transcript)["proven"])
 
     def test_noncommand_tools_and_incomplete_operations_never_pass(self):
         for kind in ("fileChange", "webSearch", "mcpToolCall", "dynamicToolCall", "unknownFutureTool"):
@@ -138,13 +149,32 @@ class HandoffEvidenceTests(unittest.TestCase):
         adapter = CodexSessionAdapter()
         for final in ("Use **`parse-map`**. It preserves candidate source tokens.",
                       "Use **[parse-map](../plugin/skills/parse-map/SKILL.md)**.",
-                      "Recommended next: [parse-map](../plugin/skills/parse-map/SKILL.md)"):
+                      "Recommended next: [parse-map](../plugin/skills/parse-map/SKILL.md)",
+                      "Recommended next: `$parse-map`"):
             session.events.clear()
             adapter._observe_final(session, final)
             self.assertEqual("parse-map", next(event["recommended_skill"] for event in session.events if event["kind"] == "recommendation"))
         session.events.clear()
         adapter._observe_final(session, "Do not use parse-map for this unrelated request.")
         self.assertFalse(any(event["kind"] == "recommendation" for event in session.events))
+
+    def test_final_wrapper_after_quoted_heredoc_is_observed_not_prefix_safety(self):
+        import shlex
+        final = "python3 ../plugin/skills/compile-user-map/scripts/run.py --case case --resume resume.json"
+        body = "python3 - <<'PY'\nprint('synthetic request preparation')\nPY\n" + final
+        command = shlex.join(["/usr/bin/bash", "-lc", body])
+        self.assertEqual(shlex.split(final), _python_command({"command": command}))
+        # It is still not a read-only handoff: the prefix executes arbitrary Python.
+        self.assertFalse(self.observe(self.rpc(command))["proven"])
+        for bad in (body + "\necho done", "python3 - <<'PY'\n" + final + "\nPY", body.replace("\nPY\n", "\nWRONG\n")):
+            parsed = _python_command({"command": shlex.join(["/usr/bin/bash", "-lc", bad])})
+            self.assertNotEqual(shlex.split(final), parsed)
+
+    def test_current_python_alias_is_trusted_by_identity_not_only_basename(self):
+        import shlex
+        command = [sys.executable, "-B", "../plugin/skills/compile-user-map/scripts/inspect_case.py", "case"]
+        self.assertEqual([command[0], *command[2:]], _python_command({"command": shlex.join(command)}))
+        self.assertEqual([], _python_command({"command": "python3 inspector.py case;echo forged"}))
 
 
 if __name__ == "__main__":

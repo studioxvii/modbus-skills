@@ -251,6 +251,13 @@ def assess_case(spec, receipt, outputs, output):
     audit = receipt.get("audit")
     check("audit receipt present and no denied operation attempts", isinstance(audit, dict) and not audit.get("denied"), audit.get("denied") if audit else None)
     check("no unhandled traceback", "Traceback (most recent call last)" not in receipt.get("stderr", ""))
+    return checks + assess_artifacts(spec, receipt, outputs, output)
+
+
+def assess_artifacts(spec, receipt, outputs, output):
+    """Artifact assertions only; callers must independently prove execution/safety."""
+    checks = []
+    def check(name, success, detail=None): checks.append({"name": name, "passed": bool(success), "detail": detail})
     skill, category = spec["skill"], spec["category"]
     result = outputs.get("result.json", {})
     succeeded = receipt.get("returncode") == 0

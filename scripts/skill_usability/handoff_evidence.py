@@ -29,8 +29,12 @@ def tree_state(root: Path) -> dict[str, Any]:
     return state
 
 
-def _documentation_read(command: str, *, plugin: Path, work: Path) -> bool:
+def _documentation_read(command: str, *, plugin: Path, work: Path, cwd: str | None = None) -> bool:
     try:
+        base = Path(cwd).resolve() if cwd is not None else work.resolve()
+        roots = (plugin.resolve(), work.resolve(), (plugin.parent / "fixtures").resolve())
+        if not any(base.is_relative_to(root) for root in roots):
+            return False
         tokens = shlex.split(command)
         if len(tokens) == 3 and Path(tokens[0]).name in {"bash", "sh"} and tokens[1] in {"-lc", "-c"}:
             command = tokens[2]
@@ -75,6 +79,11 @@ def _documentation_read(command: str, *, plugin: Path, work: Path) -> bool:
                     index = 0
                     while index < len(args):
                         value = args[index]
+                        if value in {"-A", "-B", "-C", "--after-context", "--before-context", "--context"}:
+                            if index + 1 >= len(args) or not args[index + 1].isdigit() or int(args[index + 1]) > 1_000_000:
+                                return False
+                            index += 2
+                            continue
                         if value in {"-g", "--glob", "-e", "--regexp"}:
                             if value in {"-e", "--regexp"}:
                                 has_pattern = True
@@ -82,7 +91,7 @@ def _documentation_read(command: str, *, plugin: Path, work: Path) -> bool:
                             if index > len(args):
                                 return False
                             continue
-                        if value not in {"--files", "--hidden", "--no-ignore", "-n", "-i", "-l", "-F", "-S"}:
+                        if value not in {"--files", "--hidden", "--no-ignore", "-n", "-i", "-l", "-F", "-S", "-a", "--text"}:
                             if value.startswith("-"):
                                 return False
                             if has_pattern:
@@ -99,8 +108,7 @@ def _documentation_read(command: str, *, plugin: Path, work: Path) -> bool:
                                 return False
                         else:
                             paths.append(value)
-                roots = (plugin.resolve(), work.resolve(), (plugin.parent / "fixtures").resolve())
-                if any(not any((work / value).resolve().is_relative_to(root) for root in roots) for value in paths or ["."]):
+                if any(not any((base / value).resolve().is_relative_to(root) for root in roots) for value in paths or ["."]):
                     return False
                 continue
             if Path(executable).name == "sed":
@@ -110,7 +118,7 @@ def _documentation_read(command: str, *, plugin: Path, work: Path) -> bool:
             if not args:
                 return False
             for value in args:
-                path = (work / value).resolve()
+                path = (base / value).resolve()
                 if (value.startswith("-") or not path.is_relative_to(plugin.resolve())
                         or path.suffix not in {".md", ".yaml", ".json", ".py"}
                         or not path.is_file()):
@@ -141,7 +149,7 @@ def observe_handoff(transcript: Sequence[Mapping[str, Any]], *, plugin: Path,
         duration = item.get("durationMs")
         bounded_sleep = (item.get("type") == "sleep" and type(duration) is int
                          and 0 <= duration <= 60_000)
-        if not bounded_sleep and (item.get("type") != "commandExecution" or not _documentation_read(str(item.get("command", "")), plugin=plugin, work=work)):
+        if not bounded_sleep and (item.get("type") != "commandExecution" or not _documentation_read(str(item.get("command", "")), plugin=plugin, work=work, cwd=item.get("cwd"))):
             issues.add("handoff-operation-unproven")
     if set(started) != set(completed):
         issues.add("handoff-operation-incomplete")

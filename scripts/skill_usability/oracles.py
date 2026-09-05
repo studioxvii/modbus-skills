@@ -396,6 +396,14 @@ def evaluate_trial(
             issues.append("artifact-unusable")
 
     holds = _codes(events)
+    if "specialist-execution" in conditions:
+        observations = [event for event in events if event.get("kind") == "specialist-execution-observation"]
+        if not (len(observations) == 1
+                and observations[0].get("origin") == "trusted-rpc-and-artifact-inspection"
+                and observations[0].get("version") == "specialist-execution/v1"
+                and observations[0].get("case_id") == profile.get("direct_skill_case")
+                and observations[0].get("proven") is True):
+            issues.append("specialist-execution-unproven")
     handoff = [event for event in events if event.get("kind") == "read-only-handoff-observation"]
     if handoff:
         proven = (len(handoff) == 1 and handoff[0].get("origin") == "trusted-rpc-inspection"
