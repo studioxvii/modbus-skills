@@ -271,6 +271,61 @@ def _function_table_mask(lines: Sequence[str]) -> list[bool]:
     return masked
 
 
+def _non_register_context_mask(lines: Sequence[str]) -> list[bool]:
+    """Exclude explicit option lists without assigning their values addresses.
+
+    A baud settings label followed solely by multiple numeric choices (and
+    optional navigation prompts) is menu evidence, not a headerless register.
+    A real address/name header takes precedence: a name-first register row may
+    legitimately include an address, minimum, maximum and default. Context is
+    page-local and explicit serial-settings headings end stale register columns.
+    No individual number, baud-related point name or address form is banned.
+    """
+    masked = _function_table_mask(lines)
+    in_register_table = False
+    in_serial_settings = False
+    for index, line in enumerate(lines):
+        if masked[index]:
+            in_register_table = False
+            in_serial_settings = False
+            continue
+        label = re.sub(r"\s+", " ", line.strip()).casefold().rstrip(":")
+        label = re.sub(r"^\d+(?:\.\d+)+\.?\s+", "", label)
+        if re.fullmatch(
+            r"(?:serial(?: communication| port)?|communication) (?:settings|configuration)",
+            label,
+        ):
+            masked[index] = True
+            in_register_table = False
+            in_serial_settings = True
+            continue
+        if in_register_table:
+            continue
+        if _layout_header_at(lines, index) is not None:
+            in_register_table = True
+            in_serial_settings = False
+            continue
+        options = re.fullmatch(
+            r"baud(?: rate)? (settings?|options?|choices?)\s*:?\s*(.+)", label
+        )
+        if options is None:
+            continue
+        values = options.group(2)
+        if options.group(1).startswith("setting") and not (
+            in_serial_settings or re.search(r"\bpress\b", values)
+        ):
+            # A bare point name plus several numbers could be address/min/max;
+            # require menu context rather than inventing those column roles.
+            continue
+        # Require a list, not a lone register address or an address/default pair.
+        # Other words (datatype, units, descriptions) retain ordinary parsing.
+        if len(re.findall(r"\b\d+\b", values)) >= 3 and not re.sub(
+            r"\b(?:\d+|press)\b|[\s,;|/<>←→↑↓]+", "", values
+        ):
+            masked[index] = True
+    return masked
+
+
 def parse_layout_rows(
     text: str, *, first_page: int = 1, pages: set[int] | None = None, parser_id: str = "pdftotext-layout/v1"
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -282,7 +337,7 @@ def parse_layout_rows(
         header: list[tuple[int, str, str]] | None = None
         header_end = -1
         lines = page.splitlines()
-        function_mask = _function_table_mask(lines)
+        function_mask = _non_register_context_mask(lines)
         header_lines = ["" if masked else line for line, masked in zip(lines, function_mask)]
         for line_index, line in enumerate(lines):
             line_number = line_index + 1
@@ -648,7 +703,7 @@ def discover_register_pages(text: str, *, first_page: int = 1) -> list[int]:
         lines = page.splitlines()
         lines = [
             "" if masked else line
-            for line, masked in zip(lines, _function_table_mask(lines))
+            for line, masked in zip(lines, _non_register_context_mask(lines))
         ]
         has_header = any(
             _layout_header_at(lines, index) is not None for index in range(len(lines))
@@ -723,7 +778,7 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
             lines.setdefault(key, []).append((x_min, x_max, y_max, word.text.strip()))
 
         line_items = [(y_min, sorted(lines[y_min])) for y_min in sorted(lines)]
-        function_mask = _function_table_mask(
+        function_mask = _non_register_context_mask(
             [" ".join(word[3] for word in words) for _y, words in line_items]
         )
         header_items = [
