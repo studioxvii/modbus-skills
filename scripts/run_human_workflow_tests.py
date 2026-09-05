@@ -12,16 +12,20 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.util
 import json
 import math
 import re
 import shutil
+import shlex
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from zipfile import ZipFile
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -598,6 +602,54 @@ def _verify_checksum_file(pack: Path) -> tuple[bool, int]:
     return True, len(rows)
 
 
+def _gavinying_bounded_delivery(directory: Path) -> tuple[bool, dict[str, Any]]:
+    """Exercise delivered launchers with an intercepted, never-connected native call.
+
+    This proves generated invocation configuration, not native stopping or values.
+    Native acceptance has its own physical-wire and process receipts.
+    """
+    commands = [shlex.split(line) for line in (directory / "commands.txt").read_text().splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+    observed = 0
+    try:
+        for command in commands:
+            if (len(command) != 8 or command[0] != "python3"
+                    or Path(command[1]).name != command[1]
+                    or not command[1].endswith("-read-final.py")
+                    or command[2::2] != ["--host", "--port", "--confirm-read"]
+                    or command[-1] != "READ"):
+                return False, {"reason": "unexpected-launch-command"}
+            specification = importlib.util.spec_from_file_location("delivered_gavinying_control", directory / command[1])
+            module = importlib.util.module_from_spec(specification)
+            calls = []
+            def intercepted(argv, *, cwd, deadline_seconds, max_output_bytes):
+                calls.append((argv, deadline_seconds, max_output_bytes))
+                return {"returncode": 1, "timed_out": False, "output_limited": False}
+            with patch("subprocess.Popen", side_effect=WorkflowFailure("Unexpected native process")):
+                specification.loader.exec_module(module)
+                setup = module.COMPILED_SETUP
+                if (not setup["requests"] or any(request["function_code"] not in (1, 2, 3, 4)
+                        or not 1 <= request["unit_id"] <= 247 for request in setup["requests"])):
+                    return False, {"reason": "unsafe-compiled-request"}
+                with tempfile.TemporaryDirectory(prefix="modbus-launcher-control-") as temporary:
+                    with patch.object(module, "execute_native", intercepted):
+                        result = module.run(setup, config_directory=directory,
+                                            output_directory=Path(temporary) / "result",
+                                            host="127.0.0.1", port=1, executable="native-intercept-only")
+            if len(calls) != 1 or result["status"] != "failed" or result.get("values_current"):
+                return False, {"reason": "unexpected-invocation-or-failure-state"}
+            argv, deadline, output_cap = calls[0]
+            if (len(argv) != 10 or argv[:6] != ["native-intercept-only", "--once", "--tcp", "127.0.0.1", "--tcp-port", "1"]
+                    or argv[6] != "--config" or argv[8] != "--export"
+                    or not 0 < deadline <= 300 or not 0 < output_cap <= 1_048_576):
+                return False, {"reason": "unbounded-or-unexpected-native-arguments"}
+            observed += 1
+    except (OSError, ValueError, KeyError, TypeError, WorkflowFailure):
+        return False, {"reason": "delivered-launcher-control-failed"}
+    return bool(observed), {"intercepted_native_calls": observed, "network_calls": 0,
+                            "evidence": "generated-configuration-only; native stopping not claimed"}
+
+
 def _contains_forbidden(value: Any) -> bool:
     if isinstance(value, Mapping):
         return any(_contains_forbidden(key) or _contains_forbidden(item) for key, item in value.items())
@@ -920,11 +972,11 @@ def run_workflow(corpus_dir: Path, output: Path) -> dict[str, Any]:
         ),
         details={"request_count": len(clean_plan.get("requests", ())), "getter_count": final_node_red["counts"].get("modbus-flex-getter", 0), "inject_count": final_node_red["counts"].get("inject", 0), "tabs_disabled": final_node_red["tabs_disabled"], "write_node_count": final_node_red["write_nodes"]},
     )
-    commands = (clean_pack_one / "modpoll" / "gavinying-cli" / "commands.txt").read_text(encoding="utf-8")
+    bounded_delivery, delivery_details = _gavinying_bounded_delivery(clean_pack_one / "modpoll" / "gavinying-cli")
     check["artifact-safety-and-determinism"].check(
         "modpoll-is-one-bounded-read-pass",
-        "--once" in commands and "write" not in commands.lower(),
-        details={"once_flag": "--once" in commands},
+        bounded_delivery,
+        details=delivery_details,
     )
     with (clean_pack_one / "modscan" / "read-plan.csv").open(newline="", encoding="utf-8") as source:
         modscan_rows = list(csv.DictReader(source))

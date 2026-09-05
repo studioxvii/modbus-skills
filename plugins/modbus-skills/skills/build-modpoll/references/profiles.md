@@ -14,6 +14,42 @@ Omit identity multipliers to preserve large integer precision. Zero multipliers
 and nonidentity 64-bit integer scaling remain held because this client cannot
 preserve their documented values.
 
+Final commands use the generated `<route>-read-final.py` launcher, not bare
+`modpoll --once`. It invokes the native CLI once with documented `--export`,
+unchanged polling/retry defaults and an exact private copy of the bound CSV.
+Gavinying1.6.0 console floats are rounded to three decimal places; the primary
+engineering output is the launcher's validated full-precision `result.json`.
+Identity integers remain exact JSON integers (including uint64); scaled integers
+are validated as their floating-point engineering result. Identity strings retain
+bounded string validation. Existing unsupported semantic holds are unchanged.
+
+The standalone launcher requires Python3.11+ and POSIX directory-fd/O_NOFOLLOW
+filesystem primitives; missing safe-publication support stops before connection.
+It rejects config/name collisions, symlinks, foreign output ownership and
+concurrent/stale locks. A fresh private staging export prevents stale-file reuse;
+complete expected keys and finite typed nonnull values are mandatory. Native
+exit0 does not imply a read/export succeeded. One fixed atomic status-and-values
+envelope replaces running/failed/succeeded state; running or failed envelopes
+never contain prior values. A publication failure reports failure without
+claiming an existing result is current. Stdout is a compact invocation receipt,
+not values/native diagnostics. Require successful exit, `published=true` and
+`status=succeeded`, then match its `run_id`, `binding_sha256` and status to the
+result envelope. Argument/preflight/lock failures can leave another or prior
+result untouched; `published=false` never makes it current. A retained file's
+`values_current` alone is not freshness evidence.
+Only the ownership marker and latest envelope are retained after owned staging
+cleanup, not timestamped histories. A changed compiled setup requires a fresh
+explicitly selected output directory. Never remove an unknown owner's lock/file.
+
+The manifest declares an external per-route wall-time cap (maximum300seconds);
+stdout/stderr and JSON are byte-bounded. Caps are not proof of native stopping.
+The launcher neither adds requests nor makes `--once` a single-attempt probe.
+One ordinary SIGTERM/SIGINT cleans up the owned child and publishes failure when
+possible. SIGKILL/power loss cannot guarantee cleanup: retained lock/staging
+fails closed and must not be removed by guessed ownership.
+Native verification of a generated launcher remains not-run until its exact
+bytes have a separate native receipt; generation alone grants no native proof.
+
 ## `proconx-cli`
 
 Generate one bounded proconX FieldTalk `modpoll` command per compiled read block.
