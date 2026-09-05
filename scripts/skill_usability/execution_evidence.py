@@ -6,6 +6,7 @@ execution or full source truth. The worker cannot supply its own proof event.
 from __future__ import annotations
 
 import hashlib
+import re
 import shlex
 from pathlib import Path
 
@@ -22,6 +23,17 @@ def wrapper_tokens(item, session):
     if len(tokens) != 3 or Path(tokens[0]).name not in {"bash", "sh"} or tokens[1] not in {"-lc", "-c"}:
         return []
     script = tokens[2]
+    # Temporary PDF data may be explicitly confined to the worker's current
+    # directory. Recognize this exact shell assignment, not arbitrary environment
+    # overrides or variable expansion in the executable/arguments.
+    temporary_prefix = re.fullmatch(
+        r'(?:PYTHONDONTWRITEBYTECODE=1 )?TMPDIR="\$PWD" (.+)', script
+    )
+    if temporary_prefix:
+        cwd = Path(item.get("cwd") or session.work).resolve()
+        if not cwd.is_relative_to(session.work.resolve()):
+            return []
+        return _python_command({"command": temporary_prefix.group(1)})
     if any(marker in script for marker in ("$", "`", "\n", "<", ">", "(", ")")):
         return []
     lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|")
