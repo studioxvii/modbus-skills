@@ -17,6 +17,9 @@ Follow `../../references/interaction-contract.md`.
 2. Require a canonical map, read plan, profile, and `probe` or `final` mode.
 3. Run `python3 <skill-dir>/scripts/run.py --map <map.json> --plan <read-plan.json> --profile <profile> --mode <mode> --output <directory>`.
 4. Inspect the setup manifest, decision report, polling limits, and generated files.
+   Witte final support is limited to desktop identity `uint16` with an explicit
+   unsigned display. XML final decoding and unsupported desktop semantics remain
+   held; offer an explicitly raw `probe`, never silently substitute raw values.
 5. Verify with the native target when available. Otherwise report native verification
    as unavailable and use the fallback only for one reviewed request.
 

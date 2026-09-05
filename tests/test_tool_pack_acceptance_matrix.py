@@ -47,7 +47,11 @@ class ToolPackAcceptanceMatrixTests(unittest.TestCase):
                         attempted += 1
                         options = {"modpoll": {"profile": profile}} if "modpoll" in selection else {}
                         pack = build_tool_pack(canonical, plan, targets=selection, mode=mode, target_options=options)
-                        held = mode == "probe" and profile == "gavinying-cli" and "modpoll" in selection
+                        hold_code = {
+                            ("probe", "gavinying-cli"): "MODPOLL_SINGLE_ATTEMPT_UNSUPPORTED",
+                            ("final", "witte-v12-xml"): "WITTE_FINAL_DISPLAY_UNCONFIGURED",
+                        }.get((mode, profile))
+                        held = hold_code is not None and "modpoll" in selection
                         expected = "held" if held and len(selection) == 1 else "partial" if held else "generated"
                         self.assertEqual(expected, pack.status)
                         self.assertEqual(set(selection), {result.target for result in pack.target_results})
@@ -61,7 +65,12 @@ class ToolPackAcceptanceMatrixTests(unittest.TestCase):
                         self.assertEqual(set(selection) - ({"modpoll"} if held else set()), folders)
                         if held:
                             result = next(result for result in pack.target_results if result.target == "modpoll")
-                            self.assertIn("MODPOLL_SINGLE_ATTEMPT_UNSUPPORTED", {finding.code for finding in result.findings})
+                            self.assertIn(hold_code, {finding.code for finding in result.findings})
+                        if "modpoll" in selection and profile == "witte-desktop" and mode == "final":
+                            scripts = [data.decode() for path, data in files.items() if path.endswith(".ps1")]
+                            self.assertEqual(1, len(scripts))
+                            self.assertIn("$document1.SetFormat(0, 1)", scripts[0])
+                            self.assertLess(scripts[0].index("SetFormat(0, 1)"), scripts[0].index("OpenConnection()"))
                         for data in files.values():
                             self.assertNotIn(PRIVATE_SENTINEL.encode(), data)
                         runtime_map = json.loads(files["canonical-map.json"])

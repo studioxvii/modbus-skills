@@ -72,7 +72,8 @@ class ModpollExporterTests(unittest.TestCase):
         scripts = []
         for profile in ("gavinying-cli", "proconx-cli", "witte-desktop", "witte-v12-xml"):
             with self.subTest(profile=profile):
-                result = export_modpoll(canonical_map, read_plan, profile=profile)
+                result = export_modpoll(canonical_map, read_plan, profile=profile,
+                                        mode="probe" if profile.startswith("witte-") else "final")
                 script = text(result, "pymodbus-read-once.py")
                 compile(script, "pymodbus-read-once.py", "exec")
                 self.assertIn('parser.add_argument("--request", required=True', script)
@@ -323,7 +324,7 @@ class ModpollExporterTests(unittest.TestCase):
 
     def test_witte_desktop_uses_documented_read_automation_only(self) -> None:
         canonical_map, read_plan = inputs()
-        result = export_modpoll(canonical_map, read_plan, profile="witte-desktop")
+        result = export_modpoll(canonical_map, read_plan, profile="witte-desktop", mode="probe")
         self.assertEqual("generated", result.status)
         self.assertFalse(any(artifact.path.endswith((".mbp", ".mbw")) for artifact in result.artifacts))
         script = text(result, ".ps1")
@@ -412,6 +413,7 @@ class ModpollExporterTests(unittest.TestCase):
             canonical_map,
             read_plan,
             profile="witte-desktop",
+            mode="probe",
             options={"live_read_seconds": 5},
         )
         self.assertIn("$maximumLiveReadSeconds = 5", text(result, ".ps1"))
@@ -426,7 +428,7 @@ class ModpollExporterTests(unittest.TestCase):
 
     def test_witte_v12_profile_generates_valid_disabled_xml(self) -> None:
         canonical_map, read_plan = inputs()
-        result = export_modpoll(canonical_map, read_plan, profile="witte-v12-xml")
+        result = export_modpoll(canonical_map, read_plan, profile="witte-v12-xml", mode="probe")
         self.assertEqual("generated", result.status)
         xml_artifacts = [artifact for artifact in result.artifacts if artifact.path.endswith(".mbp")]
         self.assertEqual(1, len(xml_artifacts))
@@ -481,7 +483,8 @@ class ModpollExporterTests(unittest.TestCase):
         canonical_map, read_plan = inputs(malicious)
         for profile in ("gavinying-cli", "witte-desktop"):
             with self.subTest(profile=profile):
-                result = export_modpoll(canonical_map, read_plan, profile=profile)
+                result = export_modpoll(canonical_map, read_plan, profile=profile,
+                                        mode="probe" if profile == "witte-desktop" else "final")
                 self.assertEqual("generated", result.status)
                 for artifact in result.artifacts:
                     if artifact.path.endswith(".csv"):
