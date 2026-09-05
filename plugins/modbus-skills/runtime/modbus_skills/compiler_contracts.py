@@ -737,6 +737,19 @@ def _user_map_sort_key(point: Mapping[str, Any]) -> tuple[str, str, int, str]:
 
 
 def _assert_portable(value: Any, path: str = "artifact") -> None:
+    value_type = type(value)
+    if value_type is str:
+        if value.startswith(("/", "~/", "\\")) or (
+            len(value) >= 3 and value[1] == ":" and value[2] in "\\/"
+            and ("A" <= value[0] <= "Z" or "a" <= value[0] <= "z")
+        ):
+            raise CompilerContractError(
+                f"portable artifact contains a local absolute path: {path}"
+            )
+        return
+    if value is None or value_type is int or value_type is float or value_type is bool:
+        return
+    # Keep custom scalar/container behavior and every recursive visit intact.
     if isinstance(value, Mapping):
         for raw_key, item in value.items():
             key = str(raw_key)
