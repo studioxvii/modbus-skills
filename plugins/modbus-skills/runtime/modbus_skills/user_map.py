@@ -488,10 +488,22 @@ def _selection_entry(
     index: int,
     known: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
+    entry = validate_selection_entry_structure(value, disposition, index)
+    if entry["oem_point_id"] not in known:
+        raise UserMapError(f"selection references unknown OEM point: {entry['oem_point_id']}")
+    return entry
+
+
+def validate_selection_entry_structure(
+    value: Any, disposition: str, index: int, *, selector: str = "oem_point_id",
+) -> dict[str, Any]:
+    """Validate entry fields without manufacturing or resolving a source point."""
+    if selector not in {"oem_point_id", "exact_name"}:
+        raise UserMapError("selection selector must be oem_point_id or exact_name")
     if not isinstance(value, Mapping):
         raise UserMapError(f"{disposition}[{index}] must be an object")
     allowed = {
-        "oem_point_id",
+        selector,
         "reason",
         "confidence",
         "group",
@@ -504,11 +516,15 @@ def _selection_entry(
     unknown = set(value) - allowed
     if unknown:
         raise UserMapError(f"{disposition}[{index}] has unknown fields: " + ", ".join(sorted(map(str, unknown))))
-    point_id = _text(value.get("oem_point_id"), f"{disposition}[{index}].oem_point_id")
-    if point_id not in known:
-        raise UserMapError(f"selection references unknown OEM point: {point_id}")
+    point_id = _text(value.get(selector), f"{disposition}[{index}].{selector}")
     entry = {key: value[key] for key in allowed if key in value}
-    entry["oem_point_id"] = point_id
+    entry[selector] = point_id
+    confidence = entry.get("confidence")
+    if confidence is not None and (
+        isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+        or not 0 <= confidence <= 1
+    ):
+        raise UserMapError("selection confidence must be from 0 through 1")
     entry["reason"] = _text(value.get("reason"), f"{disposition}[{index}].reason")
     evidence_refs = _text_array(value.get("evidence_refs"), f"{disposition}[{index}].evidence_refs")
     if not evidence_refs:
@@ -678,4 +694,5 @@ __all__ = [
     "render_human_summary",
     "render_user_map_csv",
     "validate_selection_candidate",
+    "validate_selection_entry_structure",
 ]
