@@ -15,6 +15,13 @@ Accept a root array or an object containing `registers`, `data`, `records`, or
 `points`. Candidate and canonical wrappers do not require a manual copy/rewrite
 before source inspection. Preserve known canonical fields and raw unknown source fields.
 
+For `compile-user-map` source paths, raw arrays and untyped collection objects use
+the same header-alias parsing as `parse-map`, including explicit access and function
+codes. Typed `candidate-map/v1` (`records`) and `modbus-map/v1` (`points`) inputs keep
+their metadata and original row provenance; typed engineering offsets are not raw
+address headers. Other explicit artifact schemas and malformed typed collections
+are held as unsupported input, not silently treated as canonical records.
+
 ## XML
 
 Accept repeated `register` or `row` elements. Reject external entities and document type declarations.
