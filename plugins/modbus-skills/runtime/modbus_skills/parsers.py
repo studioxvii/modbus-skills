@@ -56,6 +56,7 @@ _HEADER_ALIASES = {
     "register_type": "area",
     "reg_type": "area",
     "table": "area",
+    "modbus_table": "area",
     "object_type": "area",
     "name": "name",
     "tag": "name",
@@ -64,6 +65,7 @@ _HEADER_ALIASES = {
     "point_name": "name",
     "parameter_name": "name",
     "description": "description",
+    "semantics_description": "description",
     "desc": "description",
     "label": "description",
     "datatype": "datatype",
@@ -203,6 +205,7 @@ def _result(
     warnings: list[dict[str, Any]] | None = None,
     rejected_rows: list[dict[str, Any]] | None = None,
     assumptions: list[dict[str, Any]] | None = None,
+    source_holds: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "format": source_format,
@@ -210,6 +213,7 @@ def _result(
         "warnings": warnings or [],
         "rejected_rows": rejected_rows or [],
         "assumptions": assumptions or [],
+        **({"source_holds": source_holds} if source_holds else {}),
     }
 
 
@@ -291,6 +295,92 @@ def _unique_headers(values: Sequence[Any]) -> tuple[list[str], list[dict[str, An
 
 def _trim_text(value: Any) -> Any:
     return value.strip() if isinstance(value, str) else value
+
+
+def _compound_header_field(raw_header: Any, index: int) -> str | None:
+    field = _header_key(raw_header, index)
+    spelling = re.sub(r"[^a-z0-9]", "", str(raw_header).casefold())
+    if ((field == "area" and spelling.startswith("modbustable"))
+            or (field == "description" and spelling.startswith("semanticsdescription"))):
+        return field
+    return None
+
+
+def _compound_header_columns(
+    raw_headers: Sequence[Any], headers: Sequence[str],
+) -> tuple[list[tuple[int, Any, str]], list[tuple[int, Any, str]]]:
+    """Resolve the table's compound evidence columns once, not for every row."""
+    compounds = []
+    has_compound_area = False
+    for index, (raw_header, field) in enumerate(zip(raw_headers, headers)):
+        compound = _compound_header_field(raw_header, index)
+        if compound is not None:
+            compounds.append((index, raw_header, field))
+            has_compound_area |= compound == "area"
+    areas = [(i, raw, field) for i, (raw, field) in enumerate(zip(raw_headers, headers))
+             if re.fullmatch(r"area(?:_[0-9]+)?", field)] if has_compound_area else []
+    return compounds, areas if len(areas) > 1 else []
+
+
+def _compound_header_claims(
+    columns: Sequence[tuple[int, Any, str]], values: Sequence[Any],
+    location: Mapping[str, Any], *, header_row: int,
+) -> list[dict[str, Any]]:
+    """Keep literal evidence for the two compound table/description headings.
+
+    These claims describe source cells, not confirmed engineering values. The
+    unique normalized field (including duplicate suffixes) prevents a later
+    compound heading from claiming the first column's value.
+    """
+    claims = []
+    for index, raw_header, field in columns:
+        value = values[index]
+        claims.append({
+            "parser_id": "structured.compound-header/v1",
+            "field": field, "value": _trim_text(value),
+            "raw_header": str(raw_header), "raw_value": value,
+            "source_locator": {**location, "column": index + 1},
+            "header_locator": {**location, "row": header_row, "column": index + 1},
+        })
+    return claims
+
+
+def _compound_area_conflicts(
+    columns: Sequence[tuple[int, Any, str]], values: Sequence[Any],
+    location: Mapping[str, Any], *, header_row: int,
+) -> list[dict[str, Any]]:
+    """Block conflicting area columns introduced by explicit Modbus Table.
+
+    Equivalence is used only to compare source claims; it never replaces their
+    values or establishes an area/address convention. These are source-level
+    holds with physical row evidence, not invented normalized point identities.
+    """
+    groups = (
+        {"coil", "coils", "0x", "fc01", "01", "0x coil"},
+        {"discrete", "discrete input", "discrete inputs", "1x", "fc02", "02", "1x discrete"},
+        {"input", "input register", "input registers", "3x", "fc04", "04", "3x input"},
+        {"holding", "holding register", "holding registers", "4x", "fc03", "03", "4x holding"},
+    )
+    claims = []
+    identities = set()
+    for index, raw_header, field in columns:
+        value = values[index]
+        if value in (None, ""):
+            continue
+        spelling = re.sub(r"[\s_-]+", " ", str(value).strip().casefold())
+        if not spelling:
+            continue
+        identity = next((f"known:{i}" for i, aliases in enumerate(groups) if spelling in aliases), f"unknown:{spelling}")
+        identities.add(identity)
+        claims.append({"field": field, "raw_header": str(raw_header), "raw_value": value,
+                       "source_locator": {**location, "column": index + 1},
+                       "header_locator": {**location, "row": header_row, "column": index + 1}})
+    if len(identities) < 2:
+        return []
+    return [{"code": "source.area-columns-conflict", "severity": "hold", "blocking": True,
+             "field": "area", "source": dict(location),
+             "message": "Conflicting nonblank area columns require source correction; no column takes precedence.",
+             "details": {"columns": claims}}]
 
 
 def _canonicalize_mapping(record: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -411,6 +501,7 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
     assumptions: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
+    source_holds: list[dict[str, Any]] = []
     if delimiter is None:
         try:
             dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t|")
@@ -444,6 +535,7 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
         raise ParseError(f"CSV header is invalid: {exc}") from exc
 
     headers, header_warnings = _unique_headers(raw_headers)
+    compound_columns, area_columns = _compound_header_columns(raw_headers, headers)
     warnings.extend(header_warnings)
     records: list[dict[str, Any]] = []
     try:
@@ -464,6 +556,8 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
             if len(row) > len(headers):
                 record["_extra"] = [_trim_text(value) for value in row[len(headers) :]]
             record["_source"] = source_location
+            if compound_columns:
+                record["_claims"] = _compound_header_claims(compound_columns, padded, source_location, header_row=1)
             if not _has_structured_address(record, headers):
                 rejected.append(
                     {
@@ -474,6 +568,10 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
                     }
                 )
                 continue
+            if area_columns:
+                source_holds.extend(_compound_area_conflicts(
+                    area_columns, padded, source_location, header_row=1,
+                ))
             warnings.extend(_enum_warnings(record, source_location))
             records.append(record)
     except csv.Error as exc:
@@ -484,6 +582,7 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
         warnings=warnings,
         rejected_rows=rejected,
         assumptions=assumptions,
+        source_holds=source_holds,
     )
 
 
@@ -947,6 +1046,7 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
     rejected: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     assumptions: list[dict[str, Any]] = []
+    source_holds: list[dict[str, Any]] = []
     with archive_context as archive:
         total_size = sum(item.file_size for item in archive.infolist())
         if total_size > _MAX_XLSX_UNCOMPRESSED_BYTES:
@@ -984,6 +1084,7 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
             header_index, skipped_titles = _skip_title_rows(non_empty)
             header_row_number, header_values, header_formula = non_empty[header_index]
             headers, header_warnings = _xlsx_headers(header_values, non_empty[:header_index])
+            compound_columns, area_columns = _compound_header_columns(header_values, headers)
             if not _sheet_has_register_header(headers):
                 warnings.append(
                     {
@@ -1036,6 +1137,10 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                 if len(row_values) > len(headers):
                     record["_extra"] = [_trim_text(value) for value in row_values[len(headers) :]]
                 record["_source"] = location
+                if compound_columns:
+                    record["_claims"] = _compound_header_claims(
+                        compound_columns, padded, location, header_row=header_row_number,
+                    )
                 if has_formula:
                     warnings.append(
                         {
@@ -1054,6 +1159,10 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                         }
                     )
                     continue
+                if area_columns:
+                    source_holds.extend(_compound_area_conflicts(
+                        area_columns, padded, location, header_row=header_row_number,
+                    ))
                 warnings.extend(_enum_warnings(record, location))
                 records.append(record)
     return _result(
@@ -1062,6 +1171,7 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
         warnings=warnings,
         rejected_rows=rejected,
         assumptions=assumptions,
+        source_holds=source_holds,
     )
 
 
