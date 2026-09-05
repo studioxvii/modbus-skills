@@ -446,6 +446,7 @@ def parse_layout_rows(
             if not line.strip():
                 continue
             if header is None:
+                rejected_before = len(rejected)
                 headerless = _headerless_layout_row(
                     line,
                     page_number=page_number,
@@ -455,7 +456,7 @@ def parse_layout_rows(
                 )
                 if headerless is not None:
                     records.append(headerless)
-                elif _unresolved_tabular_row(line):
+                elif len(rejected) == rejected_before and _unresolved_tabular_row(line):
                     # A missed plausible table row is not proof that the page is
                     # exhausted. Preserve it as one localized source exception;
                     # do not guess column inheritance from the preceding page.
@@ -655,6 +656,26 @@ def _headerless_layout_row(
             address_indexes.append(index)
             parsed_by_index[index] = parsed
     if not address_indexes:
+        return None
+    display_identities = {
+        (parsed.get("area"), parsed.get("number"))
+        for parsed in parsed_by_index.values()
+        if parsed.get("convention") == "modicon-reference"
+    }
+    if len(display_identities) > 1:
+        # A default, limit or other numeric cell can look like another Modicon
+        # address. Without column roles, numerical rank cannot choose its role.
+        if rejected is not None:
+            rejected.append({
+                "code": "pdf-headerless-address-roles-unresolved",
+                "page": page_number, "line": line_number, "parser_id": parser_id,
+                "_source": {
+                    "format": "pdf", "page": page_number, "line": line_number,
+                    "region": f"p{page_number}:l{line_number}", "parser_id": parser_id,
+                    "method": "exact" if parser_id == "pdftotext-layout/v1" else "ocr-derived",
+                    "excerpt": line.strip()[:300],
+                },
+            })
         return None
     # Prefer Modicon/display forms over bare menu numbers when both appear.
     def _address_rank(parsed: Mapping[str, Any]) -> tuple[int, int]:
