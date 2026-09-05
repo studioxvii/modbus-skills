@@ -73,6 +73,18 @@ _PROCONX_FINAL_TYPE_SUFFIX = {
 _PROCONX_SUPPORTED_BYTE_ORDERS = frozenset({"ABCD", "ABCDEFGH", "BE_BE"})
 WITTE_DESKTOP_MIN_SCAN_INTERVAL_MS = 1000
 WITTE_DESKTOP_MAX_ROUTE_READS_PER_SECOND = 5
+_WITTE_RAW_REPRESENTATION = {
+    "kind": "raw-bits-or-register-words",
+    "datatype_decoding_configured": False,
+    "engineering_scaling_configured": False,
+    "native_display_format_contract": "unspecified",
+}
+_WITTE_UINT16_REPRESENTATION = {
+    "kind": "identity-uint16",
+    "datatype_decoding_configured": True,
+    "engineering_scaling_configured": False,
+    "native_display_format_contract": "Automation SetFormat(index, 1): unsigned",
+}
 
 _GAVINYING_AREA = {
     "coil": "coil",
@@ -867,6 +879,7 @@ def _export_witte(
     findings = list(preflight_common(canonical_map, read_plan, mode=mode))
     blocks = tuple(blocks_from_plan(read_plan))
     findings.extend(_witte_polling_findings(blocks))
+    findings.extend(_witte_final_findings(canonical_map, read_plan, mode=mode, profile=profile))
     for block_index, block in enumerate(blocks):
         unit = block_unit_id(block)
         if unit is not None and not 1 <= unit <= 255:
@@ -935,6 +948,7 @@ def _export_witte(
     )
     setup_manifest = {
         "schema_version": "witte-modbus-poll-setup/v1",
+        "numeric_representation": dict(_WITTE_UINT16_REPRESENTATION if mode == "final" else _WITTE_RAW_REPRESENTATION),
         "profile": profile,
         "native_files_bundled": False,
         "native_file_creation": "Modbus Poll Save automation method",
@@ -969,6 +983,7 @@ def _export_witte(
         findings=findings,
         extra={
             "format": "witte-modbus-poll-automation",
+            "numeric_representation": dict(_WITTE_UINT16_REPRESENTATION if mode == "final" else _WITTE_RAW_REPRESENTATION),
             "format_documentation": "https://www.modbustools.com/mbpoll-user-manual.html",
             "native_files_bundled": False,
             "live_read_confirmation_required": True,
@@ -1015,6 +1030,53 @@ def _export_witte(
         findings=tuple(findings),
         artifacts=tuple(artifacts),
     )
+
+
+def _witte_final_findings(
+    canonical_map: Mapping[str, Any],
+    read_plan: Mapping[str, Any],
+    *,
+    mode: str,
+    profile: str,
+) -> tuple[Finding, ...]:
+    if mode != "final":
+        return ()
+    findings: list[Finding] = []
+    for block_index, block in enumerate(blocks_from_plan(read_plan)):
+        for point_index, point in enumerate(points_for_block(canonical_map, block, block_index)):
+            path = f"requests[{block_index}].points[{point_index}]"
+            # Only desktop uint16 explicitly configures a documented display. XML f=0
+            # is a sample value, not a documented mapping to Automation SIGNED=0.
+            # This is a semantic capability gap, independent of native not-run.
+            if not (profile == "witte-desktop" and block_function_code(block) in {3, 4}
+                    and point_datatype(point) == "uint16" and point_word_count(point) == 1):
+                findings.append(Finding(
+                    "error", "WITTE_FINAL_DISPLAY_UNCONFIGURED",
+                    "This Witte profile does not configure the requested final datatype display; desktop supports only identity uint16. Use mode=probe for explicitly raw bits/register words or a supported final target.",
+                    f"{path}.datatype",
+                ))
+            for field, identity, code in (
+                ("scale", 1, "WITTE_SCALE_UNSUPPORTED"),
+                ("engineering_offset", 0, "WITTE_OFFSET_UNSUPPORTED"),
+            ):
+                value = point.get(field, point.get("offset") if field == "engineering_offset" else None)
+                try:
+                    is_identity = value in (None, "") or Fraction(str(value)) == identity
+                except (ValueError, ZeroDivisionError):
+                    is_identity = False
+                if not is_identity:
+                    findings.append(Finding(
+                        "error", code,
+                        f"This Witte profile does not configure {field}; a raw probe is not transformed engineering data.",
+                        f"{path}.{field}",
+                    ))
+            if point_byte_order(point) not in (None, "", "AB", "ABCD", "BE_BE"):
+                findings.append(Finding(
+                    "error", "WITTE_BYTE_ORDER_UNCONFIGURED",
+                    "This Witte profile does not configure the requested byte layout; use an explicitly raw probe or a supported final target.",
+                    f"{path}.byte_order",
+                ))
+    return tuple(findings)
 
 
 def _witte_polling_findings(
@@ -1099,6 +1161,7 @@ def _export_witte_v12_xml(
 ) -> ExportResult:
     profile = "witte-v12-xml"
     findings = list(preflight_common(canonical_map, read_plan, mode=mode))
+    findings.extend(_witte_final_findings(canonical_map, read_plan, mode=mode, profile=profile))
     if has_errors(findings):
         return held_result(
             TARGET,
@@ -1151,6 +1214,7 @@ def _export_witte_v12_xml(
 
     setup_manifest = {
         "schema_version": "witte-modbus-poll-v12-xml-setup/v1",
+        "numeric_representation": dict(_WITTE_RAW_REPRESENTATION),
         "profile": profile,
         "minimum_documented_major_version": 12,
         "documents": documents,
@@ -1169,6 +1233,7 @@ def _export_witte_v12_xml(
         findings=findings,
         extra={
             "format": "witte-modbus-poll-v12-xml",
+            "numeric_representation": dict(_WITTE_RAW_REPRESENTATION),
             "format_documentation": "https://www.modbustools.com/pollxml.html",
             "minimum_documented_major_version": 12,
             "documents": documents,
@@ -1320,7 +1385,9 @@ def _witte_v12_xml(block: Mapping[str, Any]) -> str:
     for _ in range(quantity):
         ET.SubElement(formats, "F", {"f": "0", "v": "0"})
     bytes_element = ET.SubElement(data, "Bytes")
-    for _ in range(quantity * 2):
+    # XML storage is one B per bit for FC01/02, not packed wire bytes.
+    byte_count = quantity if function_code in {1, 2} else quantity * 2
+    for _ in range(byte_count):
         _xml_text(bytes_element, "B", "0")
     for tag in ("CellData", "Scales", "ValueNames", "ChartSeries", "BinNames"):
         ET.SubElement(data, tag)
@@ -1386,6 +1453,21 @@ def validate_witte_v12_xml(xml_text: str) -> tuple[Finding, ...]:
                 "Data/Function",
             )
         )
+    try:
+        quantity = int(root.findtext("Data/Quantity") or "")
+    except ValueError:
+        quantity = 0
+    if function_code in _WITTE_METHODS and quantity > 0:
+        expected_bytes = quantity if function_code in {1, 2} else quantity * 2
+        if len(root.findall("Data/Bytes/B")) != expected_bytes:
+            findings.append(
+                Finding(
+                    "error",
+                    "WITTE_XML_BYTES_COUNT_MISMATCH",
+                    "Witte XML stores one byte entry per coil/discrete input and two per register.",
+                    "Data/Bytes",
+                )
+            )
     if root.findtext("Enable") != "0":
         findings.append(
             Finding(
@@ -1469,6 +1551,14 @@ def _witte_script(
                 f"  $readResult = {variable}.{method}({unit}, {start}, {quantity}, {scan_rate})",
                 f"  if (-not $readResult) {{ throw \"Could not create read document for {filename}.\" }}",
                 f"  {variable}.ReadWriteDisabled = $true",
+            ]
+        )
+        if mode == "final":
+            # Documented Automation SetFormat: index 0 is the first address;
+            # format 1 is unsigned. Preflight admits only identity uint16.
+            lines.extend(f"  {variable}.SetFormat({index}, 1)" for index in range(quantity))
+        lines.extend(
+            [
                 f"  {variable}.ShowWindow()",
                 f"  $savePath = Join-Path $outputDirectory \"{filename}\"",
                 f"  $saveResult = {variable}.Save($savePath)",
@@ -1607,7 +1697,21 @@ requests on timeout. Final scalar Boolean values, zero multipliers, and scaled
 
 
 def _witte_readme(mode: str, *, live_read_seconds: int) -> str:
-    return f"""# Witte Modbus Poll {mode.title()} Automation
+    representation = (
+        "Final display is identity uint16 only: the script explicitly calls "
+        "SetFormat(index, 1), the documented unsigned format, for each register. "
+        "Index zero is the first address of that document. No scale or engineering "
+        "offset is applied. Unsupported types, layouts, and transforms are held."
+        if mode == "final" else
+        "Numeric representation is raw bits/register words only. No datatype display, "
+        "signed/unsigned interpretation, float/string/bitfield decoding, byte-layout "
+        "conversion, scale, or engineering offset is configured. The native default "
+        "display is unspecified here. Do not present this raw probe as engineering data."
+    )
+    return f"""# Witte Modbus Poll {"Raw " if mode == "probe" else ""}{mode.title()} Automation
+
+{representation}
+Successful wire reads do not by themselves prove the displayed engineering values.
 
 This target does not contain a synthetic `.mbp` or `.mbw` file. The PowerShell
 scripts use the documented `Mbpoll.Application` and `Mbpoll.Document`
@@ -1638,7 +1742,14 @@ methods or perform address scans.
 
 
 def _witte_v12_readme(mode: str) -> str:
-    return f"""# Witte Modbus Poll v12 XML {mode.title()} Documents
+    return f"""# Witte Modbus Poll v12 XML Raw {mode.title()} Documents
+
+Numeric representation is raw bits/register words only. No datatype display,
+signed/unsigned interpretation, float/string/bitfield decoding, byte-layout
+conversion, scale, or engineering offset is configured. XML format f=0 is not
+an unsigned, signed, float, or Boolean display contract. Successful wire reads
+do not prove engineering values. Final decoding requests are held; select an
+explicit raw probe instead.
 
 These files follow the human-readable XML structure that Witte publishes for
 Modbus Poll version 12. Each human-readable XML `.mbp` file represents one
@@ -1655,6 +1766,8 @@ request and requires an explicit host, port, matching unit ID, and
 The files do not store a connection endpoint. Configure the reviewed Modbus
 TCP or serial connection in Modbus Poll. Inspect the unit ID, function, address,
 quantity, and scan rate in each XML file before you open or enable it.
+Keep the document disabled. After reviewing the connection, use the native
+Read/Write Once action for one raw probe; do not enable ongoing polling.
 
 Only functions 01 through 04 are present. The `.mbp` content is documented XML,
 not an invented binary project; no `.mbw` workspace is generated.

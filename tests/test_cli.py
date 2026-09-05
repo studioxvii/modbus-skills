@@ -206,8 +206,17 @@ class CliIntegrationTests(unittest.TestCase):
             "--output",
             self.root / "witte-v12",
         )
-        self.assertEqual("generated", witte["status"])
-        self.assertTrue(any((self.root / "witte-v12" / "modpoll" / "witte-v12-xml").glob("*.mbp")))
+        self.assertEqual("held", witte["status"])
+        final_result = json.loads((self.root / "witte-v12" / "modpoll-result.json").read_text())
+        self.assertIn("WITTE_FINAL_DISPLAY_UNCONFIGURED", {row["code"] for row in final_result["findings"]})
+        self.assertFalse(any((self.root / "witte-v12").rglob("*.mbp")))
+        probe = self.run_command(
+            "generate-modpoll", "--map", canonical, "--plan", plan,
+            "--profile", "witte-v12-xml", "--mode", "probe",
+            "--output", self.root / "witte-v12-probe",
+        )
+        self.assertEqual("generated", probe["status"])
+        self.assertTrue(any((self.root / "witte-v12-probe" / "modpoll" / "witte-v12-xml").glob("*.mbp")))
 
     def test_review_evidence_accepts_source_codes_before_normalization(self) -> None:
         candidate = self.root / "coordinate-candidate.json"
