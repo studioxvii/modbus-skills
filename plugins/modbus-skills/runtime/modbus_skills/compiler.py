@@ -19,6 +19,7 @@ from .compiler_contracts import (
     validate_compile_case,
     validate_device_binding,
     validate_oem_map,
+    validate_user_selection,
 )
 from .decision_packets import (
     DECISION_CANDIDATE_SCHEMA_VERSION,
@@ -263,8 +264,18 @@ def _resume_case(
             raise CompilerError("provide-binding resume requires a binding artifact")
         try:
             validate_device_binding(binding, oem_map)
+            current_selection = _read_indexed_json(root, case, "selection")
+            validate_user_selection(current_selection, oem_map)
         except CompilerContractError as exc:
             raise CompilerError(str(exc)) from exc
+        # Binding is a later input, not a new measurement-selection request.
+        # Reuse the hash-verified current dispositions, including typed replies.
+        selection_candidate = {
+            "schema_version": "modbus-user-selection-candidate/v1",
+            "oem_map_hash": current_selection["input_hashes"]["oem_map"],
+            **{key: current_selection[key] for key in
+               ("requested_measurements", "included", "suggested", "excluded")},
+        }
     elif (
         resume["action"] == "provide-selection-decision"
         and case["state"] == "awaiting-selection-decision"
@@ -292,7 +303,7 @@ def _resume_case(
         for name, record in case["artifacts"].items()
         if name != "compile_result"
     }
-    if selection_candidate is not None:
+    if resume["action"] == "provide-selection-decision":
         _store_json(
             root,
             next_index,
@@ -331,6 +342,10 @@ def _advance(
             oem_map,
             selection_candidate or request["selection_candidate"],
             case_id=case_id,
+            selection_decision_resolved=any(
+                receipt.get("action") == "provide-selection-decision"
+                for receipt in completed_receipts
+            ),
         )
     except (CompilerContractError, UserMapError) as exc:
         raise CompilerError(str(exc)) from exc
@@ -407,6 +422,22 @@ def _advance(
             timer=timer,
         )
     targets = request["targets"]
+    if not bundle["selection"]["included"]:
+        return _commit(
+            root,
+            request,
+            case_id=case_id,
+            state="offline-complete",
+            index=index,
+            receipts=completed_receipts,
+            target_statuses=[
+                {"target": target, "status": "held", "reason": "no-points-selected"}
+                for target in targets
+            ],
+            next_action={"kind": "none", "reason": "no-points-selected"},
+            started=started,
+            timer=timer,
+        )
     if not targets:
         return _commit(
             root,
