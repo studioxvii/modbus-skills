@@ -1211,6 +1211,29 @@ def _normalize_one(
         }
     )
 
+    # Engineering units are fill-only metadata, never a numeric conversion.
+    # Keep nonblank source text authoritative, including an explicit "unknown".
+    engineering_unit_raw = record.get("engineering_unit")
+    engineering_unit_source = "engineering_unit" if "engineering_unit" in record else None
+    engineering_unit = _text(engineering_unit_raw)
+    default_engineering_unit = _text(defaults.get("engineering_unit"))
+    if engineering_unit is None and default_engineering_unit is not None:
+        engineering_unit_raw = defaults["engineering_unit"]
+        engineering_unit = default_engineering_unit
+        engineering_unit_source = "workflow_default"
+        assumptions.append(
+            _assumption(
+                "workflow-default",
+                "Applied the caller-supplied workflow default for engineering_unit.",
+                field="engineering_unit",
+                value=engineering_unit,
+            )
+        )
+    evidence.append(
+        {"field": "engineering_unit", "source_field": engineering_unit_source,
+         "source_value": engineering_unit_raw, "value": engineering_unit}
+    )
+
     scale_raw, scale_source = _get(record, defaults, "scale")
     engineering_offset_raw, engineering_offset_source = _get(record, defaults, "engineering_offset", "offset")
     numeric_values: dict[str, float | None] = {}
@@ -1626,7 +1649,7 @@ def _normalize_one(
         "scale": numeric_values["scale"],
         "engineering_offset": numeric_values["engineering_offset"],
         "offset": numeric_values["engineering_offset"],
-        "engineering_unit": _text(record.get("engineering_unit")),
+        "engineering_unit": engineering_unit,
         "access": access,
         "read_function_codes": list(read_function_codes),
         "write_function_codes": list(write_function_codes),
