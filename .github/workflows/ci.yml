@@ -11,9 +11,24 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+      - name: Install declared runtime and PDF test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends poppler-utils
+          python3 - <<'PY'
+          import subprocess
+          import sys
+          import tomllib
+          with open('pyproject.toml', 'rb') as source:
+              dependencies = tomllib.load(source)['project']['dependencies']
+          subprocess.run([sys.executable, '-m', 'pip', 'install', *dependencies], check=True)
+          PY
+          python3 -c 'import pdfplumber; print("pdfplumber", pdfplumber.__version__)'
+          pdftotext -v
       - run: python3 scripts/verify_repo.py
