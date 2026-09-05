@@ -65,6 +65,7 @@ _GRID_RECOVERY_FINDING = {
     "message": "Grid-aware table extraction supplied register-table structure alongside text parsing.",
 }
 _QUARANTINE_HOLD_MESSAGES = {
+    "pdf-prior-source-quarantine": "This source row already has unresolved parser evidence; later claims cannot release it.",
     "pdf-grid-column-ambiguous": "Resolve conflicting grid columns before these rows become map points.",
     "pdf-grid-type-unresolved": "Declare the datatype or access meaning for this address-and-name table.",
     "pdf-grid-register-area-ambiguous": "Declare one Modbus register area for these rows.",
@@ -1026,7 +1027,32 @@ def _merge_scopes_compatible(left: tuple[Any, ...], right: tuple[Any, ...]) -> b
     return table is None or right_table is None or table == right_table
 
 
-def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+def _source_row_locators(record: Mapping[str, Any]) -> set[tuple[int, str]]:
+    locators = [record.get("_source")]
+    locators.extend(claim.get("source_locator") for claim in record.get("_claims", ()) if isinstance(claim, Mapping))
+    result = set()
+    for source in locators:
+        if not isinstance(source, Mapping):
+            continue
+        page, region = source.get("page"), source.get("region")
+        if isinstance(page, int) and page > 0 and isinstance(region, str) and re.fullmatch(
+            rf"p{page}:(?:t\d+:r\d+|l\d+|y\d+(?:\.\d+)?)", region
+        ):
+            result.add((page, region))
+    return result
+
+
+def _reconcile(
+    strict: list[dict[str, Any]],
+    coordinate: list[dict[str, Any]],
+    *,
+    quarantined_records: Sequence[dict[str, Any]] = (),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    # Earlier parser conflicts remain held even if a later parser agrees with
+    # one interpretation. Include them in the same identity/scope uniqueness
+    # checks rather than allowing their later claims to become new points.
+    held_count = len(quarantined_records)
+    strict = [*quarantined_records, *strict]
     accepted: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
@@ -1087,7 +1113,7 @@ def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -
             ) == 1:
                 match_index = same_name[0]
         if match_index is None:
-            accepted.append(dict(left))
+            (quarantined if left_index < held_count else accepted).append(dict(left))
             continue
         unmatched_right.remove(match_index)
         right = coordinate[match_index]
@@ -1113,12 +1139,40 @@ def _reconcile(strict: list[dict[str, Any]], coordinate: list[dict[str, Any]]) -
             if not field.startswith("_") and field not in merged:
                 merged[field] = value
         merged["_claims"] = [*left.get("_claims", []), *right.get("_claims", [])]
-        if row_conflicts:
+        if row_conflicts or left_index < held_count:
             quarantined.append(merged)
-            conflicts.append({"identity": {"page": identity[0], "address": identity[1], "name": identity[2]}, "fields": row_conflicts, "source_regions": [left["_source"]["region"], right["_source"]["region"]]})
+            if row_conflicts:
+                conflicts.append({"identity": {"page": identity[0], "address": identity[1], "name": identity[2]}, "fields": row_conflicts, "source_regions": [left["_source"]["region"], right["_source"]["region"]]})
         else:
             accepted.append(merged)
     accepted.extend(dict(coordinate[index]) for index in sorted(unmatched_right))
+    if held_count:
+        held_locators: dict[tuple[int, str], list[tuple[Any, ...]]] = {}
+        for row in quarantined_records:
+            scope = _merge_scope(row)
+            for locator in _source_row_locators(row):
+                held_locators.setdefault(locator, []).append(scope)
+        usable = []
+        for row in accepted:
+            scope = _merge_scope(row)
+            shared = {
+                locator for locator in _source_row_locators(row)
+                if any(_merge_scopes_compatible(scope, held_scope) for held_scope in held_locators.get(locator, ()))
+            }
+            if shared:
+                # Ambiguous semantic associations must not release a known
+                # held physical/source row. Retain this claim separately;
+                # do not pretend that ambiguous candidates were merged.
+                quarantined.append({
+                    **row,
+                    "code": "pdf-prior-source-quarantine",
+                    "_quarantine_source_locators": [
+                        {"page": page, "region": region} for page, region in sorted(shared)
+                    ],
+                })
+            else:
+                usable.append(row)
+        accepted = usable
     return accepted, quarantined, conflicts
 
 
@@ -1443,8 +1497,7 @@ def extract_pdf(
         grid_source_quarantined = []
     quarantined.extend(grid_source_quarantined)
     if grid:
-        records, grid_quarantined, grid_conflicts = _reconcile(records, grid)
-        quarantined.extend(grid_quarantined)
+        records, quarantined, grid_conflicts = _reconcile(records, grid, quarantined_records=quarantined)
         conflicts.extend(grid_conflicts)
         findings.append(_GRID_RECOVERY_FINDING)
     holds: list[dict[str, Any]] = []
@@ -1559,10 +1612,9 @@ def _extract_large_pdf_in_chunks(
                 grid_source_quarantined = []
             chunk_quarantined.extend(grid_source_quarantined)
             if grid:
-                chunk_records, grid_quarantined, grid_conflicts = _reconcile(
-                    chunk_records, grid
+                chunk_records, chunk_quarantined, grid_conflicts = _reconcile(
+                    chunk_records, grid, quarantined_records=chunk_quarantined
                 )
-                chunk_quarantined.extend(grid_quarantined)
                 chunk_conflicts.extend(grid_conflicts)
             records.extend(chunk_records)
             quarantined.extend(chunk_quarantined)

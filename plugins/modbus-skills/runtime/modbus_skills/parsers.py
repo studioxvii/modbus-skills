@@ -316,8 +316,19 @@ def _canonicalize_mapping(record: Mapping[str, Any]) -> tuple[dict[str, Any], li
     return output, warnings
 
 
+def _has_offset_table_header(headers: Sequence[str]) -> bool:
+    """Recognize a structured point table without resolving a plain Offset."""
+
+    keys = set(headers)
+    return (
+        "source_offset" in keys
+        and bool(keys & {"name", "description"})
+        and bool(keys & {"access", "function_code", "area"})
+    )
+
+
 def _sheet_has_register_header(headers: Sequence[str]) -> bool:
-    return any(header in _REGISTER_HEADER_KEYS for header in headers)
+    return any(header in _REGISTER_HEADER_KEYS for header in headers) or _has_offset_table_header(headers)
 
 
 def _has_address(record: Mapping[str, Any]) -> bool:
@@ -329,6 +340,33 @@ def _has_address(record: Mapping[str, Any]) -> bool:
         elif value not in (None, ""):
             return True
     return False
+
+
+def _has_structured_address(record: Mapping[str, Any], headers: Sequence[str]) -> bool:
+    """Keep contextual Offset rows as candidates, never as protocol addresses.
+
+    Limit this path to delimited/XLSX tables. A name/description and an Offset
+    alone also describe ordinary non-register data; require a recognizable
+    access, function, or area value as row-level corroboration.
+    """
+
+    if _has_address(record):
+        return True
+    if not _has_offset_table_header(headers):
+        return False
+    offset = str(record.get("source_offset", "")).strip()
+    if not re.fullmatch(r"[+-]?(?:0[xX][0-9a-fA-F]+|[0-9]+)", offset):
+        return False
+    if not any(record.get(field) not in (None, "") for field in ("name", "description")):
+        return False
+    access = re.sub(r"[\s_/-]+", "", str(record.get("access", "")).lower())
+    function = str(record.get("function_code", "")).strip()
+    area = str(record.get("area", "")).strip().lower()
+    return (
+        access in {"r", "ro", "read", "readonly", "rw", "readwrite", "w", "wo", "write", "writeonly"}
+        or function in {"1", "01", "2", "02", "3", "03", "4", "04", "5", "05", "6", "06", "15", "16"}
+        or area in _KNOWN_AREAS
+    )
 
 
 def _enum_warnings(record: Mapping[str, Any], source: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -425,7 +463,7 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
             if len(row) > len(headers):
                 record["_extra"] = [_trim_text(value) for value in row[len(headers) :]]
             record["_source"] = source_location
-            if not _has_address(record):
+            if not _has_structured_address(record, headers):
                 rejected.append(
                     {
                         "code": "missing_address",
@@ -943,7 +981,7 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                             **location,
                         }
                     )
-                if not _has_address(record):
+                if not _has_structured_address(record, headers):
                     rejected.append(
                         {
                             "code": "missing_address",

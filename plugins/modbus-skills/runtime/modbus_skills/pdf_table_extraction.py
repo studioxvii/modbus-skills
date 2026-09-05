@@ -201,12 +201,27 @@ def _extract_pdf_table_rows_in_process(
             for page_number, page in enumerate(document.pages, start=1):
                 if selected is not None and page_number not in selected:
                     continue
-                for table_index, table in enumerate(page.extract_tables()):
+                for table_index, table in enumerate(page.find_tables()):
+                    cells, header_recovery = _recover_offset_header(page, table)
                     parsed = parse_pdf_table_evidence(
-                        table,
+                        cells,
                         page_number=page_number,
                         table_index=table_index,
                     )
+                    if header_recovery is not None:
+                        header_evidence = {
+                            **header_recovery,
+                            "source_locator": {
+                                "page": page_number,
+                                "row": 0,
+                                "region": f"p{page_number}:t{table_index}:r0",
+                            },
+                        }
+                        for row in (*parsed["records"], *parsed["quarantined_records"]):
+                            row["_source"]["header_recovery"] = header_evidence
+                            for claim in row.get("_claims", []):
+                                if claim.get("column_index") == header_recovery["column_index"]:
+                                    claim["header_evidence"] = header_evidence
                     evidence["records"].extend(parsed["records"])
                     evidence["quarantined_records"].extend(
                         parsed["quarantined_records"]
@@ -222,6 +237,54 @@ def _extract_pdf_table_rows_in_process(
             "pdfplumber could not extract bounded table geometry"
         ) from exc
     return evidence
+
+
+def _recover_offset_header(page: Any, table: Any) -> tuple[list[list[Any]], dict[str, Any] | None]:
+    """Recover one open outer header cell from its own aligned literal glyphs."""
+    cells = table.extract()
+    if not cells or len(table.rows) < 3 or _find_header(cells)[1] is not None:
+        return cells, None
+    header_cells = table.rows[0].cells
+    missing = [index for index, box in enumerate(header_cells) if box is None]
+    # Only the proved missing outer-right header-border case is supported.
+    if missing != [len(header_cells) - 1] or len(header_cells) < 3:
+        return cells, None
+    column = missing[0]
+    if cells[0][column] not in (None, ""):
+        return cells, None
+    labels = {_HEADER_NAMES.get(_header_text(value)) for value in cells[0] if value}
+    if not {"name", "description"} & labels or not {"access", "format", "area"} & labels:
+        return cells, None
+    boxes = [row.cells[column] if column < len(row.cells) else None for row in table.rows[1:]]
+    if any(box is None for box in boxes):
+        return cells, None
+    x0, x1 = boxes[0][0], boxes[0][2]
+    if any(abs(box[0] - x0) > 0.5 or abs(box[2] - x1) > 0.5 for box in boxes):
+        return cells, None
+    header = table.rows[0].bbox
+    glyphs = [char for char in page.chars
+              if x0 <= (char["x0"] + char["x1"]) / 2 <= x1
+              and header[1] <= (char["top"] + char["bottom"]) / 2 <= header[3]]
+    if not glyphs or max(char["top"] for char in glyphs) - min(char["top"] for char in glyphs) > 1:
+        return cells, None
+    glyphs.sort(key=lambda char: char["x0"])
+    label = "".join(char["text"] for char in glyphs).strip()
+    if label.casefold() != "offset":
+        return cells, None
+    recovered = [list(row) for row in cells]
+    recovered[0][column] = label
+    header_index, columns, _extras, _confident = _find_header(recovered)
+    if header_index != 0 or columns is None or columns.get("address") != [(column, label)]:
+        return cells, None
+    return recovered, {
+        "column_index": column,
+        "original_cell": cells[0][column],
+        "original_cell_bbox": None,
+        "recovered_text": label,
+        "method": "coordinate-derived",
+        "derived_bbox": [x0, header[1], x1, header[3]],
+        "glyphs": [{"text": char["text"], "bbox": [char["x0"], char["top"], char["x1"], char["bottom"]]} for char in glyphs],
+    }
 
 
 def parse_pdf_table(
