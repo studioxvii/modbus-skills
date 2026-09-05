@@ -69,6 +69,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import sys
 
 from pymodbus.client import ModbusTcpClient
 
@@ -107,7 +108,7 @@ def main() -> int:
     if not 0 <= address <= 65535 or address + count > 65536:
         parser.error("selected request exceeds the Modbus address range")
 
-    client = ModbusTcpClient(args.host, port=args.port, timeout=3)
+    client = ModbusTcpClient(args.host, port=args.port, timeout=3, retries=0)
     if not client.connect():
         raise SystemExit("Could not connect to the explicit endpoint")
     try:
@@ -133,6 +134,13 @@ def main() -> int:
         )
         print(json.dumps({**request, "values": values}, sort_keys=True))
         return 0
+    except Exception as exc:
+        # A failed physical read is a bounded terminal error, not a Python
+        # traceback or permission to silently retry the request.
+        print(json.dumps({"status": "error", "request_id": request["request_id"],
+                          "error": type(exc).__name__, "message": str(exc)[:300],
+                          "automatic_retry": False}, sort_keys=True), file=sys.stderr)
+        return 1
     finally:
         client.close()
 

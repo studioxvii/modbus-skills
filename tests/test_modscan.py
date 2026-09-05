@@ -118,8 +118,8 @@ class ModscanExporterTests(unittest.TestCase):
                 return False
 
         class Client:
-            def __init__(self, host, *, port, timeout):
-                calls.append(("init", host, port, timeout))
+            def __init__(self, host, *, port, timeout, retries):
+                calls.append(("init", host, port, timeout, retries))
 
             def connect(self):
                 return True
@@ -154,9 +154,20 @@ class ModscanExporterTests(unittest.TestCase):
             ]
             with patch.object(sys, "argv", argv), contextlib.redirect_stdout(output):
                 self.assertEqual(0, namespace["main"]())
+        self.assertEqual(("init", "127.0.0.1", 502, 3, 0), calls[0])
         self.assertEqual(("read", 100, 2, 1), calls[1])
         self.assertEqual(("close",), calls[-1])
         self.assertEqual([10, 20], json.loads(output.getvalue())["values"])
+
+        def timeout_read(self, *, address, count, device_id):
+            raise RuntimeError("synthetic timeout")
+        error_output = StringIO()
+        with patch.object(Client, "read_holding_registers", timeout_read), patch.object(sys, "argv", argv), contextlib.redirect_stderr(error_output):
+            self.assertEqual(1, namespace["main"]())
+        self.assertEqual("error", json.loads(error_output.getvalue())["status"])
+        self.assertFalse(json.loads(error_output.getvalue())["automatic_retry"])
+        self.assertNotIn("Traceback", error_output.getvalue())
+        self.assertEqual(("close",), calls[-1])
 
     def test_pymodbus_fallback_rejects_incomplete_blocks(self) -> None:
         with self.assertRaisesRegex(ValueError, "bounded unit, address, and count"):
