@@ -490,7 +490,8 @@ class XlsxParserTests(unittest.TestCase):
             filename="map.csv",
         )
         self.assertEqual(1, len(result["records"]))
-        self.assertEqual("40104", str(result["records"][0]["display_address"]))
+        self.assertEqual("40104", str(result["records"][0]["address"]))
+        self.assertNotIn("display_address", result["records"][0])
 
         offset_result = parse_source(
             "Description,Access,Offset\nReady,R,12\n",
