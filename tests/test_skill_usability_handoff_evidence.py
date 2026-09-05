@@ -117,6 +117,20 @@ class HandoffEvidenceTests(unittest.TestCase):
         CodexSessionAdapter()._observe_final(session, "Recommended next: None. This task is outside Modbus.")
         self.assertIsNone(next(event["recommended_skill"] for event in session.events if event["kind"] == "recommendation"))
 
+    def test_concise_plain_or_linked_recommendation_has_the_same_meaning(self):
+        scenario = load_campaign()["loaded_scenarios"][0]
+        session = seed_workspace(scenario, campaign_dir=ROOT / "tests/skill_usability", parent=self.root)
+        adapter = CodexSessionAdapter()
+        for final in ("Use **`parse-map`**. It preserves candidate source tokens.",
+                      "Use **[parse-map](../plugin/skills/parse-map/SKILL.md)**.",
+                      "Recommended next: [parse-map](../plugin/skills/parse-map/SKILL.md)"):
+            session.events.clear()
+            adapter._observe_final(session, final)
+            self.assertEqual("parse-map", next(event["recommended_skill"] for event in session.events if event["kind"] == "recommendation"))
+        session.events.clear()
+        adapter._observe_final(session, "Do not use parse-map for this unrelated request.")
+        self.assertFalse(any(event["kind"] == "recommendation" for event in session.events))
+
 
 if __name__ == "__main__":
     unittest.main()

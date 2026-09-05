@@ -919,7 +919,12 @@ class CodexSessionAdapter(SessionAdapter):
     def _observe_final(self, session: TrialSession, final: str) -> None:
         # Markdown decoration is presentation, not part of the skill name.
         plain = re.sub(r"[*`_]", "", final)
+        plain = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", plain)
         recommendation = re.search(r"Recommended next:\s*([a-z-]+)", plain, re.IGNORECASE)
+        if not recommendation:
+            recommendation = re.search(
+                r"(?:^|\n)\s*(?:Use|Run|Choose|Start with|I recommend|You should use)\s+(?:the\s+)?\$?([a-z][a-z-]+)",
+                plain, re.IGNORECASE)
         if recommendation:
             recommended = recommendation.group(1).lower()
             session.events.append({"kind": "recommendation", "recommended_skill": None if recommended == "none" else recommended})
