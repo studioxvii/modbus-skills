@@ -65,7 +65,7 @@ class RecoveryOracleTests(unittest.TestCase):
         self.assertTrue(result["dimensions"]["grouped_decisions"])
         self.assertTrue(result["recovery_evidence"]["proven"])
         self.assertEqual("same-case-resumed", result["recovery_evidence"]["disposition"])
-        self.assertIn("recovery-v2", result["oracle_version"])
+        self.assertEqual("recovery-v2", result["recovery_evidence"]["version"])
 
     def test_restart_labels_without_continuity_or_receipts_cannot_pass(self):
         for mutation in ("generic", "same-thread", "not-fresh", "hash-change", "old-state", "no-receipt", "wrong-resume", "missing-resume", "no-invocation", "repeated-parse"):

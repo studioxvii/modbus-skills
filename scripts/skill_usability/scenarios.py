@@ -20,6 +20,7 @@ from .sessions import (
     interrupt_and_continue,
     seed_workspace,
     tamper_durable_case,
+    record_transition,
 )
 
 
@@ -162,8 +163,9 @@ def run_trial(
             profile.get("handoff_policy") or "expected-refusal" in profile.get("completion_conditions", ())
         ):
             from .handoff_evidence import observe_handoff
-            session.events.append(observe_handoff(session.state.get("transcript", []),
-                plugin=session.plugin_root, work=session.work, snapshot=snapshot))
+            record_transition(session, observe_handoff(session.state.get("transcript", []),
+                plugin=session.plugin_root, work=session.work, snapshot=snapshot,
+                baseline=session.state.get("initial_workspace_state", {})))
         result = evaluate_trial(
             scenario=scenario,
             events=session.events if session else [],

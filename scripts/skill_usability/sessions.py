@@ -794,6 +794,12 @@ class CodexSessionAdapter(SessionAdapter):
             session.state["thread_id"] = result["thread"]["id"]
             session.state["actual_model"] = result.get("model")
             session.state["thread_first_turn"] = True
+            # The application may create empty protected control directories at
+            # thread start. Record these before the worker's first turn instead
+            # of attributing them to a user-visible skill output.
+            if "initial_workspace_state" not in session.state:
+                from .handoff_evidence import tree_state
+                session.state["initial_workspace_state"] = tree_state(session.work)
         except (RpcError, KeyError) as exc:
             self._release_rpc(session)
             raise PreflightUnavailable(str(exc)) from exc

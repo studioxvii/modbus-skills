@@ -11,7 +11,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from skill_usability.contracts import load_campaign  # noqa: E402
-from skill_usability.handoff_evidence import observe_handoff  # noqa: E402
+from skill_usability.handoff_evidence import observe_handoff, tree_state  # noqa: E402
 from skill_usability.oracles import evaluate_trial  # noqa: E402
 from skill_usability.sessions import CodexSessionAdapter, SessionError, seed_workspace  # noqa: E402
 
@@ -68,6 +68,19 @@ class HandoffEvidenceTests(unittest.TestCase):
                 path.symlink_to(self.plugin / "SKILL.md")
             self.assertIn("handoff-created-output", self.observe([])["issue_codes"])
             path.rmdir() if kind == "directory" else path.unlink()
+
+    def test_initial_host_directories_are_not_worker_output_but_changes_are(self):
+        for name in (".git", ".agents", ".codex"):
+            (self.work / name).mkdir()
+        baseline = tree_state(self.work)
+        def observe():
+            return observe_handoff([], plugin=self.plugin, work=self.work, snapshot=self.snapshot, baseline=baseline)
+        self.assertTrue(observe()["proven"])
+        (self.work / ".codex/new.txt").touch()
+        self.assertFalse(observe()["proven"])
+        (self.work / ".codex/new.txt").unlink()
+        (self.work / ".agents").rmdir()
+        self.assertFalse(observe()["proven"])
 
     def test_refusal_requires_actual_nonmutating_operation_evidence_and_handoff(self):
         scenario = copy.deepcopy(load_campaign()["loaded_scenarios"][5])
