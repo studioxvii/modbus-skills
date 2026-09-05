@@ -11,7 +11,9 @@ their documented roles.
 
 ## JSON
 
-Accept a root array or an object containing `registers` or `data`. Preserve known canonical fields and raw unknown source fields.
+Accept a root array or an object containing `registers`, `data`, `records`, or
+`points`. Candidate and canonical wrappers do not require a manual copy/rewrite
+before source inspection. Preserve known canonical fields and raw unknown source fields.
 
 ## XML
 

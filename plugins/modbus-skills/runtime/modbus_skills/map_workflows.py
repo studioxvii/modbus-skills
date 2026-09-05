@@ -1570,7 +1570,7 @@ def _normalize_one(
         }
     )
 
-    explicit_id = _text(record.get("logical_point_id", record.get("point_id", record.get("id"))))
+    explicit_id = _text(record.get("logical_point_id", record.get("point_id", record.get("oem_point_id", record.get("id")))))
     id_parts = {
         "raw_address": raw_address,
         "route_id": route_id,

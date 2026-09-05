@@ -409,6 +409,25 @@ class CompilerTests(unittest.TestCase):
         user_map = json.loads((self.root / "source-case" / "output" / "user-map.json").read_text())
         self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
 
+    def test_source_json_preserves_explicit_oem_point_id_for_typed_selection(self):
+        source = self.root / "explicit-oem.json"
+        source.write_text(json.dumps({"points": [{
+            "oem_point_id": "temperature", "name": "Temperature",
+            "protocol_offset": 10, "area": "holding-register", "datatype": "uint16",
+        }]}), encoding="utf-8")
+        compile_request = request()
+        del compile_request["oem_map"]
+        selection = compile_request.pop("selection_candidate")
+        del selection["oem_map_hash"]
+        selection["schema_version"] = "modbus-user-selection-template/v1"
+        compile_request["source"] = {"path": str(source), "format": "json"}
+        compile_request["selection_template"] = selection
+        case_path = self.root / "explicit-oem-case"
+        result = compile_user_map(compile_request, case_path)
+        self.assertEqual("offline-complete", result["state"])
+        user_map = json.loads((case_path / "output/user-map.json").read_text())
+        self.assertEqual(["temperature"], [point["oem_point_id"] for point in user_map["points"]])
+
     def test_numeric_addresses_never_invent_area_basis_or_confirmed_byte_order(self):
         source = self.root / "ambiguous.csv"
         source.write_text("Address,Name,Data Type,Access,Offset\n201,Pressure,float32,read-only,-10 kPa\n")
@@ -435,6 +454,24 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual("holding-register", point["area"])
         self.assertEqual(201, point["protocol_offset"])
         self.assertEqual("CDAB", point["byte_order"])
+
+    def test_read_write_header_excludes_explicit_write_only_points(self):
+        source = self.root / "access-header.csv"
+        source.write_text("Name,Protocol Offset,Area,Data Type,R/W\nReadable,1,holding-register,uint16,R\nCommand,2,holding-register,uint16,W\n")
+        compile_request = {
+            "schema_version": "modbus-compile-request/v1",
+            "source": {"path": str(source), "format": "csv"},
+            "selection_template": {"schema_version": "modbus-user-selection-template/v1",
+                                   "requested_measurements": ["all documented Modbus read points"], "mode": "all-readable"},
+            "targets": [], "target_options": {},
+        }
+        case = self.root / "access-header-case"
+        compile_user_map(compile_request, case)
+        points = json.loads((case / "output/user-map.json").read_text())["points"]
+        self.assertEqual([1], [point["protocol_offset"] for point in points])
+        self.assertEqual("read-only", points[0]["access"])
+        source_points = json.loads((case / "artifacts/oem-map.json").read_text())["points"]
+        self.assertEqual("write-only", next(point["access"] for point in source_points if point["protocol_offset"] == 2))
 
     def test_duplicate_vendor_labels_do_not_crash_the_whole_compile(self) -> None:
         # Real vendor register maps repeat labels (e.g. two rows both named

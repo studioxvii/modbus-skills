@@ -135,6 +135,16 @@ class CsvParserTests(unittest.TestCase):
 
 
 class JsonAndXmlParserTests(unittest.TestCase):
+    def test_json_point_and_candidate_wrappers_need_no_manual_rewrite(self):
+        for collection in ("points", "records"):
+            with self.subTest(collection=collection):
+                result = parse_json({collection: [{"name": "Temperature", "protocol_offset": 10,
+                                                   "datatype": "uint16", "source_note": "preserve me"}, "bad"]})
+                self.assertEqual(10, result["records"][0]["protocol_offset"])
+                self.assertEqual("preserve me", result["records"][0]["source_note"])
+                self.assertEqual(collection, result["records"][0]["_source"]["collection"])
+                self.assertEqual("record_not_object", result["rejected_rows"][0]["code"])
+
     def test_json_registers_and_nested_data_collections(self) -> None:
         fixture = parse_json((FIXTURES / "synthetic_registers.json").read_bytes())
         nested = parse_json({"data": {"registers": [{"address": 1}, "bad"]}})
