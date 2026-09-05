@@ -941,6 +941,7 @@ def _address_parse_evidence(parsed: Mapping[str, Any]) -> dict[str, Any]:
             "separator",
         )
         if parsed.get(field) is not None
+        and (field != "word_count" or parsed.get("second") is not None)
     }
     for field in ("first", "second"):
         component = parsed.get(field)
@@ -969,13 +970,14 @@ def _address_record_fields(
         "source_register": parsed["raw"],
         "address_convention": parsed["convention"],
         "address_number": parsed["number"],
-        "word_count": parsed["word_count"],
         "footnote_marker": parsed["footnote_marker"],
         "address_parse": _address_parse_evidence(parsed),
     }
+    if parsed.get("second") is not None:
+        fields["word_count"] = parsed["word_count"]
     if explicit_word_count not in (None, ""):
-        # A single start address supplies a default, not evidence of span one.
-        # Keep the printed cell (and its raw claims) rather than overwriting it.
+        # Only a printed width or actual consecutive pair supplies source width.
+        # A single start address's internal default is not a physical width claim.
         fields["word_count"] = explicit_word_count
         try:
             pair_conflict = (parsed.get("second") is not None

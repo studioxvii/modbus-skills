@@ -65,7 +65,8 @@ class PdfTableExtractionTests(unittest.TestCase):
         self.assertEqual(["001", "002", "257/258*"], [row["source_register"] for row in records])
         self.assertEqual([1, 2, 257], [row["address_number"] for row in records])
         self.assertTrue(all("protocol_offset" not in row for row in records))
-        self.assertEqual([1, 1, 2], [row["word_count"] for row in records])
+        # Single start addresses do not supply width; the printed pair does.
+        self.assertEqual([None, None, 2], [row.get("word_count") for row in records])
         self.assertEqual("R", records[1]["access"])
         self.assertEqual("ULong", records[1]["format"])
         self.assertEqual("pdfplumber-table/v1", records[2]["_source"]["parser_id"])
