@@ -496,10 +496,11 @@ class XlsxParserTests(unittest.TestCase):
             "Description,Access,Offset\nReady,R,12\n",
             filename="map.csv",
         )
-        self.assertEqual([], offset_result["records"])
-        rejected = offset_result["rejected_rows"][0]["record"]
-        self.assertNotIn("protocol_offset", rejected)
-        self.assertEqual("12", rejected["source_offset"])
+        self.assertEqual(1, len(offset_result["records"]))
+        candidate = offset_result["records"][0]
+        self.assertNotIn("protocol_offset", candidate)
+        self.assertNotIn("address", candidate)
+        self.assertEqual("12", candidate["source_offset"])
         self.assertIn("ambiguous_offset_header", {item["code"] for item in offset_result["warnings"]})
         explicit = parse_source("Name,Zero-based Offset,Engineering Offset\nReady,12,-10\n", filename="map.csv")
         self.assertEqual("12", explicit["records"][0]["protocol_offset"])
