@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from xml.etree import ElementTree as ET
 import zipfile
 
@@ -13,6 +14,7 @@ sys.path.insert(0, str(ROOT / "plugins/modbus-skills/runtime"))
 from modbus_skills.compiler import compile_user_map
 from modbus_skills.map_workflows import normalize_map
 from modbus_skills.parsers import ParseError, parse_xlsx
+from modbus_skills import parsers
 
 HEADERS = ["Name", "Protocol Offset", "Area", "Datatype", "Access", "Scale"]
 
@@ -282,9 +284,42 @@ class XlsxScaleDirectionTests(unittest.TestCase):
             self.parse(["Frequency engineering value = raw / 10."] * 257)
         with self.assertRaisesRegex(ParseError, "4096"):
             self.parse(["Frequency engineering value = raw / 10 " + "x" * 4096])
-        with self.assertRaisesRegex(ParseError, "100000"):
-            self.parse(["Integer scaling for readings (÷10 or ×100 as configured)."] * 200,
-                       [row(f"Point {index}", 10, index) for index in range(501)])
+        self.assertEqual(100000, parsers._SCALE_ASSOCIATION_LIMIT)
+        with patch.object(parsers, "_SCALE_ASSOCIATION_LIMIT", 3):
+            with self.assertRaisesRegex(ParseError, "3 point/conversion-note"):
+                self.parse(["Integer scaling for readings (÷10 or ×100 as configured)."] * 2,
+                           [row("First"), row("Second", 10, 1)])
+
+    def test_raw_note_byte_cap_covers_normalized_short_whitespace(self):
+        note = "Frequency engineering value = raw / 10."
+        maximum = 16 * 1024
+        _, candidate = self.parse([note + " " * (maximum - len(note))])
+        self.assertEqual([None], self.scales(candidate))
+        self.assertEqual(maximum, len(candidate["records"][0]["_claims"][-1]["conversion_notes"][0]["literal"].encode()))
+        for whitespace in (" " * maximum, "\u00a0" * (maximum // 2)):
+            with self.subTest(whitespace_bytes=len(whitespace.encode())):
+                with self.assertRaisesRegex(ParseError, "16 KiB raw UTF-8"):
+                    self.parse([note + whitespace])
+
+    def test_derived_evidence_budget_boundary_is_fail_closed(self):
+        note = "Integer scaling for readings (÷10 or ×100 as configured)."
+        _, ordinary = self.parse([note])
+        raw_note = ordinary["assumptions"][-1]["notes"][0]
+        serialized = json.dumps(raw_note, ensure_ascii=True, sort_keys=True, indent=2)
+        cost = len(serialized.encode()) + 32 * (serialized.count("\n") + 1) + 1024
+        self.assertEqual(8 * 1024 * 1024, parsers._SCALE_EVIDENCE_BYTES)
+        # One retained source note plus four provisioned per-association copies.
+        with patch.object(parsers, "_SCALE_EVIDENCE_BYTES", cost * 5):
+            _, at_boundary = self.parse([note])
+            self.assertEqual(ordinary, at_boundary)
+            with self.assertRaisesRegex(ParseError, "derived evidence budget"):
+                self.parse([note], [row("First"), row("Second", 10, 1)])
+        with patch.object(parsers, "_SCALE_EVIDENCE_BYTES", cost * 5 - 1):
+            with self.assertRaisesRegex(ParseError, "no candidate is returned"):
+                self.parse([note])
+        with patch.object(parsers, "_SCALE_EVIDENCE_BYTES", cost - 1):
+            with self.assertRaisesRegex(ParseError, "before point association"):
+                self.parse([note])
 
     def test_user_output_retains_grouped_evidence_and_escapes_notes(self):
         note = "Integer scaling for readings (÷10 or ×100 as configured). <script>[click](bad)</script>"

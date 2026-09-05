@@ -199,6 +199,8 @@ _MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 _SCALE_NOTE_LIMIT = 256
 _SCALE_NOTE_CHARS = 4096
 _SCALE_ASSOCIATION_LIMIT = 100000
+_SCALE_RAW_NOTE_BYTES = 16 * 1024
+_SCALE_EVIDENCE_BYTES = 8 * 1024 * 1024
 _SCALE_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 _SCALE_EQUATION = re.compile(
     rf"(?P<selector>.+?)\s+engineering value\s*=\s*raw\s*(?P<operator>[*/×÷])\s*"
@@ -217,6 +219,8 @@ def _xlsx_scale_note(value: Any, location: Mapping[str, Any], *, row_local: bool
     text = " ".join(value.split())
     if not _SCALE_CUE.match(text):
         return None
+    if len(value) > _SCALE_RAW_NOTE_BYTES or len(value.encode("utf-8")) > _SCALE_RAW_NOTE_BYTES:
+        raise ParseError("XLSX scalar conversion literal exceeds the 16 KiB raw UTF-8 evidence limit.")
     if len(text) > _SCALE_NOTE_CHARS:
         raise ParseError("XLSX scalar conversion statement exceeds the 4096 character evidence limit.")
     clauses: list[dict[str, Any]] = []
@@ -271,6 +275,18 @@ def _xlsx_scale_claims(
     """Bind exact names/physical rows once; unresolved scope stays conservative."""
     if not notes:
         return
+    # Charge complete escaped notes once, not on every point attachment. Four
+    # provisioned copies, 32 bytes per formatted line of nesting allowance, and
+    # 1024 bytes for bounded binding/scope metadata deliberately overestimate
+    # the note-bearing association graph. This is not a whole-artifact cap:
+    # unrelated point fields and other artifact content are outside this budget.
+    note_costs: dict[int, int] = {}
+    for note in notes:
+        serialized = json.dumps(note, ensure_ascii=True, sort_keys=True, indent=2)
+        note_costs[id(note)] = len(serialized.encode("utf-8")) + 32 * (serialized.count("\n") + 1) + 1024
+    evidence_bytes = sum(note_costs.values())
+    if evidence_bytes > _SCALE_EVIDENCE_BYTES:
+        raise ParseError("XLSX conversion-note evidence exceeds the 8 MiB derived evidence budget before point association.")
     by_name: dict[str, list[int]] = {}
     by_row: dict[tuple[str, int], int] = {}
     generic: list[int] = []
@@ -294,11 +310,17 @@ def _xlsx_scale_claims(
     attached: dict[int, list[dict[str, Any]]] = {}
     association_count = 0
 
-    def attach(index: int, evidence: dict[str, Any]) -> None:
-        nonlocal association_count
+    def attach(index: int, evidence: dict[str, Any], original_note: dict[str, Any]) -> None:
+        nonlocal association_count, evidence_bytes
         association_count += 1
         if association_count > _SCALE_ASSOCIATION_LIMIT:
-            raise ParseError("XLSX exceeds the 100000 point/conversion-note evidence association limit.")
+            raise ParseError(f"XLSX exceeds the {_SCALE_ASSOCIATION_LIMIT} point/conversion-note evidence association limit.")
+        evidence_bytes += 4 * note_costs[id(original_note)]
+        if evidence_bytes > _SCALE_EVIDENCE_BYTES:
+            raise ParseError(
+                "XLSX conversion-note associations exceed the 8 MiB derived evidence budget; "
+                f"no candidate is returned ({association_count} associations considered)."
+            )
         attached.setdefault(index, []).append(evidence)
     for note in notes:
         local = note["source_locator"]
@@ -309,7 +331,7 @@ def _xlsx_scale_claims(
                 name = " ".join(str(records[index].get("name", "")).split()).casefold()
                 consistent_selector = all(" ".join(clause["selector"].split()).casefold() == name for clause in note["clauses"])
                 attach(index, {**note, "binding": "physical-row",
-                               "scope": note["scope"] if consistent_selector else "unresolved"})
+                               "scope": note["scope"] if consistent_selector else "unresolved"}, note)
             continue
         resolved: list[tuple[int, dict[str, Any]]] = []
         for clause in note["clauses"]:
@@ -320,7 +342,7 @@ def _xlsx_scale_claims(
             resolved.append((targets[0], clause))
         if resolved:
             for index, clause in resolved:
-                attach(index, {**note, "clauses": [clause], "binding": "exact-unique-name"})
+                attach(index, {**note, "clauses": [clause], "binding": "exact-unique-name"}, note)
         else:
             possible = set(generic)
             if note.get("unparsed_named_equations"):
@@ -329,7 +351,7 @@ def _xlsx_scale_claims(
             for clause in note["clauses"]:
                 possible.update(by_name.get(" ".join(clause["selector"].split()).casefold(), []))
             for index in sorted(possible):
-                attach(index, {**note, "scope": "unresolved", "binding": "possible-workbook-scale-scope"})
+                attach(index, {**note, "scope": "unresolved", "binding": "possible-workbook-scale-scope"}, note)
     for index, evidence in attached.items():
         record = records[index]
         location = record["_source"]
