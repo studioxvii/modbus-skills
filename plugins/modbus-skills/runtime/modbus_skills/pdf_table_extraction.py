@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from fractions import Fraction
 import json
 import re
 from pathlib import Path
@@ -61,6 +62,7 @@ PDF_HEADER_ALIASES = {
     "unit": "units",
     "scale": "scale",
     "scale factor": "scale",
+    "engineering offset": "engineering_offset",
     "range": "range",
     "description": "description",
     "meaning": "description",
@@ -78,6 +80,7 @@ PDF_HEADER_ALIASES = {
     "area": "area",
     "unit id": "unit_id",
     "word count": "word_count",
+    "words": "word_count",
     "byte order": "byte_order",
     "bit order": "bit_order",
 }
@@ -511,7 +514,7 @@ def parse_pdf_table_evidence(
                 extra_fields.setdefault(header, raw_unit)
         record: dict[str, Any] = {
             **{field: value for field, value in values.items() if value},
-            **_address_record_fields(parsed_address),
+            **_address_record_fields(parsed_address, explicit_word_count=values.get("word_count")),
             "name": name,
             "description": description,
             "_claims": claims,
@@ -521,7 +524,10 @@ def parse_pdf_table_evidence(
             record["_extra"] = extra_fields
         if trailing:
             record["notes"] = " | ".join(trailing)
-        records.append(record)
+        if record.get("code") == "pdf-address-width-conflict":
+            quarantined.append(record)
+        else:
+            records.append(record)
     return {"records": records, "quarantined_records": quarantined}
 
 
@@ -956,7 +962,9 @@ def _address_parse_evidence(parsed: Mapping[str, Any]) -> dict[str, Any]:
     return evidence
 
 
-def _address_record_fields(parsed: Mapping[str, Any]) -> dict[str, Any]:
+def _address_record_fields(
+    parsed: Mapping[str, Any], *, explicit_word_count: Any = None
+) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "source_register": parsed["raw"],
         "address_convention": parsed["convention"],
@@ -965,6 +973,19 @@ def _address_record_fields(parsed: Mapping[str, Any]) -> dict[str, Any]:
         "footnote_marker": parsed["footnote_marker"],
         "address_parse": _address_parse_evidence(parsed),
     }
+    if explicit_word_count not in (None, ""):
+        # A single start address supplies a default, not evidence of span one.
+        # Keep the printed cell (and its raw claims) rather than overwriting it.
+        fields["word_count"] = explicit_word_count
+        try:
+            pair_conflict = (parsed.get("second") is not None
+                             and Fraction(str(explicit_word_count)) != parsed["word_count"])
+        except (ValueError, ZeroDivisionError):
+            pair_conflict = False  # Keep invalid raw counts for normalization holds.
+        if pair_conflict:
+            # A true consecutive address pair is independent span evidence.
+            # Preserve both claims; the envelope must not accept this row.
+            fields["code"] = "pdf-address-width-conflict"
     if parsed.get("area") is not None:
         fields["area"] = parsed["area"]
     if parsed.get("source_offset"):

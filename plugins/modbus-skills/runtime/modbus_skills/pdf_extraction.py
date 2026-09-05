@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from itertools import chain
+from fractions import Fraction
 import os
 import re
 import selectors
@@ -46,7 +47,7 @@ _CONTINUATION_ROW = re.compile(
 _HEADER_ALIASES = PDF_HEADER_ALIASES
 _ADDRESS_FIELDS = ("address", "protocol_offset", "display_address", "source_offset")
 _MATERIAL_FIELDS = frozenset(
-    {"address", "protocol_offset", "display_address", "name", "area", "word_count", "datatype", "access"}
+    {"address", "protocol_offset", "display_address", "name", "area", "word_count", "datatype", "access", "engineering_offset"}
 )
 _PAGE_TOKEN = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
 _VERSION = re.compile(r"pdftotext version ([0-9]+(?:\.[0-9]+){1,3})", re.IGNORECASE)
@@ -65,6 +66,7 @@ _GRID_RECOVERY_FINDING = {
     "message": "Grid-aware table extraction supplied register-table structure alongside text parsing.",
 }
 _QUARANTINE_HOLD_MESSAGES = {
+    "pdf-address-width-conflict": "Resolve the conflict between the explicit address pair and printed word count.",
     "pdf-prior-source-quarantine": "This source row already has unresolved parser evidence; later claims cannot release it.",
     "pdf-grid-column-ambiguous": "Resolve conflicting grid columns before these rows become map points.",
     "pdf-grid-type-unresolved": "Declare the datatype or access meaning for this address-and-name table.",
@@ -391,7 +393,7 @@ def parse_layout_rows(
                 if not field.startswith("_extra:")
                 and field not in _ADDRESS_FIELDS
             }
-            record.update(_address_record_fields(parsed_address))
+            record.update(_address_record_fields(parsed_address, explicit_word_count=record.get("word_count")))
             if values.get("source_offset"):
                 record["source_offset"] = values["source_offset"]
             if address_field == "protocol_offset":
@@ -410,7 +412,7 @@ def parse_layout_rows(
             if extra:
                 record["_extra"] = extra
             locator = {"page": page_number, "line": line_number, "region": f"p{page_number}:l{line_number}"}
-            record["_claims"] = [_claim(parser_id, field, str(value), locator) for field, value in record.items() if not field.startswith("_")]
+            record["_claims"] = [_claim(parser_id, field, str(value), locator) for field, value in record.items() if not field.startswith("_") and field != "code"]
             record["_source"] = {
                 "format": "pdf",
                 "page": page_number,
@@ -799,7 +801,7 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
                 if not field.startswith("_extra:")
                 and field not in _ADDRESS_FIELDS
             }
-            record.update(_address_record_fields(parsed_address))
+            record.update(_address_record_fields(parsed_address, explicit_word_count=record.get("word_count")))
             if values.get("source_offset"):
                 record["source_offset"] = values["source_offset"]
             if address_field == "protocol_offset":
@@ -1008,6 +1010,11 @@ def _identity(record: Mapping[str, Any]) -> tuple[int, str, str]:
 def _equivalent(field: str, left: Any, right: Any) -> bool:
     def normalized(value: Any) -> str:
         text = re.sub(r"\s+", " ", str(value).strip()).casefold()
+        if field == "engineering_offset":
+            try:
+                return str(Fraction(text))
+            except (ValueError, ZeroDivisionError):
+                return text
         if field in {"address", "protocol_offset", "display_address", "word_count"}:
             try:
                 return str(int(text, 10 if re.fullmatch(r"[+-]?\d+", text) else 0))
@@ -1295,6 +1302,10 @@ def _envelope(
     discovery_complete: bool = True,
 ) -> dict[str, Any]:
     page_selection = {"first_page": page_range[0], "last_page": page_range[1]} if page_range else None
+    width_conflicts = [row for row in records if row.get("code") == "pdf-address-width-conflict"]
+    if width_conflicts:
+        records = [row for row in records if row.get("code") != "pdf-address-width-conflict"]
+        quarantined = [*quarantined, *width_conflicts]
     coverage = _source_coverage(
         records, rejected, quarantined, discovered_pages, discovery_complete
     )
