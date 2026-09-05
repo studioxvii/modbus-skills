@@ -25,13 +25,21 @@
    requesting a page selection. If one-pass output exceeds its bound, scan sequential
    256-page chunks for at most 4,096 pages or 180 seconds.
 4. Parse strict `-layout` rows, then independently parse `-bbox-layout` coordinates.
-5. When both text interpretations produce no viable rows, automatically recover drawn
-   table grids with `pdfplumber`. This is the same shared fallback used by
-   `compile-user-map`; never recreate it as a temporary per-manual script.
+5. Collect drawn table-grid evidence with `pdfplumber` within the bounded source
+   scope, including when text parsers already found rows; reconcile independent
+   claims rather than treating an early nonempty pass as complete coverage. This
+   is shared with `compile-user-map`; do not recreate it per manual.
 6. Preserve field claims with the parser ID and physical source locator. A failed
    strict pass is non-blocking when coordinate recovery passes its gates.
 7. Auto-resolve formatting-only agreement. Quarantine only conflicts affecting row
    identity, address, area, width, datatype, or access; keep unaffected rows usable.
+
+A blank or missing grid cell does not inherit the preceding row's value. A common
+cell needs same-source geometry proving that one drawn cell spans the affected
+rows, with matching glyphs and no contradictory cell or separator. Preserve the
+original claim locator and the target-row proof; without that proof, keep the
+field unknown. These proofs have bounded work and evidence size, not unlimited
+permission to duplicate page content.
 
 The artifact records the extractor receipt, discovered pages and table regions,
 accepted rows, rejected or quarantined rows, and a `source_coverage` summary. A
