@@ -79,6 +79,14 @@ def build_report(
     )
     if not complete:
         issue_codes.append("campaign-coverage-incomplete")
+    integrity_issues = list(campaign.get("integrity_issue_codes", ()))
+    if any(trial.get("status") == "passed" and not trial.get("plugin_hash") for trial in trials):
+        integrity_issues.append("campaign-passed-build-hash-missing")
+    if any(trial.get("plugin_hash") and trial.get("plugin_hash") != plugin_hash for trial in trials):
+        integrity_issues.append("campaign-build-hash-mismatch")
+    if any(trial.get("status") == "passed" for trial in trials) and not plugin_hash:
+        integrity_issues.append("campaign-build-hash-missing")
+    issue_codes = sorted(set(issue_codes + integrity_issues))
     public_trials = [
         {
             "scenario_id": trial.get("scenario_id"),
@@ -92,6 +100,7 @@ def build_report(
             "tool_calls": trial.get("tool_calls"),
             "final_words": trial.get("final_words"),
             "actual_model": trial.get("actual_model"),
+            "plugin_hash": trial.get("plugin_hash"),
         }
         for trial in trials
     ]
@@ -102,7 +111,7 @@ def build_report(
         "mode": mode,
         "adapter": adapter,
         "worker_model": "fake" if mode == "deterministic" else campaign["worker_model"],
-        "status": aggregate_status(statuses if complete else [*statuses, "inconclusive"]),
+        "status": aggregate_status(statuses if complete and not integrity_issues else [*statuses, "inconclusive"]),
         "evidence_class": "deterministic" if mode == "deterministic" else "simulated-user",
         "issue_codes": issue_codes,
         "trials": public_trials,
@@ -111,6 +120,7 @@ def build_report(
             "scenarios": [trial["scenario_id"] for trial in public_trials],
         },
         "hashes": {"plugin": plugin_hash},
+        "input_snapshot": campaign.get("input_snapshot"),
         "versions": {
             "campaign": campaign.get("version"),
             "adapter": adapter,

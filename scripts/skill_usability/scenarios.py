@@ -73,6 +73,7 @@ def run_trial(
     budget: Mapping[str, Any],
     repetition: int = 1,
     evidence_root: Path | None = None,
+    plugin_source: Path | None = None,
 ) -> dict[str, Any]:
     directory = campaign_dir or CAMPAIGN_DIR
     started = time.monotonic()
@@ -85,7 +86,8 @@ def run_trial(
     try:
         try:
             adapter.preflight()
-            session = seed_workspace(scenario, campaign_dir=directory, parent=parent)
+            session = seed_workspace(scenario, campaign_dir=directory, parent=parent,
+                                     plugin_source=plugin_source)
             session.state["deadline"] = started + int(budget.get("max_seconds", 120))
             adapter.start(session)
             worker_started = True

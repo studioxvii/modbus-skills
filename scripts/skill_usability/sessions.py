@@ -309,14 +309,18 @@ def tamper_durable_case(session: TrialSession) -> None:
     })
 
 
-def copy_plugin(destination: Path) -> Path:
+def copy_plugin(destination: Path, *, source: Path | None = None) -> Path:
+    source = source or PLUGIN_SOURCE
+    before = hash_tree(source)
     plugin = destination / "plugin"
     shutil.copytree(
-        PLUGIN_SOURCE,
+        source,
         plugin,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
         dirs_exist_ok=False,
     )
+    if before != hash_tree(source) or before != hash_tree(plugin):
+        raise SessionError("plugin changed while copying the source build")
     return plugin
 
 
@@ -325,19 +329,24 @@ def seed_workspace(
     *,
     campaign_dir: Path,
     parent: Path,
+    plugin_source: Path | None = None,
 ) -> TrialSession:
     workspace = Path(tempfile.mkdtemp(prefix="skill-usability-", dir=parent))
     try:
-        return _seed_workspace(scenario, campaign_dir=campaign_dir, workspace=workspace)
+        return _seed_workspace(scenario, campaign_dir=campaign_dir, workspace=workspace,
+                               plugin_source=plugin_source)
     except BaseException:
         shutil.rmtree(workspace)
         raise
 
 
 def _seed_workspace(
-    scenario: Mapping[str, Any], *, campaign_dir: Path, workspace: Path
+    scenario: Mapping[str, Any], *, campaign_dir: Path, workspace: Path,
+    plugin_source: Path | None = None,
 ) -> TrialSession:
-    plugin = copy_plugin(workspace)
+    plugin_source = plugin_source or PLUGIN_SOURCE
+    source_hash = hash_tree(plugin_source)
+    plugin = copy_plugin(workspace, source=plugin_source)
     fixtures = workspace / "fixtures"
     work = workspace / "work"
     home = workspace / "home"
@@ -350,10 +359,14 @@ def _seed_workspace(
     for fixture in scenario.get("fixtures", ()):
         source = (campaign_dir / fixture["path"]).resolve()
         target = fixtures / Path(fixture["path"]).name
+        if target.exists():
+            raise SessionError("fixture basenames collide in the trial workspace")
+        before = hashlib.sha256(source.read_bytes()).hexdigest()
         shutil.copy2(source, target)
-    source_hash = hash_tree(PLUGIN_SOURCE)
+        if before != hashlib.sha256(source.read_bytes()).hexdigest() or before != hashlib.sha256(target.read_bytes()).hexdigest():
+            raise SessionError("fixture changed while seeding the trial workspace")
     loaded_hash = hash_tree(plugin)
-    if source_hash != loaded_hash:
+    if source_hash != loaded_hash or source_hash != hash_tree(plugin_source):
         raise SessionError("installed plugin hash does not match the source build")
     return TrialSession(
         session_id=str(uuid.uuid4()),

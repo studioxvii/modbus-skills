@@ -19,6 +19,30 @@ from skill_usability.sessions import CodexSessionAdapter  # noqa: E402
 
 
 class SkillUsabilityReportingTests(unittest.TestCase):
+    def test_missing_or_different_trial_build_hashes_cannot_all_pass(self):
+        campaign = load_campaign()
+        for changed_hash in (None, "different-build"):
+            with self.subTest(changed_hash=changed_hash):
+                trials = [{"scenario_id": name, "status": "passed", "repetition": 1,
+                           "plugin_hash": "frozen-build"} for name in campaign["scenarios"]]
+                trials[-1]["plugin_hash"] = changed_hash
+                report = build_report(campaign=campaign, trials=trials, mode="deterministic",
+                                      adapter="fake", plugin_hash="frozen-build")
+                self.assertEqual("inconclusive", report["status"])
+                self.assertEqual(changed_hash, report["trials"][-1]["plugin_hash"])
+                expected = "campaign-passed-build-hash-missing" if changed_hash is None else "campaign-build-hash-mismatch"
+                self.assertIn(expected, report["issue_codes"])
+
+    def test_report_hash_must_bind_the_passed_build(self):
+        campaign = load_campaign()
+        trials = [{"scenario_id": name, "status": "passed", "plugin_hash": "frozen-build"}
+                  for name in campaign["scenarios"]]
+        for campaign_hash in (None, "wrong-build"):
+            report = build_report(campaign=campaign, trials=trials, mode="deterministic",
+                                  adapter="fake", plugin_hash=campaign_hash)
+            self.assertEqual("inconclusive", report["status"])
+            self.assertIn("campaign-build-hash-mismatch", report["issue_codes"])
+
     def test_completed_trial_checkpoint_survives_later_runner_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "out"
