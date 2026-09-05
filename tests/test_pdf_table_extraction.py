@@ -39,7 +39,7 @@ class PdfTableExtractionTests(unittest.TestCase):
         self.assertEqual("p4:t0:r1", first["_source"]["region"])
         self.assertEqual("p4:t1:r1", second["_source"]["region"])
 
-    def test_parses_oem_grid_with_pairs_stars_and_merged_cells(self) -> None:
+    def test_parses_pairs_stars_without_inventing_geometry_free_merges(self) -> None:
         table = [
             [
                 "Model A",
@@ -67,8 +67,9 @@ class PdfTableExtractionTests(unittest.TestCase):
         self.assertTrue(all("protocol_offset" not in row for row in records))
         # Single start addresses do not supply width; the printed pair does.
         self.assertEqual([None, None, 2], [row.get("word_count") for row in records])
-        self.assertEqual("R", records[1]["access"])
-        self.assertEqual("ULong", records[1]["format"])
+        # None is missing text, not evidence of a drawn common body cell.
+        self.assertIsNone(records[1].get("access"))
+        self.assertIsNone(records[1].get("format"))
         self.assertEqual("pdfplumber-table/v1", records[2]["_source"]["parser_id"])
         self.assertEqual("p19:t0:r4", records[2]["_source"]["region"])
 
@@ -78,15 +79,16 @@ class PdfTableExtractionTests(unittest.TestCase):
         self.assertEqual([], parse_pdf_table(table, page_number=18, table_index=0))
 
     def test_prepares_explicit_ulong_word_pair_without_assuming_offset_convention(self) -> None:
-        table = [
-            ["REG.", "R/W", "Format", "Description"],
-            ["001", "R", "ULong", "Energy (MSR)"],
-            ["002", None, None, "Energy (LSR)"],
-        ]
-
-        prepared = prepare_pdf_records(
-            {"records": parse_pdf_table(table, page_number=19, table_index=0)}
-        )["records"]
+        # Replace the old geometry-free None assumption with an actual drawn
+        # common Format/Access cell; keep every original pair assertion.
+        import tempfile
+        from test_pdf_merged_cell_proof import draw_pdf
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "pair.pdf"
+            draw_pdf(source, data=[["REG.", "Description", "Format", "R/W", "Units"],
+                                  ["001", "Energy (MSR)", "ULong", "R", "kWh"],
+                                  ["002", "Energy (LSR)", "", "", ""]], merged_columns=[2, 3, 4])
+            prepared = prepare_pdf_records(extract_pdf_table_evidence(source))["records"]
 
         self.assertEqual(1, len(prepared))
         self.assertEqual("001/002", prepared[0]["source_register"])
@@ -280,7 +282,7 @@ class PdfTableExtractionTests(unittest.TestCase):
             ["address"], evidence["quarantined_records"][0]["fields"]
         )
 
-    def test_inherited_cells_reuse_the_original_source_claim(self) -> None:
+    def test_explicit_blanks_keep_their_own_source_claim(self) -> None:
         table = [
             ["Start", "R/W", "Type", "Units", "Description"],
             ["17", "R", "int16", "uF", "First"],
@@ -292,10 +294,10 @@ class PdfTableExtractionTests(unittest.TestCase):
             claim["field"]: claim for claim in evidence["records"][1]["_claims"]
         }
 
-        self.assertEqual("R", claims["access"]["raw_value"])
-        self.assertEqual("int16", claims["format"]["raw_value"])
-        self.assertEqual("uF", claims["units"]["raw_value"])
-        self.assertEqual("p10:t0:r1", claims["units"]["source_locator"]["region"])
+        self.assertEqual("", claims["access"]["raw_value"])
+        self.assertEqual("", claims["format"]["raw_value"])
+        self.assertEqual("", claims["units"]["raw_value"])
+        self.assertEqual("p10:t0:r2", claims["units"]["source_locator"]["region"])
 
     def test_selected_page_and_worker_time_are_bounded(self) -> None:
         with self.assertRaisesRegex(PdfTableExtractionError, "256 selected pages"):

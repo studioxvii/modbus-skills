@@ -101,6 +101,9 @@ _PREFIX_BY_AREA = {value: key for key, value in _AREA_BY_PREFIX.items()}
 _MAX_GRID_PAGES = 256
 _MAX_GRID_RECORDS = 50_000
 _MAX_GRID_OUTPUT_BYTES = 32_000_000
+# Bound duplicated source proof before associating any common-cell claims.
+_MAX_MERGED_PROOF_BYTES = 4_000_000
+_MAX_MERGED_INDEX_INCIDENCES = 500_000
 _GRID_TIMEOUT_SECONDS = 60
 
 
@@ -198,6 +201,7 @@ def _extract_pdf_table_rows_in_process(
 
     selected = set(pages) if pages is not None else None
     evidence = {"records": [], "quarantined_records": []}
+    merged_budget = [0]
     try:
         with pdfplumber.open(path) as document:
             source_sha256 = None
@@ -215,10 +219,23 @@ def _extract_pdf_table_rows_in_process(
                     continue
                 for table_index, table in enumerate(page.find_tables()):
                     cells, header_recovery = _recover_offset_header(page, table)
+                    merged = _proved_common_cells(
+                        page, table, cells, page_number, table_index,
+                        source_sha256 or "0" * 64, merged_budget,
+                    )
+                    if merged.claims:
+                        if source_sha256 is None:
+                            position = document.stream.tell()
+                            document.stream.seek(0)
+                            source_sha256 = file_digest(document.stream, "sha256").hexdigest()
+                            document.stream.seek(position)
+                        for claim in merged.claims.values():
+                            claim["merged_cell_evidence"]["source_sha256"] = source_sha256
                     parsed = parse_pdf_table_evidence(
                         cells,
                         page_number=page_number,
                         table_index=table_index,
+                        _common_cells=merged,
                     )
                     if header_recovery is not None:
                         header_evidence = {
@@ -268,6 +285,175 @@ def _extract_pdf_table_rows_in_process(
             "pdfplumber could not extract bounded table geometry"
         ) from exc
     return evidence
+
+
+class _CommonCells:
+    """Invocation-owned geometry registry, never decoded from row evidence."""
+
+    def __init__(self, table: Any, page: int, index: int):
+        self.table, self.page, self.index = table, page, index
+        self.claims: dict[tuple[int, str], dict[str, Any]] = {}
+
+
+def _proved_common_cells(
+    page: Any, table: Any, cells: Sequence[Sequence[Any]],
+    page_number: int, table_index: int, source_sha256: str, budget: list[int],
+) -> _CommonCells:
+    """Associate only uniquely owned, drawn same-table spanning body cells.
+
+    Row/column indexes retain every intersecting glyph/edge, including boundary
+    crossings. No preceding-value state or None sentinel is merge authority.
+    """
+    result = _CommonCells(cells, page_number, table_index)
+    header, columns, _extras, _confident = _find_header(cells)
+    if columns is None:
+        return result
+    rows = list(getattr(table, "rows", ()))
+    if len(rows) != len(cells) or header >= len(rows):
+        return result
+
+    def valid(box: Any) -> bool:
+        return (box is not None and len(box) == 4
+                and all(isinstance(v, (int, float)) and math.isfinite(v) for v in box)
+                and box[0] < box[2] and box[1] < box[3])
+
+    heads = rows[header].cells
+    if not heads or any(not valid(box) for box in heads):
+        return result
+    if any(left[2] != right[0] for left, right in zip(heads, heads[1:])):
+        return result
+    boundaries = []
+    for row in rows:
+        boxes = [box for box in row.cells if box is not None]
+        if not boxes or any(not valid(box) for box in boxes):
+            return result
+        top = min(box[1] for box in boxes)
+        if boundaries and top <= boundaries[-1]:
+            return result
+        boundaries.append(top)
+    if not valid(table.bbox) or table.bbox[3] <= boundaries[-1]:
+        return result
+    boundaries.append(table.bbox[3])
+    boundary_index = {value: index for index, value in enumerate(boundaries)}
+    boxes_by_column: list[list[tuple[int, int, Any]]] = [[] for _ in heads]
+    original_boxes = [tuple(box) for box in table.cells]
+    if len(set(original_boxes)) != len(original_boxes):
+        return result
+    remaining = set(original_boxes)
+    for row_index, row in enumerate(rows):
+        if len(row.cells) != len(heads) or len(cells[row_index]) != len(heads):
+            return result
+        for column, box in enumerate(row.cells):
+            if box is None:
+                continue
+            if (tuple(box) not in remaining or box[1] != boundaries[row_index]
+                    or box[3] not in boundary_index
+                    or (box[0], box[2]) != (heads[column][0], heads[column][2])):
+                return result
+            remaining.remove(tuple(box))
+            end = boundary_index[box[3]]
+            previous = boxes_by_column[column]
+            if end <= row_index or (previous and previous[-1][1] > row_index):
+                return result
+            previous.append((row_index, end, box))
+    if remaining or any(head[1] != boundaries[header] or head[3] != boundaries[header+1] for head in heads):
+        return result
+    eligible = [(field, items[0][0], items[0][1]) for field, items in columns.items()
+                if field in _INHERITED_FIELDS and len(items) == 1]
+    if not any(end > start + 1 and start > header
+               for _field, column, _label in eligible
+               for start, end, _box in boxes_by_column[column]):
+        return result
+    # Sparse two-dimensional indexes, not all rows times all page glyphs.
+    glyph_index: dict[tuple[int, int], list[int]] = {}
+    edge_index: dict[tuple[int, int], list[int]] = {}
+    chars, edges = list(page.chars), list(getattr(page, "edges", ()))
+    if not edges:
+        return result
+    xstarts, xends = [b[0] for b in heads], [b[2] for b in heads]
+    row_tops, row_bottoms = boundaries[:-1], boundaries[1:]
+    incidences = 0
+    for values, index in ((chars, glyph_index), (edges, edge_index)):
+        for number, item in enumerate(values):
+            box = (item.get("x0"), item.get("top"), item.get("x1"), item.get("bottom"))
+            if (any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in box)
+                    or box[0] > box[2] or box[1] > box[3]):
+                return result
+            for row in range(bisect_left(row_bottoms, box[1]), bisect_right(row_tops, box[3])):
+                for column in range(bisect_left(xends, box[0]), bisect_right(xstarts, box[2])):
+                    incidences += 1
+                    if incidences > _MAX_MERGED_INDEX_INCIDENCES:
+                        raise PdfTableExtractionError("merged-cell evidence budget exceeded while indexing geometry")
+                    index.setdefault((row, column), []).append(number)
+
+    def glyphs_for(box: Any, column: int, start: int, end: int, literal: str):
+        numbers = {n for row in range(start, end) for n in glyph_index.get((row, column), ())}
+        glyphs = []
+        for number in sorted(numbers):
+            char = chars[number]
+            if not char.get("text", "").strip():
+                continue
+            x0, top, x1, bottom = char["x0"], char["top"], char["x1"], char["bottom"]
+            if x0 >= box[2] or x1 <= box[0] or top >= box[3] or bottom <= box[1]:
+                continue
+            if (not char.get("upright", True) or x0 < box[0] or x1 > box[2]
+                    or top < box[1] or bottom > box[3]):
+                return None
+            glyphs.append({"text": char["text"], "bbox": [x0, top, x1, bottom]})
+        glyphs.sort(key=lambda glyph: (glyph["bbox"][1], glyph["bbox"][0]))
+        if not glyphs or "".join(g["text"] for g in glyphs) != re.sub(r"\s+", "", literal):
+            return None
+        return glyphs
+
+    def locator(row: int) -> dict[str, Any]:
+        return {"page": page_number, "row": row, "region": f"p{page_number}:t{table_index}:r{row}"}
+
+    for field, column, label in eligible:
+        header_glyphs = glyphs_for(heads[column], column, header, header+1, _clean(label))
+        if header_glyphs is None:
+            continue
+        for start, end, box in boxes_by_column[column]:
+            if start <= header or end <= start + 1:
+                continue
+            literal = _clean(cells[start][column])
+            if not literal or any(cells[row][column] is not None or rows[row].cells[column] is not None
+                                  for row in range(start+1, end)):
+                continue
+            numbers = {n for row in range(start, end) for n in edge_index.get((row, column), ())}
+            if any((edge["orientation"] == "h" and box[1] < edge["top"] < box[3]
+                    and edge["x0"] < box[2] and edge["x1"] > box[0])
+                   or (edge["orientation"] == "v" and box[0] < edge["x0"] < box[2]
+                       and edge["top"] < box[3] and edge["bottom"] > box[1])
+                   for edge in (edges[n] for n in numbers)):
+                continue
+            glyphs = glyphs_for(box, column, start, end, literal)
+            if glyphs is None:
+                continue
+            # Bound strings/glyph duplication before building or associating the
+            # repeated proof. JSON escapes at most twelve bytes per code point;
+            # the fixed allowance covers keys, locators and finite PDF numbers.
+            size = (4096 + 36 * (len(literal) + len(str(label)))
+                    + sum(256 + 12 * len(g["text"])
+                          + sum(len(str(v)) for v in g["bbox"])
+                          for g in (*glyphs, *header_glyphs)))
+            required = size * (end-start-1)
+            if budget[0] + required > _MAX_MERGED_PROOF_BYTES:
+                raise PdfTableExtractionError("merged-cell evidence budget exceeded before claim association")
+            budget[0] += required
+            base = {"method": "same-source-spanning-cell/v1", "source_sha256": source_sha256,
+                    "source_locator": locator(start), "source_cell_bbox": list(box),
+                    "raw_header": label, "raw_value": literal, "glyphs": glyphs,
+                    "header_cell_bbox": list(heads[column]), "header_glyphs": header_glyphs}
+            for target in range(start+1, end):
+                proof = {**base, "target_locator": locator(target),
+                         "target_row_band": boundaries[target:target+2]}
+                result.claims[(target, field)] = {
+                    "parser_id": "pdfplumber-table/v1", "field": field,
+                    "value": literal, "raw_value": literal, "raw_header": label,
+                    "column_index": column, "source_locator": locator(start),
+                    "merged_cell_evidence": proof,
+                }
+    return result
 
 
 def _prepare_description_cell_geometry(
@@ -451,7 +637,8 @@ def parse_pdf_table(
 
 
 def parse_pdf_table_evidence(
-    table: Sequence[Sequence[Any]], *, page_number: int, table_index: int
+    table: Sequence[Sequence[Any]], *, page_number: int, table_index: int,
+    _common_cells: _CommonCells | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Parse one grid table and retain ambiguous rows separately."""
 
@@ -462,7 +649,9 @@ def parse_pdf_table_evidence(
         return {"records": [], "quarantined_records": []}
     records: list[dict[str, Any]] = []
     quarantined: list[dict[str, Any]] = []
-    inherited: dict[str, tuple[str, dict[str, Any]]] = {}
+    common = (_common_cells.claims if type(_common_cells) is _CommonCells
+              and _common_cells.table is table and _common_cells.page == page_number
+              and _common_cells.index == table_index else {})
     for row_index, raw_row in enumerate(table[header_index + 1 :], start=header_index + 1):
         row = list(raw_row)
         resolved, conflicts = _resolve_cells(row, columns)
@@ -510,9 +699,9 @@ def parse_pdf_table_evidence(
                 value = address_text
             else:
                 value = resolved.get(field, "")
-            inherited_claim = inherited.get(field) if not value else None
-            if field in _INHERITED_FIELDS and inherited_claim is not None:
-                value, claim = inherited_claim
+            claim = common.get((row_index, field)) if not value else None
+            if claim is not None and _cell(row, claim["column_index"]) is None:
+                value = claim["value"]
                 claims.append(dict(claim))
                 values[field] = value
                 continue
@@ -540,8 +729,6 @@ def parse_pdf_table_evidence(
                 },
             }
             claims.append(claim)
-            if field in _INHERITED_FIELDS and value:
-                inherited[field] = (value, claim)
         name = values.get("name", "")
         description = values.get("description", "")
         if not name and not description:
