@@ -455,7 +455,10 @@ def parse_layout_rows(
                 record.pop("display_address", None)
                 record["address_convention"] = "protocol-offset"
                 record["source_address"] = {
-                    "raw": address,
+                    # A validated pair supplies one starting address and a
+                    # width; the complete token remains in source_register,
+                    # address_parse, and the original field claims.
+                    "raw": parsed_address["first"]["raw"] if parsed_address.get("second") is not None else address,
                     "convention": "protocol-offset",
                 }
             if record.get("name") in (None, ""):
@@ -863,7 +866,7 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
                 record.pop("display_address", None)
                 record["address_convention"] = "protocol-offset"
                 record["source_address"] = {
-                    "raw": address,
+                    "raw": parsed_address["first"]["raw"] if parsed_address.get("second") is not None else address,
                     "convention": "protocol-offset",
                 }
             if record.get("name") in (None, ""):
