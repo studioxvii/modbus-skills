@@ -247,6 +247,60 @@ class NodeRedLiveCampaignTests(unittest.TestCase):
         self.assertEqual(2, len(deployments))
         self.assertEqual([{"id": "original"}], deployments[-1])
 
+    def test_admin_binds_global_clients_without_process_environment(self) -> None:
+        flow = [
+            {"id": "tab", "type": "tab", "disabled": True},
+            {"id": "inject", "type": "inject", "once": False},
+        ]
+        environment = {}
+        for route, port in (("A", "5502"), ("B", "5503")):
+            flow.extend([
+                {"id": route, "type": "modbus-client", "tcpHost": "${MODBUS_" + route + "_HOST}",
+                 "tcpPort": "${MODBUS_" + route + "_PORT}"},
+                {"id": "read" + route, "type": "modbus-flex-getter", "fc": 3, "server": route},
+            ])
+            environment.update({f"MODBUS_{route}_HOST": "127.0.0.1", f"MODBUS_{route}_PORT": port})
+        before = json.dumps(flow, sort_keys=True)
+        original = [{"id": "original", "nested": {"unchanged": True}}]
+        admin = NodeRedAdminClient(wait=lambda _: None)
+        deployments = []
+        with patch.dict("os.environ", {}, clear=True), patch.object(admin, "flows", return_value=original), patch.object(
+            admin, "deploy", side_effect=lambda value: deployments.append(value)
+        ), patch.object(admin, "trigger", side_effect=NodeRedCampaignError("trigger failed")):
+            with self.assertRaisesRegex(NodeRedCampaignError, "trigger failed"):
+                with admin.campaign_session(flow, capture_path=Path("capture.json"), environment=environment) as run_round:
+                    run_round(1)
+        clients = [node for node in deployments[0] if node["type"] == "modbus-client"]
+        self.assertEqual([("127.0.0.1", "5502"), ("127.0.0.1", "5503")],
+                         [(node["tcpHost"], node["tcpPort"]) for node in clients])
+        self.assertTrue(all("z" not in node for node in clients))
+        self.assertFalse(deployments[0][0]["disabled"])
+        self.assertEqual(original, deployments[-1])
+        self.assertEqual(before, json.dumps(flow, sort_keys=True))
+
+    def test_admin_rejects_missing_or_unsafe_endpoint_bindings_before_deployment(self) -> None:
+        flow = [
+            {"id": "tab", "type": "tab", "disabled": True},
+            {"id": "inject", "type": "inject", "once": False},
+            {"id": "client", "type": "modbus-client", "tcpHost": "${MODBUS_HOST}", "tcpPort": "${MODBUS_PORT}"},
+            {"id": "read", "type": "modbus-flex-getter", "fc": 3, "server": "client"},
+        ]
+        for environment in (
+            {}, {"MODBUS_HOST": "127.0.0.1"}, {"MODBUS_PORT": "5502"},
+            {"MODBUS_HOST": "192.0.2.1", "MODBUS_PORT": "5502"},
+            {"MODBUS_HOST": None, "MODBUS_PORT": "5502"},
+            *({"MODBUS_HOST": "127.0.0.1", "MODBUS_PORT": value}
+              for value in ("0", "65536", "1.5", "${OTHER_PORT}", "", True, None)),
+        ):
+            with self.subTest(environment=environment):
+                admin = NodeRedAdminClient(wait=lambda _: None)
+                with patch.object(admin, "flows") as flows, patch.object(admin, "deploy") as deploy:
+                    with self.assertRaises(NodeRedCampaignError):
+                        with admin.campaign_session(flow, capture_path=Path("capture.json"), environment=environment):
+                            self.fail("unsafe bindings reached the campaign")
+                flows.assert_not_called()
+                deploy.assert_not_called()
+
     def test_trigger_time_is_charged_to_the_round_deadline(self) -> None:
         now = [0.0]
         admin = NodeRedAdminClient(clock=lambda: now[0], wait=lambda _seconds: None)
