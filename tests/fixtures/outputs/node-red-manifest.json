@@ -1,5 +1,5 @@
 {
-  "adapter_version": "2.1.0",
+  "adapter_version": "2.2.0",
   "artifact_type": "modbus-target-manifest",
   "assumptions": [],
   "capture_contract": "capture/v1",
@@ -26,6 +26,20 @@
   "map_hash": "79ad30a6abca4292ebe85a97d692b70ba6b1a11395c12d8090d219aa9d8f6bbd",
   "max_in_flight": 1,
   "mode": "final",
+  "numeric_representation": {
+    "final_datatypes": [
+      "bool",
+      "boolean",
+      "float32",
+      "int16",
+      "int32",
+      "uint16",
+      "uint32"
+    ],
+    "kind": "validated-final-scalars",
+    "raw_values_preserved": true,
+    "semantic_decode_errors_retried": false
+  },
   "physical_read_nodes": 1,
   "poll_interval_seconds": 5,
   "read_block_ids": [

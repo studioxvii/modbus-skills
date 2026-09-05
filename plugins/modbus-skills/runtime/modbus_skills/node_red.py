@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any, Mapping
 
 from .exporters import (
@@ -23,12 +24,14 @@ from .exporters import (
     held_result,
     normalize_mode,
     point_byte_order,
+    point_area,
     point_datatype,
     point_id,
     point_name,
     point_protocol_offset,
     point_word_count,
     points_for_block,
+    points_from_map,
     preflight_common,
     read_plan_hash,
     safe_slug,
@@ -37,10 +40,54 @@ from .exporters import (
 )
 
 
-ADAPTER_VERSION = "2.1.0"
+ADAPTER_VERSION = "2.2.0"
 TARGET = "node-red"
 _PROBE_BYTE_ORDER_LAYOUTS = ("ABCD", "BADC", "CDAB", "DCBA")
 _PROBE_32_BIT_INTERPRETATIONS = ("uint32", "int32", "float32")
+_FINAL_WIDTHS = {"int16": 1, "uint16": 1, "int32": 2, "uint32": 2, "float32": 2, "bool": 1, "boolean": 1}
+_LAYOUT32 = {"ABCD": "ABCD", "BADC": "BADC", "CDAB": "CDAB", "DCBA": "DCBA", "BE_BE": "ABCD", "LE_BE": "BADC", "BE_LE": "CDAB", "LE_LE": "DCBA"}
+_LAYOUT16 = {None: "AB", "AB": "AB", "ABCD": "AB", "BE_BE": "AB", "BA": "BA", "BADC": "BA", "LE_BE": "BA"}
+
+
+def _finite_transform(value: Any) -> bool:
+    if value is None:
+        return True  # Optional absent/null transforms mean identity, never zero.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _final_decode_findings(canonical_map: Mapping[str, Any]) -> list[Finding]:
+    findings = []
+    for index, point in enumerate(points_from_map(canonical_map)):
+        path = f"points[{index}]"
+        datatype = point_datatype(point)
+        width = point_word_count(point)
+        area = point_area(point)
+        order = point_byte_order(point)
+        if datatype not in _FINAL_WIDTHS:
+            if datatype is not None:
+                findings.append(Finding("error", "NODE_RED_FINAL_DATATYPE_UNSUPPORTED", "Final decoding supports int16, uint16, int32, uint32, float32 and scalar FC01/02 bool only. Use an explicit raw probe for other semantics.", f"{path}.datatype"))
+            continue
+        if width != _FINAL_WIDTHS[datatype]:
+            findings.append(Finding("error", "NODE_RED_FINAL_WIDTH_MISMATCH", "Point width does not match its final datatype.", f"{path}.word_span"))
+        bit = datatype in {"bool", "boolean"}
+        if bit != (area in {"coil", "discrete-input"}):
+            findings.append(Finding("error", "NODE_RED_FINAL_AREA_DATATYPE_MISMATCH", "Scalar Boolean decoding requires FC01/02; numeric decoding requires FC03/04.", f"{path}.datatype"))
+        supported_order = order in (None, "AB", "ABCD", "BE_BE") if bit else order in (_LAYOUT16 if width == 1 else _LAYOUT32)
+        if order is not None and not supported_order:
+            findings.append(Finding("error", "NODE_RED_FINAL_LAYOUT_UNSUPPORTED", "Final byte layout is not supported for this datatype width.", f"{path}.byte_order"))
+        scale = point.get("scale")
+        offset = point.get("engineering_offset", point.get("offset"))
+        for key, value in (("scale", scale), ("engineering_offset", offset)):
+            if not _finite_transform(value):
+                findings.append(Finding("error", "NODE_RED_FINAL_TRANSFORM_INVALID", "A supplied transform must be a finite number; missing/null means identity.", f"{path}.{key}"))
+        if bit and (scale not in (None, 1) or offset not in (None, 0)):
+            findings.append(Finding("error", "NODE_RED_FINAL_BIT_TRANSFORM_UNSUPPORTED", "Scalar Boolean final values require identity transforms.", path))
+    return findings
 
 
 def export_node_red(
@@ -62,6 +109,8 @@ def export_node_red(
     mode = normalize_mode(mode)
     options = dict(options or {})
     findings = list(preflight_common(canonical_map, read_plan, mode=mode))
+    if mode == "final":
+        findings.extend(_final_decode_findings(canonical_map))
     if has_errors(findings):
         return held_result(
             TARGET,
@@ -192,9 +241,13 @@ def export_node_red(
                     "relative_offset": (point_start - start) if point_start is not None else None,
                     "word_count": point_word_count(point),
                     "datatype": point_datatype(point),
-                    "byte_order": point_byte_order(point),
-                    "scale": point.get("scale"),
-                    "offset": point.get("engineering_offset", point.get("offset")),
+                    "byte_order": (
+                        (_LAYOUT16 if point_word_count(point) == 1 else _LAYOUT32).get(point_byte_order(point), point_byte_order(point))
+                        if mode == "final" else point_byte_order(point)
+                    ),
+                    "byte_order_confirmed": point.get("byte_order_confirmed", point.get("byte_layout_confirmed", True)),
+                    "scale": 1 if point.get("scale") is None else point.get("scale"),
+                    "offset": 0 if point.get("engineering_offset", point.get("offset")) is None else point.get("engineering_offset", point.get("offset")),
                     "engineering_unit": point.get(
                         "engineering_unit", point.get("unit")
                     ),
@@ -886,6 +939,12 @@ def export_node_red(
             "max_in_flight": 1,
             "capture_contract": "capture/v1",
             "scheduled_polling": polling_enabled,
+            "numeric_representation": {
+                "kind": "validated-final-scalars" if mode == "final" else "raw-only-with-layout-candidates",
+                "final_datatypes": sorted(_FINAL_WIDTHS) if mode == "final" else [],
+                "raw_values_preserved": True,
+                "semantic_decode_errors_retried": False,
+            },
             "dashboard": {
                 "type": "core-http",
                 "endpoint": "/modbus-dashboard",
@@ -966,18 +1025,13 @@ const rows = samples.slice(-50).reverse().map((sample) => {
   const state = sample.success === false ? 'ERROR' : 'OK';
   const raw = Array.isArray(sample.raw_words) ? sample.raw_words.join(', ') : '';
   const derived = sample.derived_values || {};
-  const rawValues = Array.isArray(derived.raw_values) ? derived.raw_values : [];
-  const scale = Number.isFinite(Number(derived.scale)) ? Number(derived.scale) : 1;
-  const offset = Number.isFinite(Number(derived.offset)) ? Number(derived.offset) : 0;
-  const formatNumber = (item) => {
-    const numeric = Number(item);
-    return Number.isFinite(numeric) ? String(Number(numeric.toFixed(3))) : String(item);
-  };
-  const value = rawValues.length
-    ? rawValues.map((item) => Number.isFinite(Number(item))
-      ? formatNumber(Number(item) * scale + offset) : String(item)).join(', ')
-    : raw;
-  const unit = derived.engineering_unit ? ` ${derived.engineering_unit}` : '';
+  const engineering = derived.engineering_value;
+  const validValue = typeof engineering === 'boolean' ||
+    (typeof engineering === 'number' && Number.isFinite(engineering));
+  const decoded = sample.success === true && derived.decode_status === 'decoded' && validValue;
+  const value = decoded ? String(engineering)
+    : (sample.success === false ? 'Unavailable (error)' : 'Unavailable (raw only)');
+  const unit = decoded && derived.engineering_unit ? ` ${derived.engineering_unit}` : '';
   return `<tr><td>${escapeHtml(state)}</td><td>${escapeHtml(sample.unit_id)}</td>` +
     `<td>${escapeHtml(sample.point_id)}</td><td>${escapeHtml(raw)}</td>` +
     `<td>${escapeHtml(value)}${escapeHtml(unit)}</td><td>${escapeHtml(sample.timestamp)}</td></tr>`;
@@ -993,7 +1047,7 @@ msg.payload = `<!doctype html><html><head><meta charset=\"utf-8\">` +
   `th,td{border:1px solid #d9e2ec;padding:7px;text-align:left}` +
   `th{background:#d8ecff;color:#163b5c}.ok{color:#28743c}.empty{color:#64748b;text-align:center}` +
   `small{color:#64748b}</style></head><body>` +
-  `<h1>Live generator readings</h1><small>Read-only view · engineering values are scaled from register data · refreshes every 3 seconds</small>` +
+  `<h1>Live generator readings</h1><small>Read-only view · validated final scalar values only; probes stay raw · refreshes every 3 seconds</small>` +
   `<div class=\"meta\"><span class=\"pill\">Run: ${escapeHtml(runId)}</span>` +
   `<span class=\"pill\">State: ${running ? 'RUNNING' : 'IDLE'}</span>` +
   `<span class=\"pill\">Pending reads: ${escapeHtml(queue)}</span>` +
@@ -1078,51 +1132,85 @@ def _sequencer_function(block_specs: list[dict[str, Any]], route_count: int, *, 
 
 
 def _derive_function() -> str:
-    return (
-        "const block = msg.modbusSkillsRequest || {};\n"
-        "const pointSpecs = Array.isArray(block.point_specs) ? block.point_specs : [];\n"
-        "const byteLayouts32 = Object.freeze({\n"
-        "  ABCD: Object.freeze([0, 1, 2, 3]),\n"
-        "  BADC: Object.freeze([1, 0, 3, 2]),\n"
-        "  CDAB: Object.freeze([2, 3, 0, 1]),\n"
-        "  DCBA: Object.freeze([3, 2, 1, 0])\n"
-        "});\n"
-        "const decode32 = (sourceBytes, layout) => {\n"
-        "  const order = byteLayouts32[layout];\n"
-        "  const buffer = Buffer.from(order.map((index) => sourceBytes[index]));\n"
-        "  const float32 = buffer.readFloatBE(0);\n"
-        "  return Object.freeze({\n"
-        "    bytes: Object.freeze(Array.from(buffer.values())),\n"
-        "    uint32: buffer.readUInt32BE(0),\n"
-        "    int32: buffer.readInt32BE(0),\n"
-        "    float32: Number.isFinite(float32) ? float32 : null\n"
-        "  });\n"
-        "};\n"
-        "const candidate = Array.isArray(msg.payload)\n"
-        "  ? msg.payload\n"
-        "  : (msg.payload && Array.isArray(msg.payload.data) ? msg.payload.data : []);\n"
-        "const rawValues = Object.freeze(candidate.slice());\n"
-        "msg.modbusSkills = { block, raw_values: rawValues };\n"
-        "msg.payload = pointSpecs.map((spec) => {\n"
-        "  const offset = Number.isInteger(spec.relative_offset) ? spec.relative_offset : 0;\n"
-        "  const width = Number.isInteger(spec.word_count) ? spec.word_count : 1;\n"
-        "  const pointRawValues = Object.freeze(rawValues.slice(offset, offset + width));\n"
-        "  const derived = Object.assign({}, spec, { raw_values: pointRawValues });\n"
-        "  if (block.mode === 'probe' && width === 2 && pointRawValues.length === 2) {\n"
-        "    const firstWord = Number(pointRawValues[0]) & 0xffff;\n"
-        "    const secondWord = Number(pointRawValues[1]) & 0xffff;\n"
-        "    const sourceBytes = Object.freeze([\n"
-        "      (firstWord >>> 8) & 0xff, firstWord & 0xff,\n"
-        "      (secondWord >>> 8) & 0xff, secondWord & 0xff\n"
-        "    ]);\n"
-        "    derived.byte_order_candidates = Object.freeze(Object.fromEntries(\n"
-        "      Object.keys(byteLayouts32).map((layout) => [layout, decode32(sourceBytes, layout)])\n"
-        "    ));\n"
-        "  }\n"
-        "  return derived;\n"
-        "});\n"
-        "return msg;"
-    )
+    return """const block = msg.modbusSkillsRequest || {};
+const pointSpecs = Array.isArray(block.point_specs) ? block.point_specs : [];
+const byteLayouts32 = Object.freeze({
+  ABCD: Object.freeze([0, 1, 2, 3]),
+  BADC: Object.freeze([1, 0, 3, 2]),
+  CDAB: Object.freeze([2, 3, 0, 1]),
+  DCBA: Object.freeze([3, 2, 1, 0])
+});
+const decode32 = (sourceBytes, layout) => {
+  const order = byteLayouts32[layout];
+  if (!order) throw Error('unsupported-byte-layout');
+  const buffer = Buffer.from(order.map((index) => sourceBytes[index]));
+  const float32 = buffer.readFloatBE(0);
+  return Object.freeze({
+    bytes: Object.freeze(Array.from(buffer.values())),
+    uint32: buffer.readUInt32BE(0),
+    int32: buffer.readInt32BE(0),
+    float32: Number.isFinite(float32) ? float32 : null
+  });
+};
+const candidate = Array.isArray(msg.payload)
+  ? msg.payload
+  : (msg.payload && Array.isArray(msg.payload.data) ? msg.payload.data : []);
+const rawValues = Object.freeze(candidate.slice());
+msg.modbusSkills = { block, raw_values: rawValues };
+const bitArea = block.function_code === 1 || block.function_code === 2;
+const validRaw = (value) => bitArea
+  ? (value === true || value === false || value === 0 || value === 1)
+  : (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 65535);
+msg.payload = pointSpecs.map((spec) => {
+  const offset = spec.relative_offset;
+  const width = spec.word_count;
+  const validSpan = Number.isInteger(offset) && offset >= 0 && Number.isInteger(width) && width > 0;
+  const pointRawValues = Object.freeze(validSpan ? rawValues.slice(offset, offset + width) : []);
+  const derived = Object.assign({}, spec, {raw_values: pointRawValues, decode_status: 'raw', decoded_value: null, engineering_value: null});
+  try {
+    if (!validSpan || pointRawValues.length !== width) throw Error('incomplete-point-data');
+    if (!pointRawValues.every(validRaw)) throw Error('invalid-raw-value');
+    const sourceBytes = bitArea ? [] : pointRawValues.flatMap((word) => [(word >>> 8) & 255, word & 255]);
+    if (block.mode === 'probe') {
+      if (!bitArea && width === 2) {
+        derived.byte_order_candidates = Object.freeze(Object.fromEntries(
+          Object.keys(byteLayouts32).map((layout) => [layout, decode32(sourceBytes, layout)])
+        ));
+      }
+      return derived;
+    }
+    if (block.mode !== 'final') throw Error('unsupported-decode-mode');
+    const type = spec.datatype;
+    let value;
+    if (bitArea) {
+      if (width !== 1 || !['bool', 'boolean'].includes(type)) throw Error('unsupported-bit-datatype');
+      value = pointRawValues[0] === true || pointRawValues[0] === 1;
+    } else if (['int16', 'uint16'].includes(type) && width === 1) {
+      if (!['AB', 'BA'].includes(spec.byte_order)) throw Error('unsupported-byte-layout');
+      const buffer = Buffer.from(spec.byte_order === 'BA' ? sourceBytes.slice().reverse() : sourceBytes);
+      value = type === 'int16' ? buffer.readInt16BE(0) : buffer.readUInt16BE(0);
+    } else if (['int32', 'uint32', 'float32'].includes(type) && width === 2) {
+      if (spec.byte_order_confirmed === false) throw Error('unconfirmed-byte-layout');
+      value = decode32(sourceBytes, spec.byte_order)[type];
+    } else throw Error('unsupported-final-datatype');
+    if (typeof value !== 'boolean' && (typeof value !== 'number' || !Number.isFinite(value))) throw Error('nonfinite-decoded-value');
+    const scale = spec.scale == null ? 1 : spec.scale;
+    const additive = spec.offset == null ? 0 : spec.offset;
+    if (typeof scale !== 'number' || !Number.isFinite(scale) || typeof additive !== 'number' || !Number.isFinite(additive)) throw Error('invalid-engineering-transform');
+    if (bitArea && (scale !== 1 || additive !== 0)) throw Error('unsupported-bit-transform');
+    const engineering = bitArea ? value : value * scale + additive;
+    if (!bitArea && (!Number.isFinite(engineering) ||
+        (type !== 'float32' && Number.isInteger(engineering) && !Number.isSafeInteger(engineering)))) throw Error('unsafe-engineering-value');
+    derived.decoded_value = value;
+    derived.engineering_value = engineering;
+    derived.decode_status = 'decoded';
+  } catch (error) {
+    derived.decode_status = 'error';
+    derived.decode_error = error.message;
+  }
+  return derived;
+});
+return msg;"""
 
 
 def _capture_function(
@@ -1165,6 +1253,7 @@ def _capture_function(
         "const derived = Array.isArray(msg.payload) ? msg.payload : [];\n"
         "const successful = derived.length > 0 && !msg.error && !msg.modbusError && !msg.modbusSkillsReadError;\n"
         "const points = Array.isArray(request.point_specs) ? request.point_specs : [];\n"
+        "const rawResponse = Array.isArray(msg.modbusSkillsRawValues) ? msg.modbusSkillsRawValues : [];\n"
         "const baseSample = (point, suffix = '') => ({\n"
         "  sample_id: `${requestId}:${point.point_id}${suffix}`, request_id: requestId,\n"
         "  point_id: point.point_id, block_id: request.block_id, route: request.route_id, route_id: request.route_id,\n"
@@ -1174,11 +1263,14 @@ def _capture_function(
         "});\n"
         "const samples = successful ? derived.map((point) => ({\n"
         "  ...baseSample(point),\n"
-        "  status: 'success', success: true, raw_words: point.raw_values || [],\n"
-        "  derived_values: point\n"
+        "  status: point.decode_status === 'error' ? 'error' : 'success',\n"
+        "  success: point.decode_status !== 'error', raw_words: point.raw_values || [],\n"
+        "  ...(point.decode_status === 'error' ? {error: point.decode_error || 'decode-failed'} : {derived_values: point})\n"
         "})) : points.map((point) => ({\n"
         "  ...baseSample(point, ':error'),\n"
-        "  status: 'error', success: false, raw_words: [],\n"
+        "  status: 'error', success: false,\n"
+        "  raw_words: rawResponse.slice(point.relative_offset, point.relative_offset + point.word_count),\n"
+        "  raw_response: rawResponse,\n"
         "  error: (msg.modbusSkillsReadError && msg.modbusSkillsReadError.reason) ||\n"
         "    (msg.payload && msg.payload.state) || (msg.error && msg.error.message) || 'read-failed'\n"
         "}));\n"
@@ -1236,19 +1328,24 @@ def _response_gate_function() -> str:
         "  ? msg.payload.data\n"
         "  : null;\n"
         "const values = Array.isArray(msg.payload) ? msg.payload : payloadData;\n"
+        "msg.modbusSkillsRawValues = Array.isArray(values) ? values.slice() : [];\n"
         "const explicitFailure = Boolean(\n"
         "  msg.error || msg.modbusError ||\n"
         "  (msg.payload && !Array.isArray(msg.payload) && msg.payload.error)\n"
         ");\n"
         "const complete = Array.isArray(values) &&\n"
         "  values.length === expected.expected_quantity;\n"
-        "if (explicitFailure || !complete) {\n"
+        "const bitArea = request.function_code === 1 || request.function_code === 2;\n"
+        "const validValues = complete && values.every((value) => bitArea\n"
+        "  ? (value === true || value === false || value === 0 || value === 1)\n"
+        "  : (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 65535));\n"
+        "if (explicitFailure || !complete || !validValues) {\n"
         "  msg.modbusSkillsReadError = {\n"
         "    state: 'invalid-read-response',\n"
         "    block_id: expected.block_id,\n"
         "    expected_quantity: expected.expected_quantity,\n"
         "    received_quantity: Array.isArray(values) ? values.length : 0,\n"
-        "    reason: explicitFailure ? 'read-failed' : 'read-wrong-length'\n"
+        "    reason: explicitFailure ? 'read-failed' : (!complete ? 'read-wrong-length' : 'read-invalid-values')\n"
         "  };\n"
         "  return [null, msg];\n"
         "}\n"
@@ -1306,8 +1403,19 @@ one complete `capture/v1` document only after the queue drains or the run is
 cancelled. The flow uses one shared reader per route, keeps one request in
 flight. {"Final mode retries a failed block at most once." if mode == "final" else "Probe mode makes one physical attempt per block, with no retry."}
 
-The derive nodes keep an immutable copy of the raw values. They also attach
-point datatype, byte-order, scaling, and engineering-unit metadata. For each
+The derive nodes keep an immutable copy of the raw values. Final mode supports
+int16/uint16, int32/uint32, float32, and identity bool/boolean FC01/02 scalars.
+Register values are decoded using the confirmed supported layout before numeric
+scale and engineering offset are applied once. Missing/null transforms mean
+identity; zero scale is valid. Unsupported 64-bit, string, bitfield, width,
+layout, and transform semantics remain held, not silently replaced with raw output.
+Malformed raw responses and nonfinite/unsafe decoded values are errors, not
+successful engineering values. A per-point semantic decode error preserves raw
+evidence and does not trigger another physical read. The dashboard renders only
+validated final engineering values; it never scales individual raw register words.
+
+Probe mode does not decode a selected engineering value or apply transforms.
+It attaches raw values and datatype/layout metadata without choosing a layout. For each
 two-register point, probe mode derives `ABCD`, `BADC`, `CDAB`, and `DCBA`
 candidates from the same raw words. Each candidate includes unsigned integer,
 signed integer, and float interpretations. The flow does not choose a winner.
