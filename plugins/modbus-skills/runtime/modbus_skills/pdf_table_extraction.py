@@ -60,6 +60,7 @@ PDF_HEADER_ALIASES = {
     "offset": "source_offset",
     "display address": "display_address",
     "r/w": "access",
+    "read/write": "access",
     "read/": "access",
     "access": "access",
     "nv": "nonvolatile",
@@ -75,6 +76,7 @@ PDF_HEADER_ALIASES = {
     "scale factor": "scale",
     "engineering offset": "engineering_offset",
     "range": "range",
+    "data range": "range",
     "description": "description",
     "meaning": "description",
     "semantics": "description",
@@ -1433,7 +1435,12 @@ def _clean_values(values: Iterable[Any]) -> list[str]:
 
 
 def _header_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", _clean(value).casefold()).strip().rstrip(":")
+    normalized = re.sub(r"\s+", " ", _clean(value).casefold()).strip().rstrip(":")
+    # A wrapped slash changes spacing, not the role of this exact header.
+    # Keep longer prose headers and original raw claims untouched.
+    if re.fullmatch(r"read\s*/\s*write", normalized):
+        return "read/write"
+    return normalized
 
 
 def _cell(row: Sequence[Any], index: int) -> Any:
