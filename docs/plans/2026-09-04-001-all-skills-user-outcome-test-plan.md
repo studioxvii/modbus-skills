@@ -6,6 +6,14 @@ Status: Execution started 2026-09-04. Unattended testing, documented PRs, automa
 
 Scope: All 20 shipped Modbus skills, every local working map, and the additional inputs needed to exercise review, comparison, capture, and export skills.
 
+### Execution update: streamline without changing acceptance
+
+The user's subsequent efficiency instruction governs scheduling: freeze this original scope, stop optional investigations and new acceptance requirements, and prioritize remaining coverage gaps and demonstrated user-facing defects. Improve test infrastructure only when it blocks a required test or produces unreliable results. Batch related fixes into fewer PRs; during development run focused regressions and only affected benchmarks. Run the full suite, complete applicable benchmarks and exact-head CI on the final PR candidate before merging.
+
+Parallelize independent source, implementation and native-test work; pause competing heavy workloads only for controlled performance measurements. Preserve correctness, safety, performance thresholds and failed runs. Do not retry unchanged candidates until green, alter expectations to conceal defects, or count blocked cases as passes. Reuse unchanged evidence and avoid duplicate reviews and reports.
+
+Maintain one current completion checklist at the ignored campaign path `artifacts/all-skills/completion-checklist.md`, linking detailed case receipts and showing passed, failed, blocked and remaining work. Distinguish completed testing from resolved product limitations. Continue without intermediate human testing or engineering review; stop only when safe authorized alternatives are exhausted and a genuine blocker requires new authority or information. Preserve unrelated work. At completion deliver one plain-English report covering changes, measured speed/output improvements, remaining limitations and merged PRs.
+
 ## 1. Objective and definition of success
 
 Produce the correct, usable result the user requested, with less waiting, fewer unnecessary decisions, and only useful deliverables in the handoff. Optimize in this order: engineering correctness and honest completion, user effort and artifact usefulness, then execution cost and speed.

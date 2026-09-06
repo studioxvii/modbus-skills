@@ -470,7 +470,8 @@ def _handle_lint(args: argparse.Namespace) -> dict[str, Any]:
 def _handle_diagnose(args: argparse.Namespace) -> dict[str, Any]:
     path, data = _read_bytes(args.input)
     defaults = _json_options(args.defaults, "defaults")
-    result = diagnose_map(data, source_format=args.format, filename=path.name, delimiter=args.delimiter, defaults=defaults)
+    # Native PDF readers open this location; a basename loses the input directory.
+    result = diagnose_map(data, source_format=args.format, filename=str(path), delimiter=args.delimiter, defaults=defaults)
     parsed_raw = result["parsed"]
     parsed = artifact_envelope(
         parsed_raw,

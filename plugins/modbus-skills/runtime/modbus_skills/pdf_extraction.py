@@ -21,12 +21,14 @@ from .artifacts import (
     assert_artifact_envelope,
     stable_input_hash,
 )
+from .pdf_access_legend import apply_access_legend, is_access_legend
 from .pdf_table_extraction import (
     PDF_HEADER_ALIASES,
     PdfTableExtractionError,
     PdfTableEvidenceBudgetError,
     _address_record_fields,
     _address_with_area,
+    _header_text,
     _parse_pdf_address,
     _parse_source_offset,
     _parse_register_area,
@@ -67,6 +69,7 @@ _GRID_RECOVERY_FINDING = {
     "message": "Grid-aware table extraction supplied register-table structure alongside text parsing.",
 }
 _QUARANTINE_HOLD_MESSAGES = {
+    "pdf-access-annotation-conflict": "Resolve conflicting explicit access and the source table's access legend.",
     "pdf-address-width-conflict": "Resolve the conflict between the explicit address pair and printed word count.",
     "pdf-prior-source-quarantine": "This source row already has unresolved parser evidence; later claims cannot release it.",
     "pdf-grid-column-ambiguous": "Resolve conflicting grid columns before these rows become map points.",
@@ -126,7 +129,7 @@ def _header(line: str) -> list[str] | None:
 
 
 def _layout_field(value: str, index: int) -> str:
-    normalized = re.sub(r"\s+", " ", value.strip().casefold()).rstrip(":")
+    normalized = _header_text(value)
     name = _HEADER_ALIASES.get(normalized)
     if name == "format":
         return "datatype"
@@ -397,26 +400,192 @@ def _overview_context_mask(lines: Sequence[str]) -> list[bool]:
     return masked
 
 
+def _lcd_context_evidence(lines: Sequence[str]) -> list[tuple[int, ...]]:
+    """Identify explicit screen/navigation scope without interpreting its values.
+
+    Context pairing is bounded and page-local. Real register headers/headings
+    and existing unambiguous typed headerless rows retain their normal meaning.
+    Return source line indexes so skipped examples remain traceable rejections.
+    """
+    result: list[tuple[int, ...]] = [()] * len(lines)
+    if not any(re.search(r"\b(?:lcd|main screen)\b", line, re.IGNORECASE) for line in lines):
+        return result
+    labels = [re.sub(r"\s+", " ", line.strip()).casefold() for line in lines]
+
+    def register_heading(label: str) -> bool:
+        label = re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", label).rstrip(":")
+        return re.fullmatch(r"(?:(?:modbus|holding|input) )?registers?(?: map| table)?|coils?|discrete inputs?", label) is not None
+
+    def section_heading(index: int) -> bool:
+        return len(_layout_segments(lines[index])) == 1 and re.match(r"^\d+(?:\.\d+)+\.?\s+[a-z]", labels[index]) is not None
+
+    def heading(index: int) -> bool:
+        parts = [re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", value.casefold()).rstrip(":")
+                 for _x, value in _layout_segments(lines[index])]
+        return bool(parts) and any(re.fullmatch(r"(?:operation of (?:the )?)?lcd display", part) for part in parts) and all(
+            part == "user manual" or re.fullmatch(r"(?:operation of (?:the )?)?lcd display", part) for part in parts
+        )
+
+    def navigation(label: str) -> bool:
+        return re.search(r"\bpress\s+(?:enter|up|down|[<>←→↑↓])", label) is not None
+
+    def screen_chain(label: str) -> bool:
+        return (label.startswith("main screen") and "menu" in label and navigation(label)
+                and ("->" in label or "→" in label))
+
+    def display_prose(label: str) -> bool:
+        return re.match(r"^lcd display (?:will show|shows?)\b", label) is not None
+
+    active: tuple[int, ...] = ()
+    for index, label in enumerate(labels):
+        # An explicit address/name header takes precedence even inside an LCD
+        # chapter. The screen keyword in a genuine point name is not a heading.
+        if (active or heading(index) or screen_chain(label) or display_prose(label)) and _layout_header_at(lines, index) is not None:
+            active = ()
+            continue
+        starts: tuple[int, ...] = ()
+        if screen_chain(label):
+            starts = (index,)
+        elif heading(index) or display_prose(label):
+            if display_prose(label) and navigation(label) and re.search(r"\b(?:turn|scroll) pages\b", label):
+                starts = (index,)
+            else:
+                for following in range(index + 1, min(index + 9, len(lines))):
+                    if register_heading(labels[following]) or section_heading(following) or _layout_header_at(lines, following) is not None:
+                        break
+                    if navigation(labels[following]):
+                        starts = (index, following)
+                        break
+        if starts:
+            active = starts
+        elif register_heading(label) or section_heading(index):
+            active = ()
+        if active:
+            # Preserve only already-supported, single-address typed rows. This
+            # does not teach the parser a new bare-offset/address convention.
+            tokens = _headerless_tokens(lines[index])
+            addresses = [token for token in tokens if _headerless_address_token(token) is not None]
+            if len(addresses) == 1:
+                row = _headerless_layout_row(lines[index], page_number=1, line_number=index + 1, parser_id="pdftotext-layout/v1")
+                if row is not None and row.get("datatype"):
+                    continue
+            result[index] = active
+    return result
+
+
+def _lcd_context_mask(lines: Sequence[str]) -> list[bool]:
+    return [bool(refs) for refs in _lcd_context_evidence(lines)]
+
+
+def _lcd_rejection(line: str, *, page_number: int, line_number: int, parser_id: str,
+                   context: tuple[int, ...], lines: Sequence[str]) -> dict[str, Any] | None:
+    if not (_unresolved_tabular_row(line) or _headerless_layout_row(
+        line, page_number=page_number, line_number=line_number, parser_id=parser_id
+    ) is not None):
+        return None
+    return {"code": "pdf-lcd-display-example", "page": page_number, "line": line_number,
+            "parser_id": parser_id, "_source": {
+                "format": "pdf", "page": page_number, "line": line_number,
+                "region": f"p{page_number}:l{line_number}", "parser_id": parser_id,
+                "excerpt": line.strip()[:300],
+                "context_refs": [{"page": page_number, "line": anchor + 1,
+                                  "excerpt": lines[anchor].strip()[:160]} for anchor in context]}}
+
+
+def _aligned_layout_body_values(
+    line: str, header: Sequence[tuple[int, str, str]],
+) -> dict[str, str] | None:
+    """Use exact occupied-column starts, never a segment-count coincidence.
+
+    Only a row whose first fragment in every occupied column starts at that
+    header anchor qualifies. An explicit address must also be recognizable;
+    otherwise the existing ragged-layout/header logic remains authoritative.
+    """
+    segments = _split_boolean_columns(_layout_segments(line), header)
+    if len(segments) < 2:
+        return None
+    cells: dict[str, list[str]] = {}
+    for x, value in segments:
+        preceding = [item for item in header if item[0] <= x]
+        if not preceding:
+            return None
+        anchor, field, _raw = max(preceding, key=lambda item: item[0])
+        if field not in cells and x != anchor:
+            return None
+        if field in cells and field not in {"name", "description"} and not field.startswith("_extra:"):
+            # Multiple fragments are safe to join only as literal prose. A
+            # ragged scalar near the next heading may instead belong to that
+            # next column; do not turn it into a new executable scalar claim.
+            return None
+        cells.setdefault(field, []).append(value)
+    values = {field: " ".join(parts).strip() for field, parts in cells.items()}
+    for field in _ADDRESS_FIELDS:
+        if not values.get(field):
+            continue
+        parsed = (_parse_source_offset(values[field]) if field == "source_offset"
+                  else _parse_pdf_address(values[field], protocol_offset=field == "protocol_offset"))
+        if parsed is not None and parsed.get("status") in {"single", "range", "pair"}:
+            return values
+    return None
+
+
 def parse_layout_rows(
     text: str, *, first_page: int = 1, pages: set[int] | None = None, parser_id: str = "pdftotext-layout/v1"
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     records: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for page_number, page in enumerate(text.split("\f"), start=first_page):
+        lines = page.splitlines()
+        lcd_context = _lcd_context_evidence(lines)
         if pages is not None and page_number not in pages:
+            # Discovery excludes LCD samples as candidate pages, but their
+            # bounded source rejection must not disappear from extraction.
+            for index, refs in enumerate(lcd_context):
+                if refs:
+                    item = _lcd_rejection(lines[index], page_number=page_number, line_number=index + 1,
+                                          parser_id=parser_id, context=refs, lines=lines)
+                    if item is not None:
+                        rejected.append(item)
             continue
         header: list[tuple[int, str, str]] | None = None
         header_end = -1
-        lines = page.splitlines()
+        legend_rows: list[dict[str, Any]] = []
         function_mask = _non_register_context_mask(lines)
         overview_mask = _overview_context_mask(lines)
         header_lines = [
-            "" if masked or overview else line
-            for line, masked, overview in zip(lines, function_mask, overview_mask)
+            "" if masked or overview or lcd else line
+            for line, masked, overview, lcd in zip(lines, function_mask, overview_mask, lcd_context)
         ]
         for line_index, line in enumerate(lines):
             line_number = line_index + 1
+            if lcd_context[line_index]:
+                legend_rows = []
+                header = None
+                header_end = -1
+                item = _lcd_rejection(line, page_number=page_number, line_number=line_number,
+                                      parser_id=parser_id, context=lcd_context[line_index], lines=lines)
+                if item is not None:
+                    rejected.append(item)
+                continue
+            if is_access_legend(line):
+                if legend_rows and all(
+                    not text.strip()
+                    for text in lines[legend_rows[-1]["_source"]["line"]:line_index]
+                ):
+                    conflicts = apply_access_legend(
+                        legend_rows, page=page_number, line=line_number, literal=line,
+                    )
+                    conflict_lines = {item["line"] for item in conflicts}
+                    if conflict_lines:
+                        records = [row for row in records if not (
+                            row.get("_source", {}).get("page") == page_number
+                            and row.get("_source", {}).get("line") in conflict_lines
+                        )]
+                        rejected.extend(conflicts)
+                legend_rows = []
+                continue
             if overview_mask[line_index]:
+                legend_rows = []
                 header = None
                 header_end = -1
                 if _unresolved_tabular_row(line) or _headerless_layout_row(
@@ -435,14 +604,17 @@ def parse_layout_rows(
                     })
                 continue
             if function_mask[line_index]:
+                legend_rows = []
                 header = None
                 header_end = -1
                 continue
             if line_index <= header_end:
                 continue
-            candidate = _layout_header_at(header_lines, line_index)
+            aligned_values = _aligned_layout_body_values(line, header) if header is not None else None
+            candidate = None if aligned_values is not None else _layout_header_at(header_lines, line_index)
             if candidate is not None:
                 header_end, header = candidate
+                legend_rows = []
                 continue
             if not line.strip():
                 continue
@@ -478,26 +650,29 @@ def parse_layout_rows(
                         }
                     )
                 continue
-            cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
-            segments = _split_boolean_columns(_layout_segments(line), header)
-            if len(segments) < 2 and len(header) > 1:
-                continue
-            if len(segments) == len(header):
-                for (_x, value), (_anchor, field, _raw) in zip(
-                    segments, header, strict=True
-                ):
-                    cells[field].append(value)
+            if aligned_values is not None:
+                values = aligned_values
             else:
-                for x, value in segments:
-                    _anchor, field, _raw = min(
-                        header, key=lambda item: (abs(item[0] - x), -item[0])
-                    )
-                    cells[field].append(value)
-            values = {
-                field: " ".join(parts).strip()
-                for field, parts in cells.items()
-                if parts
-            }
+                cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
+                segments = _split_boolean_columns(_layout_segments(line), header)
+                if len(segments) < 2 and len(header) > 1:
+                    continue
+                if len(segments) == len(header):
+                    for (_x, value), (_anchor, field, _raw) in zip(
+                        segments, header, strict=True
+                    ):
+                        cells[field].append(value)
+                else:
+                    for x, value in segments:
+                        _anchor, field, _raw = min(
+                            header, key=lambda item: (abs(item[0] - x), -item[0])
+                        )
+                        cells[field].append(value)
+                values = {
+                    field: " ".join(parts).strip()
+                    for field, parts in cells.items()
+                    if parts
+                }
             address_field = next(
                 (
                     field
@@ -513,6 +688,7 @@ def parse_layout_rows(
                 else _parse_pdf_address(address, protocol_offset=address_field == "protocol_offset")
             )
             if parsed_address is None or parsed_address.get("status") != "single":
+                locator = {"page": page_number, "line": line_number, "region": f"p{page_number}:l{line_number}"}
                 rejected.append(
                     {
                         "code": (
@@ -523,6 +699,21 @@ def parse_layout_rows(
                         "page": page_number,
                         "line": line_number,
                         "parser_id": parser_id,
+                        # A rejected scalar interpretation does not erase the
+                        # source table. These are literal header-associated
+                        # claims, never executable point fields or expansion.
+                        "_claims": [
+                            {**_claim(parser_id, field, values.get(field, ""), locator),
+                             "raw_header": raw_header, "raw_value": values.get(field, ""),
+                             "column_index": index}
+                            for index, (_anchor, field, raw_header) in enumerate(header)
+                        ],
+                        "_source": {
+                            "format": "pdf", "page": page_number, "line": line_number,
+                            "region": locator["region"], "parser_id": parser_id,
+                            "method": "exact" if parser_id == "pdftotext-layout/v1" else "ocr-derived",
+                            "excerpt": line.strip()[:300],
+                        },
                     }
                 )
                 continue
@@ -572,6 +763,8 @@ def parse_layout_rows(
                 "excerpt": line.strip()[:300],
             }
             records.append(record)
+            if any(field == "description" for _x, field, _raw in header):
+                legend_rows.append(record)
     return records, rejected
 
 
@@ -829,8 +1022,8 @@ def discover_register_pages(text: str, *, first_page: int = 1) -> list[int]:
     for page_number, page in enumerate(text.split("\f"), start=first_page):
         lines = page.splitlines()
         lines = [
-            "" if masked else line
-            for line, masked in zip(lines, _non_register_context_mask(lines))
+            "" if masked or lcd else line
+            for line, masked, lcd in zip(lines, _non_register_context_mask(lines), _lcd_context_mask(lines))
         ]
         has_header = any(
             _layout_header_at(lines, index) is not None for index in range(len(lines))
@@ -880,7 +1073,9 @@ def _named_address_row_count(lines: Sequence[str]) -> int:
     return count
 
 
-def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any]]:
+def parse_bbox_rows(
+    xml_text: str, *, first_page: int = 1, rejected: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     try:
         root = ElementTree.fromstring(xml_text)
     except ElementTree.ParseError as exc:
@@ -907,8 +1102,8 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
         line_items = [(y_min, sorted(lines[y_min])) for y_min in sorted(lines)]
         line_labels = [" ".join(word[3] for word in words) for _y, words in line_items]
         function_mask = [
-            masked or overview for masked, overview in zip(
-                _non_register_context_mask(line_labels), _overview_context_mask(line_labels)
+            masked or overview or lcd for masked, overview, lcd in zip(
+                _non_register_context_mask(line_labels), _overview_context_mask(line_labels), _lcd_context_mask(line_labels)
             )
         ]
         header_items = [
@@ -917,16 +1112,36 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
         ]
         columns: list[tuple[float, str, str]] | None = None
         header_end = -1
+        legend_rows: list[dict[str, Any]] = []
+        last_legend_row_index = -1
         for line_index, (y_min, words) in enumerate(line_items):
+            if is_access_legend(line_labels[line_index]):
+                if legend_rows and last_legend_row_index == line_index - 1:
+                    conflicts = apply_access_legend(
+                        legend_rows, page=page_number, line=line_index + 1,
+                        literal=line_labels[line_index], region=f"p{page_number}:y{y_min:g}",
+                    )
+                    conflict_regions = {item["_source"]["region"] for item in conflicts}
+                    if conflict_regions:
+                        records = [row for row in records if not (
+                            row.get("_source", {}).get("page") == page_number
+                            and row.get("_source", {}).get("region") in conflict_regions
+                        )]
+                        if rejected is not None:
+                            rejected.extend(conflicts)
+                legend_rows = []
+                continue
             if function_mask[line_index]:
                 columns = None
                 header_end = -1
+                legend_rows = []
                 continue
             if line_index <= header_end:
                 continue
             candidate = _bbox_header_at(header_items, line_index)
             if candidate is not None:
                 header_end, columns = candidate
+                legend_rows = []
                 continue
             if columns is None:
                 continue
@@ -1039,6 +1254,9 @@ def parse_bbox_rows(xml_text: str, *, first_page: int = 1) -> list[dict[str, Any
                 )[:300],
             }
             records.append(record)
+            if "description" in values:
+                legend_rows.append(record)
+                last_legend_row_index = line_index
     return records
 
 
@@ -1573,6 +1791,14 @@ def _envelope(
     fresh_body_proofs: Mapping[int, Any] | None = None,
 ) -> dict[str, Any]:
     page_selection = {"first_page": page_range[0], "last_page": page_range[1]} if page_range else None
+    access_conflicts = [row for row in rejected if row.get("code") == "pdf-access-annotation-conflict"]
+    if access_conflicts:
+        # A later grid/parser agreement cannot undo an earlier access conflict.
+        records, access_quarantined, access_findings = _reconcile(
+            [], records, quarantined_records=access_conflicts,
+        )
+        quarantined = [*quarantined, *access_quarantined]
+        findings = [*findings, *access_findings]
     width_conflicts = [row for row in records if row.get("code") == "pdf-address-width-conflict"]
     if width_conflicts:
         records = [row for row in records if row.get("code") != "pdf-address-width-conflict"]
@@ -1695,6 +1921,46 @@ def _source_coverage(
     }
 
 
+def _page_text_evidence(text: str, *, first_page: int) -> dict[str, Any] | None:
+    """Reuse bounded layout output; no new source scan or sparse threshold.
+
+    A page with no alphanumeric glyph text is not necessarily blank or a map.
+    This inventory explains an extraction limitation, not a register classifier.
+    """
+    pages = text.split("\f")
+    if pages and pages[-1] == "":
+        pages.pop()  # Output terminator, not an additional physical page.
+    missing: list[list[int]] = []
+    symbols: list[list[int]] = []
+    for number, page in enumerate(pages, start=first_page):
+        if any(character.isalnum() for character in page):
+            continue
+        for ranges in (missing, symbols) if page.strip() else (missing,):
+            if ranges and ranges[-1][1] == number - 1:
+                ranges[-1][1] = number
+            else:
+                ranges.append([number, number])
+    if not missing:
+        return None
+    return {"method": "existing-bounded-layout-text/v1", "first_page": first_page,
+            "pages_seen": len(pages), "no_alphanumeric_text_ranges": missing,
+            "symbols_only_ranges": symbols, "visual_content": "unassessed",
+            "interpretation": "These pages expose no alphanumeric text to this reader; this does not classify them as blank, image-only or register tables. No OCR was performed."}
+
+
+def _with_page_text_evidence(result: dict[str, Any], evidence: dict[str, Any] | None) -> dict[str, Any]:
+    if evidence is None:
+        return result
+    result["source_coverage"] = {**result.get("source_coverage", {}), "page_text_evidence": evidence}
+    # Explain an already-held failed extraction as one source problem. Do not
+    # add holds to successful maps merely because a document has blank pages.
+    if not result.get("records") and result.get("holds"):
+        result["holds"] = [dict(hold) for hold in result["holds"]]
+        result["holds"][0]["page_text_evidence"] = evidence
+        result["holds"][0]["message"] += " Some scanned pages expose no alphanumeric text; review the grouped page-text evidence before correcting the source."
+    return result
+
+
 def extract_pdf(
     path: Path,
     source: bytes,
@@ -1748,17 +2014,22 @@ def extract_pdf(
         fallback = _hold_result(path, source, "pdf-ocr-required", "The selected pages contain no extractable text. Supply one bounded rights-safe modbus-ocr-evidence/v1 artifact.", page_range=page_range, capability=capability)
         return _recover_grid_or(path, source, page_range=page_range, fallback=fallback, capability=capability)
     first_page = page_range[0] if page_range else 1
+    text_evidence = _page_text_evidence(text, first_page=first_page)
     discovered = list(range(page_range[0], page_range[1] + 1)) if page_range else discover_register_pages(text, first_page=first_page)
+    page_filter = set(discovered)
+    strict, rejected = parse_layout_rows(text, first_page=first_page, pages=page_filter)
     if not discovered:
         try:
             grid, grid_quarantined, discovered = _recover_grid_rows(path, fresh_body_proofs=fresh_body_proofs)
         except PdfTableExtractionError as exc:
-            return _hold_result(path, source, "pdf-register-pages-unavailable", f"No likely register pages were discovered and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
-        return _envelope(
+            failure = _hold_result(path, source, "pdf-register-pages-unavailable", f"No likely register pages were discovered and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
+            return _with_page_text_evidence(_envelope(path, source, [], rejected, [], failure["holds"], page_range,
+                                                      capability=capability), text_evidence)
+        return _with_page_text_evidence(_envelope(
             path,
             source,
             grid,
-            [],
+            rejected,
             [_GRID_RECOVERY_FINDING],
             [],
             page_range,
@@ -1766,9 +2037,7 @@ def extract_pdf(
             discovered_pages=discovered,
             quarantined=grid_quarantined,
             fresh_body_proofs=fresh_body_proofs,
-        )
-    page_filter = set(discovered)
-    strict, rejected = parse_layout_rows(text, first_page=first_page, pages=page_filter)
+        ), text_evidence)
     findings: list[dict[str, Any]] = []
     if not strict:
         findings.append({"code": "pdf-strict-parser-no-rows", "severity": "info", "blocking": False, "message": "Strict layout parsing found no rows; coordinate parsing was attempted automatically."})
@@ -1810,7 +2079,7 @@ def extract_pdf(
             keep_rejected=rejected,
         )
     try:
-        coordinate = parse_bbox_rows(bbox_result.stdout.decode("utf-8", errors="replace"), first_page=min(discovered))
+        coordinate = parse_bbox_rows(bbox_result.stdout.decode("utf-8", errors="replace"), first_page=min(discovered), rejected=rejected)
     except PdfExtractionError:
         fallback = _hold_result(path, source, "pdf-coordinate-output-malformed", "pdftotext coordinate output was malformed and could not be reconciled safely.", page_range=page_range, capability=capability)
         return _recover_grid_or(
@@ -1832,10 +2101,12 @@ def extract_pdf(
                              page_range, capability=capability, discovered_pages=discovered,
                              discovery_complete=False)
         except PdfTableExtractionError as exc:
-            return _hold_result(path, source, "pdf-structured-rows-unavailable", f"Text and coordinate parsing produced no rows, and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
+            failure = _hold_result(path, source, "pdf-structured-rows-unavailable", f"Text and coordinate parsing produced no rows, and grid recovery failed: {exc}.", page_range=page_range, capability=capability)
+            return _with_page_text_evidence(_envelope(path, source, [], rejected, findings, failure["holds"], page_range,
+                                                      capability=capability, discovered_pages=discovered), text_evidence)
         findings.append(_GRID_RECOVERY_FINDING)
-        return _envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered, quarantined=grid_quarantined,
-                         fresh_body_proofs=fresh_body_proofs)
+        return _with_page_text_evidence(_envelope(path, source, grid, rejected, findings, [], page_range, capability=capability, discovered_pages=discovered, quarantined=grid_quarantined,
+                         fresh_body_proofs=fresh_body_proofs), text_evidence)
     records, quarantined, conflicts = _reconcile(strict, coordinate)
     budget_holds: list[dict[str, Any]] = []
     try:
@@ -1862,9 +2133,9 @@ def extract_pdf(
             "message": "Resolve the listed material field conflicts as one localized decision; unaffected rows remain available.",
             "conflicts": conflicts,
         })
-    return _envelope(path, source, records, rejected, findings, holds, page_range, capability=capability, discovered_pages=discovered, quarantined=quarantined,
+    return _with_page_text_evidence(_envelope(path, source, records, rejected, findings, holds, page_range, capability=capability, discovered_pages=discovered, quarantined=quarantined,
                      discovery_complete=not budget_holds,
-                     fresh_body_proofs=fresh_body_proofs)
+                     fresh_body_proofs=fresh_body_proofs), text_evidence)
 
 
 def _extract_large_pdf_in_chunks(
@@ -1941,6 +2212,7 @@ def _extract_large_pdf_in_chunks(
                     parse_bbox_rows(
                         bbox_result.stdout.decode("utf-8", errors="replace"),
                         first_page=min(chunk_pages),
+                        rejected=rejected,
                     )
                     if bbox_result.returncode == 0
                     else []

@@ -261,6 +261,33 @@ def compile_user_map_bundle(
         for entry in selection["excluded"]
     ]
     annex.extend({"kind": "unselected-hold", **hold} for hold in annex_holds)
+    source_reference = oem_map.get("source_reference", {})
+    rejected_holds = (oem_map.get("holds", ()) if isinstance(source_reference, Mapping)
+                      and source_reference.get("format") == "pdf" else ())
+    rejected_count = 0
+    for hold in rejected_holds:
+        if not isinstance(hold, Mapping) or hold.get("code") != "source.rejected-rows-unresolved":
+            continue
+        details = hold.get("details", {})
+        rejected = details.get("rejected_rows") if isinstance(details, Mapping) else None
+        if not isinstance(rejected, list) or not rejected:
+            continue
+        # One source exception, not N invented points or N prose rows. The
+        # complete literal records remain in the delivered JSON, even when the
+        # selected points themselves are unrelated to this unresolved table.
+        annex.append({
+            "kind": "source-rejected-evidence", "code": hold["code"],
+            "source_sha256": details.get("source_sha256"),
+            "rejected_rows": rejected,
+            "reason": f"{len(rejected)} rejected source "
+                      + ("row remains" if len(rejected) == 1 else "rows remain")
+                      + " unresolved; source text and locations are retained in the JSON map, not executable points.",
+        })
+        rejected_count += len(rejected)
+    if rejected_count:
+        for hold in selected_holds:
+            if hold.get("code") == "source.rejected-rows-unresolved":
+                hold["affected_count"] = rejected_count
     try:
         user_map = build_user_map(
             oem_map,
@@ -429,6 +456,8 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
             reason = item.get("reason", item.get("message", "Retained outside selected output"))
             suffix = f" ({count} unselected source records)" if count > 1 else ""
             lines.append(f"- {label}: {reason}{suffix}")
+        if any(item.get("kind") == "source-rejected-evidence" for item, _count in annex_groups):
+            lines.extend(["", "Rejected source fields and locations are retained in [the JSON map](user-map.json)."])
         if any(count > 1 for _item, count in annex_groups):
             lines.extend(["", "Individual records and source locations remain in [the JSON map](user-map.json)."])
     else:

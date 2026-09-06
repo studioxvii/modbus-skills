@@ -169,6 +169,11 @@ def compile_source_descriptor(
                 "blocking": True,
                 "message": "Resolve the rejected source rows as one bounded source exception.",
                 "affected_count": len(rejected),
+                # PDF extraction already bounds source/tool evidence. Keep its
+                # rejected literals available without promoting them to points.
+                **({"details": {"source_sha256": source_hash,
+                                 "rejected_rows": list(rejected)}}
+                   if source_format == "pdf" else {}),
             }
         )
     try:
