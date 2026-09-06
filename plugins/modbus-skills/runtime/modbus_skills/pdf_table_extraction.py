@@ -15,6 +15,11 @@ import sys
 import tempfile
 from typing import Any
 
+if __package__:
+    from .pdf_protocol_context import EXCLUDED_PROTOCOL_CODE, protocol_contexts
+else:  # The isolated grid worker executes this exact file, not python -m.
+    from pdf_protocol_context import EXCLUDED_PROTOCOL_CODE, protocol_contexts
+
 
 class PdfTableExtractionError(ValueError):
     """Raised when the optional grid extractor cannot run safely."""
@@ -241,6 +246,7 @@ def _extract_pdf_table_rows_in_process(
                 # do not use another reader's empty output as this test.
                 if not page.chars:
                     continue
+                protocol_lines, protocol_y, protocol_scope = _page_protocol_scope(page)
                 for table_index, table in enumerate(page.find_tables()):
                     cells, header_recovery = _recover_offset_header(page, table)
                     merged = _proved_common_cells(
@@ -261,6 +267,29 @@ def _extract_pdf_table_rows_in_process(
                         table_index=table_index,
                         _common_cells=merged,
                     )
+                    if protocol_scope:
+                        kept = {"records": [], "quarantined_records": []}
+                        for channel, row in (
+                            (channel, row) for channel in kept for row in parsed[channel]
+                        ):
+                            row_index = row.get("_source", {}).get("row")
+                            context = None
+                            if type(row_index) is int and 0 <= row_index < len(table.rows):
+                                position = bisect_right(protocol_y, table.rows[row_index].bbox[1] + 2.5) - 1
+                                if position >= 0:
+                                    context = protocol_scope[position]
+                            if context is None:
+                                kept[channel].append(row)
+                            else:
+                                row["code"] = EXCLUDED_PROTOCOL_CODE
+                                row["protocol"] = "DNP3"
+                                row["_source"]["context_refs"] = [{
+                                    "page": page_number, "line": context + 1,
+                                    "region": f"p{page_number}:y{protocol_y[context]:g}",
+                                    "excerpt": protocol_lines[context][:300],
+                                }]
+                                evidence["quarantined_records"].append(row)
+                        parsed = kept
                     if header_recovery is not None:
                         header_evidence = {
                             **header_recovery,
@@ -309,6 +338,21 @@ def _extract_pdf_table_rows_in_process(
             "pdfplumber could not extract bounded table geometry"
         ) from exc
     return evidence
+
+
+def _page_protocol_scope(page: Any) -> tuple[list[str], list[float], list[int | None]]:
+    """Decode heading coordinates once, only on pages containing DNP3 glyphs."""
+    if "dnp3" not in "".join(str(c.get("text", "")) for c in page.chars).casefold():
+        return [], [], []
+    lines: list[list[Any]] = []
+    for word in sorted(page.extract_words(), key=lambda w: (w["top"], w["x0"])):
+        if not lines or abs(lines[-1][0] - word["top"]) > 2.5:
+            lines.append([float(word["top"]), []])
+        lines[-1][1].append(word)
+    labels = [" ".join(w["text"] for w in sorted(words, key=lambda w: w["x0"]))
+              for _top, words in lines]
+    contexts = protocol_contexts(labels)
+    return labels, [top for top, _words in lines], contexts if any(c is not None for c in contexts) else []
 
 
 class _CommonCells:

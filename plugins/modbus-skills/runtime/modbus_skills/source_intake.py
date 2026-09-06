@@ -19,7 +19,10 @@ from .pdf_extraction import PdfExtractionError, extract_pdf, parse_page_range
 from .pdf_table_extraction import prepare_pdf_records
 from .user_map import (
     UserMapError,
+    UninterpretedContextCapacityError,
     build_literal_source_context,
+    build_uninterpreted_source_context,
+    validate_uninterpreted_source_fields,
     validate_selection_entry_structure,
 )
 
@@ -146,10 +149,33 @@ def compile_source_descriptor(
     points = _disambiguate_oem_point_ids(
         [_oem_point(point, index) for index, point in enumerate(canonical["points"])]
     )
+    additional_context_hold = None
     try:
         literal_context = build_literal_source_context(
             _literal_context_entries(canonical["points"], points)
         )
+        if source_format != "pdf":
+            try:
+                additional_context = build_uninterpreted_source_context(
+                    _uninterpreted_context_entries(canonical["points"], points),
+                    existing_context=literal_context,
+                )
+            except UninterpretedContextCapacityError as exc:
+                # Preserve the useful map and old context, never a silently
+                # truncated new registry or a claim of full source fidelity.
+                rows = fields = 0
+                for entry in _uninterpreted_context_entries(canonical["points"], points):
+                    validate_uninterpreted_source_fields(entry["fields"])
+                    rows += 1
+                    fields += len(entry["fields"])
+                additional_context_hold = {
+                    "code": "source.uninterpreted-fields-incomplete", "severity": "hold", "blocking": True,
+                    "message": f"Additional source fields exceeded evidence capacity: {fields} scalar field associations across {rows} source rows were not retained. The existing map remains partial.",
+                    "details": {"source_sha256": source_hash, "omitted_source_rows": rows,
+                                "omitted_scalar_field_associations": fields, "capacity_reason": str(exc)},
+                }
+            else:
+                literal_context.extend(additional_context)
     except UserMapError as exc:
         raise SourceIntakeError(str(exc)) from exc
     holds = [
@@ -158,6 +184,8 @@ def compile_source_descriptor(
         if isinstance(hold, Mapping)
         and str(hold.get("code", "")) not in _DEPLOYMENT_ONLY_HOLDS
     ]
+    if additional_context_hold is not None:
+        holds.append(additional_context_hold)
     rejected = canonical.get("rejected_rows", ())
     if isinstance(rejected, Sequence) and not isinstance(
         rejected, (str, bytes, bytearray)
@@ -513,6 +541,29 @@ def _literal_context_entries(
                        "source_field": source_field}
 
 
+def _uninterpreted_context_entries(
+    canonical_points: Sequence[Mapping[str, Any]],
+    oem_points: Sequence[Mapping[str, Any]],
+):
+    """Keep otherwise lost scalar columns, not known fields or nested metadata."""
+    for point, oem_point in zip(canonical_points, oem_points):
+        unmapped = point.get("unmapped_fields", {})
+        if not isinstance(unmapped, Mapping):
+            continue
+        fields = {
+            key: value for key, value in unmapped.items()
+            if isinstance(key, str) and key not in _OEM_POINT_FIELDS
+            and key not in {"oem_point_id", "source_refs", "notes", "units_notes", "minimum", "maximum"}
+            and re.fullmatch(r"(units_notes|notes|minimum|maximum)(?:_(?:[2-9]|[1-9][0-9]+))?", key) is None
+            and isinstance(value, (str, int, float)) and not isinstance(value, bool)
+            and value not in (None, "")
+            and not (isinstance(value, str) and not value.strip())
+        }
+        if fields:
+            yield {"fields": fields, "oem_point_id": oem_point["oem_point_id"],
+                   "source_ref": oem_point["source_refs"][0]}
+
+
 def _oem_point(point: Mapping[str, Any], index: int) -> dict[str, Any]:
     point_id = point.get("logical_point_id", point.get("point_id"))
     if not isinstance(point_id, str) or not point_id:
@@ -594,6 +645,8 @@ def _source_field_evidence(
         for claim in claims:
             if isinstance(claim, Mapping) and isinstance(claim.get("field"), str):
                 target = _CLAIM_TO_POINT_FIELD.get(str(claim["field"]))
+                if claim.get("parser_id") == "structured.holding-header/v1" and claim["field"] == "area":
+                    target = "area"
                 if target is not None:
                     raw_claims.setdefault(target, claim)
     raw_evidence = point.get("source_evidence", ())
@@ -650,6 +703,9 @@ def _source_field_evidence(
             _source_ref(locator, 0) if isinstance(locator, Mapping) else source_ref
         )
         claim_ref_text = point_evidence_refs({"source_refs": [claim_ref]})[0]
+        comparison_value = (raw_claim.get("value")
+                            if raw_claim.get("parser_id") == "structured.holding-header/v1"
+                            else item.get("value", normalized_value))
         result.append(
             {
                 "field": target,
@@ -663,7 +719,7 @@ def _source_field_evidence(
                     "unresolved"
                     if raw_value not in (None, "") and normalized_value in (None, "")
                     else "contradiction"
-                    if item.get("value", normalized_value) != normalized_value
+                    if comparison_value != normalized_value
                     else "confirmed"
                 ),
             }
