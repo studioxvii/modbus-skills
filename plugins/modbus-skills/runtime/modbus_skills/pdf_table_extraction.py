@@ -266,9 +266,11 @@ def _extract_pdf_table_rows_in_process(
     if cell_partition_requests is not None:
         _validate_partition_requests(cell_partition_requests,partition_pages)
         indexed: dict[tuple[int,str],list[Any]]={}
+        by_page: dict[int,list[Any]]={}
         for row in cell_partition_requests["rows"]:
             indexed.setdefault((row["page"],row["address"]),[]).append(row)
-        cell_partition_requests={**cell_partition_requests,"_rows_by_identity":indexed}
+            by_page.setdefault(row["page"],[]).append(row)
+        cell_partition_requests={**cell_partition_requests,"_rows_by_identity":indexed,"_rows_by_page":by_page}
     evidence = {"records": [], "quarantined_records": []}
     merged_budget = [0]
     try:
@@ -779,6 +781,14 @@ def _requested_partition_fields(table: Any, cells: Sequence[Sequence[Any]], reco
     if len(columns.get("name",()))==1:
         index=columns["name"][0][0]
         name_box=body[index] if index<len(body) else None
+        # A number in a name continuation can fall left of a centered name
+        # heading. Demand source-cell proof before allowing that bbox-only
+        # interpretation to survive as a separate register.
+        nearby = request.get("_rows_by_page", {}).get(page, ()) if "_rows_by_page" in request else (
+            r for r in request["rows"] if r["page"] == page)
+        if name_box is not None and any(r["address"] != record.get("source_register")
+                and inside(r["address_bbox"], name_box) for r in nearby):
+            wanted.add("name")
         def owned(bounds):
             selected=[]
             for x0,x1,top,bottom,text in words:

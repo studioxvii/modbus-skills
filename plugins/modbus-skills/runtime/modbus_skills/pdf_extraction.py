@@ -1459,6 +1459,7 @@ def _apply_drawn_name_partitions(
     rows: Sequence[dict[str, Any]],
     word_pages: Mapping[int, Sequence[tuple[float, float, float, float, str]]],
     partitions: Sequence[Mapping[str, Any]], source_sha256: str,
+    *, quarantined: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Reassign only names/descriptions proved by the same drawn row cells."""
     def valid_box(box: Any) -> bool:
@@ -1519,12 +1520,49 @@ def _apply_drawn_name_partitions(
     for proof in partitions:
         if isinstance(proof, Mapping) and validate(proof):
             indexed.setdefault((proof["source_locator"]["page"], proof["cells"][0]["raw_value"]), []).append(proof)
+    page_proofs: dict[int,list[tuple[Any,Any]]] = {}
+    for (page,address), proofs in indexed.items():
+        page_proofs.setdefault(page,[]).append((address,proofs))
     keys = [(r.get("_source",{}).get("page"),r.get("source_register")) for r in rows]
     counts: dict[tuple[Any, Any], int] = {}
     for key in keys:
         counts[key] = counts.get(key,0)+1
     result = []
     for row,key in zip(rows,keys):
+        if quarantined is not None and row.get("_source",{}).get("parser_id") == "pdftotext-bbox-layout/v1":
+            address_claims = [c for c in row.get("_claims",()) if c.get("field") in _ADDRESS_FIELDS
+                and c.get("value") == key[1] and c.get("source_locator",{}).get("page") == key[0]
+                and c.get("source_locator",{}).get("region") == row.get("_source",{}).get("region")]
+            crossed = []
+            if address_claims and all(c.get("source_locator",{}).get("bbox") ==
+                    address_claims[0].get("source_locator",{}).get("bbox") for c in address_claims):
+                claim_box = address_claims[0]["source_locator"].get("bbox")
+                if valid_box(claim_box):
+                    for address, proofs in page_proofs.get(key[0],()):
+                        page = key[0]
+                        if address == key[1] or len(proofs) != 1:
+                            continue
+                        for cell in proofs[0]["cells"]:
+                            if cell["field"] != "name" or not inside(claim_box,cell["bbox"]):
+                                continue
+                            owned = [w for w in word_pages.get(page,())
+                                     if inside([w[0],w[2],w[1],w[3]],claim_box)]
+                            cell_words = [w for w in word_pages.get(page,())
+                                          if inside([w[0],w[2],w[1],w[3]],cell["bbox"])]
+                            # Readers use different font ascent/descent boxes.
+                            # Bind the exact word box inside the same drawn cell
+                            # and require complete cell glyph/text equality.
+                            if (owned and cell_words and ''.join(w[4] for w in sorted(owned,key=lambda w:(w[2],w[0]))) == key[1]
+                                    and ''.join(re.sub(r'\s+','',w[4]) for w in sorted(cell_words,key=lambda w:(w[2],w[0])))
+                                        == ''.join(g["text"] for g in cell["glyphs"])
+                                    and [min(w[0] for w in owned),min(w[2] for w in owned),
+                                         max(w[1] for w in owned),max(w[3] for w in owned)] == list(claim_box)):
+                                crossed.append(proofs[0])
+            if len(crossed) == 1:
+                quarantined.append({**row,"code":"pdf-address-from-nonaddress-cell",
+                    "_address_cell_conflict":{"method":"same-source-drawn-name-cell-conflict/v1",
+                        "drawn_cell_evidence":_emit_drawn_glyph_spans(crossed[0])}})
+                continue
         candidates = indexed.get(key, ())
         if len(candidates) != 1 or counts[key] != 1:
             result.append(row); continue
@@ -2523,12 +2561,14 @@ def extract_pdf(
     except PdfTableExtractionError:
         grid = []
         grid_source_quarantined = []
+    address_quarantined: list[dict[str, Any]] = []
     if partitions:
-        coordinate = _apply_drawn_name_partitions(coordinate,word_pages,partitions,stable_input_hash(source))
+        coordinate = _apply_drawn_name_partitions(coordinate,word_pages,partitions,stable_input_hash(source),quarantined=address_quarantined)
         grid = _apply_drawn_name_partitions(grid,word_pages,partitions,stable_input_hash(source))
         grid_source_quarantined = _apply_drawn_name_partitions(grid_source_quarantined,word_pages,partitions,stable_input_hash(source))
     records, quarantined, conflicts = _reconcile(strict, coordinate)
     quarantined.extend(grid_source_quarantined)
+    quarantined.extend(address_quarantined)
     if grid:
         records, quarantined, grid_conflicts = _reconcile(records, grid, quarantined_records=quarantined,
                                                        source_sha256=stable_input_hash(source))
@@ -2668,12 +2708,14 @@ def _extract_large_pdf_in_chunks(
                 record_limit=max(0,_MAX_CHUNK_RECORDS-len(records)-len(rejected)-len(quarantined)-len(conflicts)),
             )
             budget_holds.extend(scope_holds)
+            address_quarantined: list[dict[str, Any]] = []
             if partitions:
-                coordinate = _apply_drawn_name_partitions(coordinate,word_pages,partitions,stable_input_hash(source))
+                coordinate = _apply_drawn_name_partitions(coordinate,word_pages,partitions,stable_input_hash(source),quarantined=address_quarantined)
                 grid = _apply_drawn_name_partitions(grid,word_pages,partitions,stable_input_hash(source))
                 grid_source_quarantined = _apply_drawn_name_partitions(grid_source_quarantined,word_pages,partitions,stable_input_hash(source))
             chunk_records, chunk_quarantined, chunk_conflicts = _reconcile(strict,coordinate)
             chunk_quarantined.extend(grid_source_quarantined)
+            chunk_quarantined.extend(address_quarantined)
             if grid:
                 chunk_records, chunk_quarantined, grid_conflicts = _reconcile(
                     chunk_records, grid, quarantined_records=chunk_quarantined,
