@@ -83,6 +83,272 @@ def drawn_projection_input():
 
 
 class ExplicitColumnRoleTests(unittest.TestCase):
+    def test_rejected_native_access_continuation_preserves_exact_line_span(self):
+        from modbus_skills.compiler_contracts import _assert_portable
+        text='\n'.join([line([(0,'Address'),(15,'Name'),(35,'Access'),(50,'Description')]),
+                        line([(0,'40001'),(15,'Synthetic'),(35,'Read'),(50,'Mode')]),
+                        line([(15,'Continuation'),(35,'/Write'),(50,'Literal Ω detail')])])
+        rows,rejected=pdf.parse_layout_rows(text)
+        self.assertEqual(1,len(rows));self.assertEqual(1,len(rejected))
+        row=rejected[0];self.assertEqual('pdf-row-address-invalid',row['code'])
+        claim=next(c for c in row['_claims'] if c['field']=='access')
+        self.assertNotIn('value',claim);self.assertNotIn('raw_value',claim)
+        span=claim['value_source_span'];literal=row['_source']['excerpt'];start,end=span['character_span']
+        self.assertEqual('/Write',literal[start:end])
+        self.assertEqual(pdf.stable_input_hash(b'/Write'),span['value_sha256'])
+        self.assertEqual(pdf.stable_input_hash(literal.encode()),span['excerpt_sha256'])
+        self.assertEqual(pdf.stable_input_hash(text.splitlines()[2].encode()),span['source_line_sha256'])
+        self.assertEqual({'page':1,'line':3,'region':'p1:l3'},claim['source_locator'])
+        self.assertEqual('Access',claim['raw_header']);self.assertEqual(2,claim['column_index'])
+        _assert_portable(row)
+
+    def test_rejected_span_never_encodes_imported_actual_path_or_ambiguous_source(self):
+        from modbus_skills.compiler_contracts import _assert_portable,CompilerContractError
+        header=line([(0,'Address'),(15,'Name'),(35,'Access'),(60,'Description')])
+        for value,name,description,parser in [('/tmp/synthetic','Continuation','Note','pdftotext-layout/v1'),
+                ('/Write','','','pdftotext-layout/v1'),('/ Write','','','pdftotext-layout/v1'),('/Write','/Write','Note','pdftotext-layout/v1'),
+                ('/Write','Continuation','Note','external-ocr-layout/v1')]:
+            body=line([(15,name),(35,value),(60,description)])
+            _rows,rejected=pdf.parse_layout_rows(header+'\n'+body,parser_id=parser)
+            if not name and not description:
+                self.assertEqual([],_rows)
+                if rejected:
+                    self.assertNotIn('original_excerpt_span',rejected[0]['_source'])
+                    with self.assertRaises(CompilerContractError):_assert_portable(rejected)
+                continue
+            claim=next(c for c in rejected[0]['_claims'] if c['field']=='access')
+            self.assertEqual(value,claim['value']);self.assertEqual(value,claim['raw_value'])
+            with self.assertRaises(CompilerContractError):_assert_portable(rejected)
+        imported={'code':'pdf-row-address-invalid','_claims':[{'field':'access','value':'/Write'}]}
+        with self.assertRaises(CompilerContractError):_assert_portable(imported)
+        rows,rejected=pdf.parse_layout_rows(header+'\n'+line([(0,'40001'),(15,'Point'),(35,'/Write'),(60,'Complete cell')]))
+        self.assertEqual(1,len(rows));self.assertEqual('/Write',rows[0]['access'])
+        with self.assertRaises(CompilerContractError):_assert_portable(rows)
+
+    def test_rejected_leading_fragment_retains_only_actual_native_whitespace(self):
+        from modbus_skills.compiler_contracts import _assert_portable
+        header=line([(0,'Address'),(15,'Name'),(35,'Access'),(60,'Description')])
+        body=line([(35,'/Write'),(60,'Continuation text')])
+        rows,rejected=pdf.parse_layout_rows(header+'\n'+body)
+        self.assertEqual(1,len(rejected));record=rejected[0]
+        self.assertEqual(body,record['_source']['excerpt'])
+        span=record['_source']['original_excerpt_span'];start,end=span['character_span']
+        self.assertEqual(body.strip(),body[start:end])
+        self.assertEqual(pdf.stable_input_hash(body.strip().encode()),span['value_sha256'])
+        claim=next(c for c in record['_claims'] if c['field']=='access')
+        start,end=claim['value_source_span']['character_span']
+        self.assertEqual('/Write',body[start:end]);_assert_portable(record)
+
+    def test_superseded_access_fragment_retains_exact_source_span_not_path_scalar(self):
+        from modbus_skills.compiler_contracts import _assert_portable
+        for fragment in ('/Write','/ Write'):
+            row,words,proof=self.access_fragment_input(fragment)
+            result=pdf._apply_drawn_name_partitions([row],words,[proof],'a'*64)[0]
+            self.assertEqual('Read /Write',result['access'])
+            claim=result['_claims'][1]
+            self.assertNotIn('value',claim)
+            self.assertEqual(row['_claims'][1]['source_locator'],claim['source_locator'])
+            span=claim['value_source_span'];literal=re.sub(r'\s+','',span['cell_literal'])
+            start,end=span['glyph_span'];characters=list(literal[start:end])
+            for offset,codepoint in span['whitespace']:
+                characters.insert(offset,chr(codepoint))
+            reconstructed=''.join(characters)
+            self.assertEqual(fragment,reconstructed)
+            self.assertEqual(pdf.stable_input_hash(fragment.encode()),span['value_sha256'])
+            self.assertEqual(pdf.stable_input_hash(proof),span['drawn_cell_evidence_sha256'])
+            emitted=next(c['drawn_cell_evidence'] for c in result['_claims'] if 'drawn_cell_evidence' in c)
+            self.assertEqual(proof,pdf._restore_drawn_glyph_spans(emitted))
+            _assert_portable(result)
+
+    def test_glyph_span_rejects_missing_forged_wrong_span_hash_and_path_cells(self):
+        from modbus_skills.compiler_contracts import _assert_portable,CompilerContractError
+        row,words,proof=self.access_fragment_input()
+        emitted=pdf._emit_drawn_glyph_spans(proof)
+        self.assertEqual(proof,pdf._restore_drawn_glyph_spans(emitted))
+        for kind in ('missing','forged-text','wrong-span','wrong-hash','full-path'):
+            bad=deepcopy(emitted)
+            cell=next(c for c in bad['cells'] if c['field']=='access')
+            glyph=next(g for g in cell['glyphs'] if 'text_span' in g)
+            if kind=='missing':glyph.pop('text_span')
+            elif kind=='forged-text':glyph['text']='/'
+            elif kind=='wrong-span':glyph['text_span']=[0,1]
+            elif kind=='wrong-hash':bad['glyph_span_encoding']['unencoded_proof_sha256']='b'*64
+            else:cell['raw_value']='/synthetic/private'
+            with self.assertRaises((pdf.PdfExtractionError,CompilerContractError),msg=kind):
+                pdf._restore_drawn_glyph_spans(bad)
+        path_cell=deepcopy(proof);path_cell['cells'][1]['raw_value']='/synthetic/private'
+        self.assertIs(path_cell,pdf._emit_drawn_glyph_spans(path_cell))
+        with self.assertRaises(CompilerContractError):_assert_portable(path_cell)
+
+    def access_fragment_input(self,fragment='/Write'):
+        page,table,values,record=drawn_geometry()
+        values[0][1]='Access';values[1][1]='Read /Write'
+        page.chars=[c for c in page.chars if not 90 <= c['x0'] < 170]
+        for r,text in enumerate(('Access','Read /Write')):
+            page.chars.extend({'text':c,'x0':93+i*3,'x1':96+i*3,'top':r*30+5,'bottom':r*30+15,'upright':True} for i,c in enumerate(text))
+        record=parse_pdf_table_evidence(values,page_number=1,table_index=0)['records'][0]
+        proof=grid._drawn_name_partition(page,table,values,record,'a'*64)
+        row,_,_=drawn_projection_input();row['access']=fragment
+        row['_claims'].append({'parser_id':'pdftotext-bbox-layout/v1','field':'access','value':fragment,'source_locator':{'page':1,'region':'p1:y35','bbox':[108,35,126,45]}})
+        words=[(c['x0'],c['x1'],c['top'],c['bottom'],c['text']) for c in page.chars if c['top']>=30 and c['text'].strip() and not 90<=c['x0']<170]
+        words.append((93,105,35,45,'Read'))
+        words.extend([(108,126,35,45,'/Write')] if fragment=='/Write' else [(108,111,35,45,'/'),(111,126,35,45,'Write')])
+        return row,{1:words},proof
+
+    def test_access_span_requires_actual_superseded_same_cell_word_identity(self):
+        for kind in ('wrong-page','wrong-box','wrong-parser','no-boundary','unrelated-fragment','actual-path-cell'):
+            row,words,proof=self.access_fragment_input()
+            claim=row['_claims'][1]
+            if kind=='wrong-page':claim['source_locator']['page']=2
+            elif kind=='wrong-box':claim['source_locator']['bbox'][0]=0
+            elif kind=='wrong-parser':claim['parser_id']='imported'
+            elif kind=='no-boundary':words[1]=[w for w in words[1] if w[4]!='Read' and w[4]!='/Write']+[(93,126,35,45,'Read/Write')]
+            elif kind=='unrelated-fragment':claim['value']='/elsewhere'
+            else:
+                cell=next(c for c in proof['cells'] if c['field']=='access');cell['raw_value']='/Write';cell['glyphs']=cell['glyphs'][4:]
+            result=pdf._apply_drawn_name_partitions([row],words,[proof],'a'*64)[0]
+            self.assertEqual(claim,result['_claims'][1],kind)
+
+    def test_large_grid_scopes_are_disjoint_and_share_original_deadline(self):
+        calls=[]
+        def recover(path,**kwargs):
+            calls.append(kwargs)
+            return ([{'_source':{'page':p,'region':f'p{p}:t0:r1'}} for p in kwargs['pages']],[],kwargs['pages'])
+        with mock.patch.object(pdf,'_recover_grid_rows',side_effect=recover),mock.patch.object(pdf.time,'monotonic',side_effect=[0,1,2]):
+            rows,rejected,holds=pdf._recover_grid_scopes(Path('source.pdf'),pages=list(range(1,71)),deadline=10,fresh_body_proofs={},cell_partition_pages=[],fresh_name_partitions=[],cell_partition_requests=None)
+        self.assertEqual(list(range(1,71)),[p for call in calls for p in call['pages']])
+        self.assertEqual([32,32,6],[len(c['pages']) for c in calls])
+        self.assertEqual([10,9,8],[c['timeout_seconds'] for c in calls])
+        self.assertEqual(70,len(rows));self.assertEqual([],holds)
+
+    def test_grid_scope_deadline_preserves_results_and_explicit_unprocessed_pages(self):
+        with mock.patch.object(pdf,'_recover_grid_rows',return_value=([{'name':'Kept'}],[],[])) as recover,mock.patch.object(pdf.time,'monotonic',side_effect=[0,11]):
+            rows,rejected,holds=pdf._recover_grid_scopes(Path('source.pdf'),pages=list(range(1,66)),deadline=10,fresh_body_proofs={},cell_partition_pages=[],fresh_name_partitions=[],cell_partition_requests=None)
+        self.assertEqual([{'name':'Kept'}],rows);self.assertEqual(1,recover.call_count)
+        self.assertEqual(list(range(33,66)),holds[0]['unprocessed_pages'])
+
+    def test_grid_scope_budget_failure_never_repeats_failed_pages(self):
+        error=grid.PdfTableEvidenceBudgetError('bounded',page=1,table_index=0,stage='claim-association')
+        with mock.patch.object(pdf,'_recover_grid_rows',side_effect=[error,([{'name':'Later'}],[],[])]) as recover,mock.patch.object(pdf.time,'monotonic',return_value=0):
+            rows,rejected,holds=pdf._recover_grid_scopes(Path('source.pdf'),pages=list(range(1,34)),deadline=60,fresh_body_proofs={},cell_partition_pages=[],fresh_name_partitions=[],cell_partition_requests=None)
+        self.assertEqual(2,recover.call_count);self.assertEqual([{'name':'Later'}],rows)
+        self.assertEqual(list(range(1,33)),holds[0]['scope_pages'])
+
+    def test_grid_scope_record_allowance_is_shared_and_omission_explicit(self):
+        with mock.patch.object(pdf,'_recover_grid_rows',return_value=([{'name':'A'},{'name':'B'},{'name':'C'}],[{'name':'Held'}],[])),mock.patch.object(pdf.time,'monotonic',return_value=0):
+            rows,rejected,holds=pdf._recover_grid_scopes(Path('source.pdf'),pages=[1],deadline=60,fresh_body_proofs={},cell_partition_pages=[],fresh_name_partitions=[],cell_partition_requests=None,record_limit=2)
+        self.assertEqual([{'name':'A'},{'name':'B'}],rows);self.assertEqual([],rejected)
+        self.assertEqual(2,holds[0]['omitted_due_to_record_limit'])
+
+    def test_partition_demand_ignores_agreeing_rows_and_requests_only_changed_field(self):
+        page,table,values,record=drawn_geometry()
+        request={'rows':[{'page':1,'address':'40011','address_bbox':[3,35,18,45],'fields':{'name':'VAX','description':'Phase X voltage'}}], 'words':{}}
+        self.assertEqual([],grid._requested_partition_fields(table,values,record,request))
+        request['rows'][0]['fields']['description']='voltage'
+        self.assertEqual(['description'],grid._requested_partition_fields(table,values,record,request))
+        proof=grid._drawn_name_partition(page,table,values,record,'a'*64,requested_fields=['description'])
+        self.assertEqual(['address','description'],[c['field'] for c in proof['cells']])
+        self.assertIsNone(grid._drawn_name_partition(page,table,values,record,'a'*64,requested_fields=[]))
+        request['rows'].append(deepcopy(request['rows'][0]))
+        self.assertEqual([],grid._requested_partition_fields(table,values,record,request))
+        request['rows'].pop();request['rows'][0]['address_bbox']=[170,35,185,45]
+        self.assertEqual([],grid._requested_partition_fields(table,values,record,request))
+
+    def test_partition_request_bytes_are_bounded_before_worker_spawn(self):
+        with mock.patch.object(grid,'_MAX_GRID_OUTPUT_BYTES',1),mock.patch.object(grid.subprocess,'Popen') as spawn:
+            with self.assertRaises(grid.PdfTableExtractionError):
+                grid._run_grid_worker(Path('synthetic.pdf'),[1],60,[1],{'source_sha256':'a'*64,'rows':[],'words':{}})
+            spawn.assert_not_called()
+
+    def test_partition_request_rejects_incomplete_and_nonfinite_identity(self):
+        valid={'source_sha256':'a'*64,'rows':[{'page':1,'address':'40011','address_bbox':[3,35,18,45],'fields':{'name':'VAX'}}],'words':{'1':[[3,18,35,45,'40011']]}}
+        grid._validate_partition_requests(valid,{1})
+        for kind in ('page','address','bbox','field','word'):
+            bad=deepcopy(valid)
+            if kind=='page':bad['rows'][0]['page']=True
+            elif kind=='address':bad['rows'][0]['address']=''
+            elif kind=='bbox':bad['rows'][0]['address_bbox'][0]=float('nan')
+            elif kind=='field':bad['rows'][0]['fields']['datatype']='uint32'
+            else:bad['words']['1'][0][0]=float('inf')
+            with self.assertRaises(grid.PdfTableExtractionError):grid._validate_partition_requests(bad,{1})
+
+    @unittest.skipUnless(importlib.util.find_spec('pdfplumber'),'PDF reader unavailable')
+    def test_unneeded_partition_does_not_consume_shared_near_zero_budget(self):
+        from test_pdf_description_cells import write_pdf
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'agree.pdf'
+            write_pdf(path,[['Address','Name','Description','Access'],['40011','VAX','Phase X','R']],[20,100,180,320,400])
+            import hashlib
+            request={'source_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),'rows':[{'page':1,'address':'40011','address_bbox':[23,113,47,121],'fields':{'name':'VAX','description':'Phase X','access':'R'}}],'words':{}}
+            with mock.patch.object(grid,'_MAX_MERGED_PROOF_BYTES',1):
+                good=grid._extract_pdf_table_rows_in_process(path,pages=[1],cell_partition_pages=[1],cell_partition_requests=request)
+                self.assertEqual(1,len(good['records']))
+                self.assertNotIn('_drawn_name_partition',good['records'][0])
+                request['rows'][0]['fields']['name']='Spilled name'
+                with self.assertRaises(grid.PdfTableEvidenceBudgetError):
+                    grid._extract_pdf_table_rows_in_process(path,pages=[1],cell_partition_pages=[1],cell_partition_requests=request)
+
+    def test_source_owned_access_partition_corrects_fragment_without_access_alias(self):
+        page,table,values,record=drawn_geometry()
+        values[0][1]='Access'; values[1][1]='Read /Write'
+        page.chars=[c for c in page.chars if not 90 <= c['x0'] < 170]
+        for r,text in enumerate(('Access','Read /Write')):
+            page.chars.extend({'text':c,'x0':93+i*3,'x1':96+i*3,'top':r*30+5,'bottom':r*30+15,'upright':True} for i,c in enumerate(text))
+        record=parse_pdf_table_evidence(values,page_number=1,table_index=0)['records'][0]
+        proof=grid._drawn_name_partition(page,table,values,record,'a'*64)
+        row,_,_=drawn_projection_input();row['access']='/Write'
+        words={1:[(c['x0'],c['x1'],c['top'],c['bottom'],c['text']) for c in page.chars if c['top']>=30 and c['text'].strip()]}
+        result=pdf._apply_drawn_name_partitions([row],words,[proof],'a'*64)[0]
+        self.assertEqual('Read /Write',result['access'])
+        self.assertEqual(row['_claims'],result['_claims'][:len(row['_claims'])])
+        self.assertEqual([row],pdf._apply_drawn_name_partitions([row],words,[],'a'*64))
+        for changed in ('header','cell','glyph','address'):
+            bad=deepcopy(proof)
+            access=next(c for c in bad['cells'] if c['field']=='access')
+            if changed=='header':access['raw_header']='Unrelated text'
+            elif changed=='cell':access['bbox'][0]=0
+            elif changed=='glyph':access['glyphs'].pop()
+            else:bad['cells'][0]['raw_value']='40012'
+            self.assertEqual([row],pdf._apply_drawn_name_partitions([row],words,[bad],'a'*64),changed)
+
+    def test_grid_name_restores_only_independent_owned_word_boundaries(self):
+        page,table,values,record=drawn_geometry()
+        values[0][3]='Notes' # Name-only cell proof must not require a description role.
+        values[1][2]='OutputID'
+        page.chars=[c for c in page.chars if not 170 <= c['x0'] < 280]
+        for r,text in enumerate(('Parameter Name','OutputID')):
+            page.chars.extend({'text':c,'x0':173+i*3,'x1':176+i*3,'top':r*30+5,'bottom':r*30+15,'upright':True} for i,c in enumerate(text))
+        record=parse_pdf_table_evidence(values,page_number=1,table_index=0)['quarantined_records'][0]
+        record['_claims']=[{'parser_id':'pdfplumber-table/v1','field':'name','value':'OutputID','source_locator':{'page':1,'row':1,'region':'p1:t0:r1'}}]
+        proof=grid._drawn_name_partition(page,table,values,record,'a'*64)
+        words={1:[(3,18,35,45,'40011'),(173,191,35,45,'Output'),(191,197,35,45,'ID')]}
+        result=pdf._apply_drawn_name_partitions([record],words,[proof],'a'*64)[0]
+        self.assertEqual('Output ID',result['name'])
+        self.assertEqual(record['_claims'],result['_claims'][:len(record['_claims'])])
+        self.assertEqual(['Output','ID'],[w['text'] for w in result['_claims'][-1]['word_boundary_evidence']])
+        for mutation in ('wrong-source','cross-cell','extra','missing','duplicate','no-boundary','wrong-row'):
+            altered=deepcopy(words);proofs=[deepcopy(proof)];expected=record
+            if mutation=='wrong-source':proofs[0]['source_sha256']='b'*64
+            elif mutation=='cross-cell':altered[1][1]=(160,191,35,45,'Output')
+            elif mutation=='extra':altered[1].append((200,203,35,45,'X'))
+            elif mutation=='missing':altered[1].pop()
+            elif mutation=='duplicate':proofs.append(deepcopy(proof))
+            elif mutation=='no-boundary':altered[1]=[(3,18,35,45,'40011'),(173,197,35,45,'OutputID')]
+            elif mutation=='wrong-row':proofs[0]['source_locator']['region']='p1:t1:r1'
+            self.assertEqual([expected],pdf._apply_drawn_name_partitions([record],altered,proofs,'a'*64),mutation)
+
+    def test_literal_only_geometry_reuses_the_table_row_glyph_index(self):
+        page,table,values,_=drawn_geometry()
+        values[0][3]='Notes'
+        prepared=grid._prepare_description_cell_geometry(page,table,values,include_name=True)
+        self.assertIs(prepared['rows'],table.rows)
+        self.assertEqual(2,len(prepared['glyphs_by_row']))
+
+    def test_actual_absolute_source_path_still_fails_portability(self):
+        from modbus_skills.compiler_contracts import _assert_portable,CompilerContractError
+        for value in ('/tmp/synthetic-secret','C:\\synthetic\\secret','~/synthetic-secret'):
+            with self.assertRaises(CompilerContractError):_assert_portable({'source_field_evidence':[{'raw_value':value}]})
+
     def readers(self, text):
         return pdf.parse_layout_rows(text)[0], pdf.parse_bbox_rows(bbox(text))
 
@@ -362,8 +628,9 @@ class ExplicitColumnRoleTests(unittest.TestCase):
              mock.patch.object(pdf,'_recover_grid_rows',return_value=([],[],[])) as worker:
             result=pdf.extract_pdf(Path('large.pdf'),b'synthetic')
         self.assertEqual(1,sum('-layout' in c for c in calls))
-        self.assertEqual(2,worker.call_count)
-        self.assertTrue(all(len(c.kwargs['pages'])<=256 for c in worker.call_args_list))
+        self.assertEqual(9,worker.call_count)
+        self.assertEqual(list(range(1,258)),[p for c in worker.call_args_list for p in c.kwargs['pages']])
+        self.assertTrue(all(len(c.kwargs['pages'])<=32 for c in worker.call_args_list))
         self.assertTrue(all(int(c[c.index('-l')+1])-int(c[c.index('-f')+1])<256 for c in calls if '-bbox-layout' in c))
         self.assertEqual(257,len(result['records']))
 

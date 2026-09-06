@@ -52,8 +52,16 @@ def synthetic_pdf(path, *, mixed=False, glyphs=True):
 class ZeroGlyphGridTests(unittest.TestCase):
     def fake_document(self, pages):
         document = mock.MagicMock()
-        document.__enter__.return_value.pages = pages
-        return mock.patch.dict(sys.modules, {"pdfplumber": SimpleNamespace(open=lambda _path: document)})
+        def open_document(_path, **options):
+            selected = options.get("pages")
+            visible = []
+            for number, page in enumerate(pages, 1):
+                if selected is None or number in selected:
+                    page.page_number = number
+                    visible.append(page)
+            document.__enter__.return_value.pages = visible
+            return document
+        return mock.patch.dict(sys.modules, {"pdfplumber": SimpleNamespace(open=open_document)})
 
     def test_zero_chars_skip_geometry_regardless_of_images(self):
         for images in ([], [object()]):

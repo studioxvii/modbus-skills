@@ -709,6 +709,54 @@ def parse_layout_rows(
             )
             if parsed_address is None or parsed_address.get("status") != "single":
                 locator = {"page": page_number, "line": line_number, "region": f"p{page_number}:l{line_number}"}
+                literal_claims = [
+                    {**_claim(parser_id, field, values.get(field, ""), locator),
+                     "raw_header": raw_header, "raw_value": values.get(field, ""),
+                     "column_index": index}
+                    for index, (_anchor, field, raw_header) in enumerate(header)
+                ]
+                # A rejected continuation is not a complete cell or a point.
+                # Preserve the native Access slash fragment as an exact span
+                # of its retained portable source line, without assigning a
+                # parent address or making it an executable access claim.
+                # Imported/OCR claims and complete path-valued cells never
+                # enter this fresh native-line representation.
+                excerpt = line.strip()[:300]
+                excerpt_span = None
+                if (parser_id == "pdftotext-layout/v1" and excerpt.startswith("/")
+                        and len(excerpt.split()) > 1 and line[:1].isspace()
+                        and any(c["field"] != "access" and c["value"].strip() for c in literal_claims)
+                        and any(c["field"] == "access" and re.fullmatch(r"/\s*Write",c["value"],re.I)
+                                and excerpt.count(c["value"]) == 1 for c in literal_claims)):
+                    # Keep only whitespace actually present in the captured
+                    # native line. Do not prepend padding to a path or extend
+                    # the existing300-character evidence bound.
+                    native_excerpt = line[:300]
+                    start = native_excerpt.find(excerpt)
+                    if start >= 0:
+                        excerpt_span = {"method":"same-native-source-line-span/v1",
+                            "character_span":[start,start+len(excerpt)],
+                            "value_sha256":stable_input_hash(excerpt.encode()),
+                            "source_line_sha256":stable_input_hash(line.encode())}
+                        excerpt = native_excerpt
+                if parser_id == "pdftotext-layout/v1" and not excerpt.startswith(("/","~/","\\")):
+                    for claim in literal_claims:
+                        fragment = claim["value"]
+                        start = excerpt.find(fragment) if fragment else -1
+                        if (claim["field"] != "access" or re.fullmatch(r"/\s*Write",fragment,re.I) is None
+                                or start < 0 or excerpt.find(fragment,start+1) >= 0):
+                            continue
+                        claim.pop("value");claim.pop("raw_value")
+                        claim["value_status"] = "non-executable-source-line-fragment"
+                        claim["value_source_span"] = {
+                            "method":"same-native-source-line-span/v1",
+                            "excerpt_field":"_source.excerpt",
+                            "character_span":[start,start+len(fragment)],
+                            "represented_fields":["value","raw_value"],
+                            "value_sha256":stable_input_hash(fragment.encode()),
+                            "excerpt_sha256":stable_input_hash(excerpt.encode()),
+                            "source_line_sha256":stable_input_hash(line.encode()),
+                        }
                 rejected.append(
                     {
                         "code": (
@@ -722,17 +770,13 @@ def parse_layout_rows(
                         # A rejected scalar interpretation does not erase the
                         # source table. These are literal header-associated
                         # claims, never executable point fields or expansion.
-                        "_claims": [
-                            {**_claim(parser_id, field, values.get(field, ""), locator),
-                             "raw_header": raw_header, "raw_value": values.get(field, ""),
-                             "column_index": index}
-                            for index, (_anchor, field, raw_header) in enumerate(header)
-                        ],
+                        "_claims": literal_claims,
                         "_source": {
                             "format": "pdf", "page": page_number, "line": line_number,
                             "region": locator["region"], "parser_id": parser_id,
                             "method": "exact" if parser_id == "pdftotext-layout/v1" else "ocr-derived",
-                            "excerpt": line.strip()[:300],
+                            "excerpt": excerpt,
+                            **({"original_excerpt_span":excerpt_span} if excerpt_span is not None else {}),
                         },
                     }
                 )
@@ -1315,7 +1359,100 @@ def _drawn_partition_pages(strict: Sequence[Mapping[str, Any]], coordinate: Sequ
         names.setdefault((row.get("_source", {}).get("page"), row.get("source_register")), set()).add(str(row.get("name")))
     return sorted({row["_source"]["page"] for row in coordinate
         if (key := (row.get("_source", {}).get("page"), row.get("source_register"))) not in names
-        or (len(names[key]) == 1 and str(row.get("name")) not in names[key])})
+        or (len(names[key]) == 1 and str(row.get("name")) not in names[key])
+        or re.fullmatch(r"/\s*Write", str(row.get("access", "")), re.I)})
+
+
+def _drawn_partition_requests(strict, coordinate, word_pages, source_sha256):
+    pages=set(_drawn_partition_pages(strict,coordinate));rows=[]
+    for row in coordinate:
+        page=row.get("_source",{}).get("page")
+        if page not in pages:
+            continue
+        boxes={tuple(c.get("source_locator",{}).get("bbox",())) for c in row.get("_claims",())
+               if c.get("field") in _ADDRESS_FIELDS and c.get("value")==row.get("source_register")}
+        if len(boxes)!=1 or len(next(iter(boxes)))!=4:
+            continue
+        rows.append({"page":page,"address":row["source_register"],"address_bbox":list(next(iter(boxes))),
+                     "fields":{f:row[f] for f in ("name","description","access","engineering_unit","range") if isinstance(row.get(f),str)}})
+    return {"source_sha256":source_sha256,"rows":rows,"words":{str(p):list(word_pages.get(p,())) for p in sorted(pages)}}
+
+
+def _restore_drawn_glyph_spans(proof: Mapping[str, Any]) -> dict[str, Any]:
+    """Verify the lossless representation of an already source-owned proof."""
+    from .compiler_contracts import _assert_portable
+    metadata = proof.get("glyph_span_encoding", {})
+    if (not isinstance(metadata, Mapping)
+            or metadata.get("method") != "complete-cell-literal-glyph-spans/v1"
+            or re.fullmatch(r"[0-9a-f]{64}",str(metadata.get("unencoded_proof_sha256"))) is None):
+        raise PdfExtractionError("drawn glyph span identity is invalid")
+    restored = {k:v for k,v in proof.items() if k != "glyph_span_encoding"}
+    cells = []
+    for cell in proof.get("cells", ()):
+        copy = dict(cell)
+        for glyph_key,literal_key in (("glyphs","raw_value"),("header_glyphs","raw_header")):
+            literal = cell.get(literal_key)
+            if not isinstance(literal,str):
+                raise PdfExtractionError("drawn glyph span complete literal is missing")
+            _assert_portable(literal)
+            text = re.sub(r"\s+","",literal); offset = 0; glyphs = []
+            for glyph in cell.get(glyph_key, ()):
+                copy_glyph = dict(glyph)
+                if "text_span" in glyph:
+                    span = glyph["text_span"]
+                    if ("text" in glyph or not isinstance(span,list) or len(span) != 2
+                            or any(type(i) is not int for i in span)
+                            or span[0] != offset or not 0 <= span[0] < span[1] <= len(text)):
+                        raise PdfExtractionError("drawn glyph span bounds are invalid")
+                    value = text[span[0]:span[1]]
+                    if not value.startswith(("/","~/","\\")) and not re.match(r"^[A-Za-z]:[/\\]",value):
+                        raise PdfExtractionError("drawn glyph span is not a path-like glyph")
+                    copy_glyph.pop("text_span");copy_glyph["text"] = value
+                value = copy_glyph.get("text")
+                if not isinstance(value,str) or text[offset:offset+len(value)] != value:
+                    raise PdfExtractionError("drawn glyph span glyph sequence is invalid")
+                offset += len(value);glyphs.append(copy_glyph)
+            if offset != len(text):
+                raise PdfExtractionError("drawn glyph span glyph sequence is incomplete")
+            copy[glyph_key] = glyphs
+        cells.append(copy)
+    restored["cells"] = cells
+    if stable_input_hash(restored) != metadata["unencoded_proof_sha256"]:
+        raise PdfExtractionError("drawn glyph span original proof hash differs")
+    return restored
+
+
+def _emit_drawn_glyph_spans(proof: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Encode only fresh glyph fragments; complete path cells stay rejected."""
+    from .compiler_contracts import _assert_portable, CompilerContractError
+    try:
+        for cell in proof["cells"]:
+            _assert_portable(cell["raw_value"]);_assert_portable(cell["raw_header"])
+    except CompilerContractError:
+        return proof
+    changed = False;cells = []
+    for cell in proof["cells"]:
+        copy = dict(cell)
+        for key in ("glyphs","header_glyphs"):
+            offset = 0;glyphs = []
+            for glyph in cell[key]:
+                text = glyph["text"]
+                if text.startswith(("/","~/","\\")) or re.match(r"^[A-Za-z]:[/\\]",text):
+                    glyphs.append({**{k:v for k,v in glyph.items() if k != "text"},
+                                   "text_span":[offset,offset+len(text)]});changed = True
+                else:
+                    glyphs.append(glyph)
+                offset += len(text)
+            copy[key] = glyphs
+        cells.append(copy)
+    if not changed:
+        return proof
+    emitted = {**proof,"cells":cells,"glyph_span_encoding":{
+        "method":"complete-cell-literal-glyph-spans/v1",
+        "unencoded_proof_sha256":stable_input_hash(proof)}}
+    if _restore_drawn_glyph_spans(emitted) != proof:
+        raise PdfExtractionError("drawn glyph span reconstruction differs")
+    return emitted
 
 
 def _apply_drawn_name_partitions(
@@ -1332,7 +1469,8 @@ def _apply_drawn_name_partitions(
         return outer[0] <= inner[0] and inner[2] <= outer[2] and outer[1] <= inner[1] and inner[3] <= outer[3]
     def validate(proof: Mapping[str, Any]) -> bool:
         if (not isinstance(source_sha256,str) or re.fullmatch(r"[0-9a-f]{64}",source_sha256) is None
-                or proof.get("source_sha256") != source_sha256 or proof.get("method") != "same-source-drawn-name-cells/v1"):
+                or proof.get("source_sha256") != source_sha256 or proof.get("method") not in {
+                    "same-source-drawn-name-cells/v1", "same-source-drawn-literal-cells/v1"}):
             return False
         locator = proof.get("source_locator", {})
         if (not isinstance(locator,Mapping) or type(locator.get("page")) is not int or locator["page"] < 1
@@ -1341,10 +1479,16 @@ def _apply_drawn_name_partitions(
                 or re.fullmatch(rf'p{locator["page"]}:t\d+:r{locator["row"]}', locator["region"]) is None):
             return False
         cells = proof.get("cells")
-        if (not isinstance(cells, list) or not 3 <= len(cells) <= 5 or not all(isinstance(c,Mapping) for c in cells)
-                or [c.get("field") for c in cells[:3]] != ["address", "name", "description"]
-                or any(c.get("field") not in {"engineering_unit","range"} for c in cells[3:])
-                or len({c.get("field") for c in cells}) != len(cells)):
+        if not isinstance(cells,list) or not cells or not all(isinstance(c,Mapping) for c in cells):
+            return False
+        fields=[c.get("field") for c in cells]
+        if proof["method"] == "same-source-drawn-name-cells/v1":
+            if not 3 <= len(cells) <= 6 or fields[:3] != ["address","name","description"] or any(
+                    f not in {"engineering_unit","range","access"} for f in fields[3:]):
+                return False
+        elif not 2 <= len(cells) <= 6 or fields[0] != "address" or any(f not in {"name","description","access","engineering_unit","range"} for f in fields[1:]):
+            return False
+        if len(set(fields)) != len(fields):
             return False
         for cell in cells:
             box, head = cell.get("bbox"), cell.get("header_bbox")
@@ -1386,13 +1530,17 @@ def _apply_drawn_name_partitions(
             result.append(row); continue
         proof = candidates[0]
         address_box = proof["cells"][0]["bbox"]
+        grid_owned = row.get("_source",{}).get("parser_id") == "pdfplumber-table/v1" and all(
+            row.get("_source",{}).get(k) == proof["source_locator"][k] for k in ("page","row","region"))
         address_claims = [c for c in row.get("_claims", ()) if c.get("field") in _ADDRESS_FIELDS
                           and str(c.get("value")) == key[1]]
-        if not address_claims or any(not valid_box(c.get("source_locator",{}).get("bbox"))
+        if not grid_owned and (not address_claims or any(not valid_box(c.get("source_locator",{}).get("bbox"))
                 or c.get("source_locator",{}).get("page") != key[0]
-                or not inside(c["source_locator"]["bbox"],address_box) for c in address_claims):
+                or not inside(c["source_locator"]["bbox"],address_box) for c in address_claims)):
             result.append(row); continue
         valid = True
+        replacements = {}
+        boundary_evidence = {}
         for cell in proof["cells"]:
             box = cell["bbox"]; words = []
             for x0,x1,top,bottom,text in word_pages.get(key[0], ()):
@@ -1405,23 +1553,85 @@ def _apply_drawn_name_partitions(
                     if not inside(word_box,box):
                         valid = False; break
                     words.append((x0,top,bottom,text))
-            if (not valid or not words or max(w[1] for w in words) >= min(w[2] for w in words)
-                    or "".join(w[3] for w in sorted(words)) != re.sub(r"\s+","",cell["raw_value"])):
+            multiline_name = proof["method"] == "same-source-drawn-literal-cells/v1" and cell["field"] == "name"
+            ordered = sorted(words,key=lambda w:(w[1],w[0])) if multiline_name else sorted(words)
+            if (not valid or not words or (not multiline_name and max(w[1] for w in words) >= min(w[2] for w in words))
+                    or "".join(re.sub(r"\s+","",w[3]) for w in ordered) != re.sub(r"\s+","",cell["raw_value"])):
                 valid = False; break
+            replacements[cell["field"]] = (" ".join(w[3] for w in ordered)
+                if grid_owned and cell["field"] == "name" else cell["raw_value"])
+            if replacements[cell["field"]] != cell["raw_value"]:
+                boundary_evidence[cell["field"]] = [
+                    {"text":text,"bbox":[x0,top,x1,bottom]}
+                    for x0,x1,top,bottom,text in word_pages.get(key[0], ())
+                    if inside([x0,top,x1,bottom],box) and str(text).strip()]
         def extra_key(cell: Mapping[str,Any]) -> str:
             return re.sub(r"[^a-z0-9]+","_",cell["raw_header"].casefold()).strip("_")
-        changed = [c for c in proof["cells"][1:] if row.get(c["field"]) != c["raw_value"]
+        changed = [c for c in proof["cells"][1:] if row.get(c["field"]) != replacements.get(c["field"],c["raw_value"])
             or (c["field"] == "engineering_unit" and isinstance(row.get("_extra"),Mapping)
                 and extra_key(c) in row["_extra"] and row["_extra"][extra_key(c)] != c["raw_value"])]
         if not valid or not changed:
             result.append(row); continue
+        emitted_proof = _emit_drawn_glyph_spans(proof)
         corrected = {**row, "_claims":list(row.get("_claims",()))}
+        # A corrected field may remain quarantined for an unrelated conflict.
+        # Preserve its superseded slash fragment without exporting that fragment
+        # as an independent path-like scalar. This is not imported-claim cleanup:
+        # require the actual bbox words inside this already validated source cell,
+        # exact former value/locator, and a unique contiguous source glyph span.
+        access_cells = [c for c in changed if c["field"] == "access"]
+        if len(access_cells) == 1:
+            cell = access_cells[0]
+            literal = cell["raw_value"]
+            if not (literal.startswith(("/", "~/", "\\")) or re.match(r"^[A-Za-z]:[/\\]",literal)):
+                glyph_text = re.sub(r"\s+","",literal)
+                retained = []
+                for original in corrected["_claims"]:
+                    fragment = original.get("value")
+                    locator = original.get("source_locator",{})
+                    box = locator.get("bbox")
+                    if (original.get("parser_id") != "pdftotext-bbox-layout/v1"
+                            or original.get("field") != "access"
+                            or not isinstance(fragment,str) or not fragment.startswith("/")
+                            or fragment != row.get("access") or "raw_value" in original
+                            or locator.get("page") != key[0]
+                            or locator.get("region") != row.get("_source",{}).get("region")
+                            or not valid_box(box) or not inside(box,cell["bbox"])):
+                        retained.append(original); continue
+                    owned = [w for w in word_pages.get(key[0],())
+                             if inside([w[0],w[2],w[1],w[3]],box) and str(w[4]).strip()]
+                    owned.sort(key=lambda w:(w[2],w[0]))
+                    if (not owned or " ".join(w[4] for w in owned) != fragment
+                            or [min(w[0] for w in owned),min(w[2] for w in owned),
+                                max(w[1] for w in owned),max(w[3] for w in owned)] != list(box)):
+                        retained.append(original); continue
+                    bare = re.sub(r"\s+","",fragment)
+                    start = glyph_text.find(bare)
+                    if not bare or start < 0 or glyph_text.find(bare,start+1) >= 0:
+                        retained.append(original); continue
+                    retained.append({**{k:v for k,v in original.items() if k != "value"},
+                        "value_status":"superseded-source-fragment",
+                        "value_source_span":{
+                            "method":"same-cell-bbox-glyph-span/v1",
+                            "source_sha256":source_sha256,
+                            "cell_literal":literal,"cell_bbox":cell["bbox"],
+                            "cell_source_locator":proof["source_locator"],
+                            "glyph_span":[start,start+len(bare)],
+                            "whitespace":[[i,ord(c)] for i,c in enumerate(fragment) if c.isspace()],
+                            "value_sha256":stable_input_hash(fragment.encode()),
+                            "drawn_cell_evidence_sha256":stable_input_hash(proof),
+                        }})
+                corrected["_claims"] = retained
         for index,cell in enumerate(changed):
-            corrected[cell["field"]] = cell["raw_value"]
+            corrected[cell["field"]] = replacements[cell["field"]]
             if cell["field"] == "engineering_unit" and isinstance(row.get("_extra"),Mapping) and extra_key(cell) in row["_extra"]:
                 corrected["_extra"] = {**row["_extra"],extra_key(cell):cell["raw_value"]}
-            claim = _claim("pdf-drawn-name-cell-projection/v1",cell["field"],cell["raw_value"],proof["source_locator"])
-            claim["drawn_cell_evidence" if index == 0 else "drawn_cell_evidence_sha256"] = proof if index == 0 else stable_input_hash(proof)
+            claim = _claim("pdf-drawn-name-cell-projection/v1",cell["field"],replacements[cell["field"]],proof["source_locator"])
+            if replacements[cell["field"]] != cell["raw_value"]:
+                claim["raw_value"] = cell["raw_value"]
+                claim["word_boundary_method"] = "same-cell-pdftotext-bbox-words/v1"
+                claim["word_boundary_evidence"] = boundary_evidence[cell["field"]]
+            claim["drawn_cell_evidence" if index == 0 else "drawn_cell_evidence_sha256"] = emitted_proof if index == 0 else stable_input_hash(emitted_proof)
             corrected["_claims"].append(claim)
         result.append(corrected)
     return result
@@ -2305,7 +2515,8 @@ def extract_pdf(
     try:
         grid, grid_source_quarantined, _grid_pages = _recover_grid_rows(path, pages=discovered,
             fresh_body_proofs=fresh_body_proofs,
-            cell_partition_pages=_drawn_partition_pages(strict,coordinate), fresh_name_partitions=partitions)
+            cell_partition_pages=_drawn_partition_pages(strict,coordinate), fresh_name_partitions=partitions,
+            cell_partition_requests=_drawn_partition_requests(strict,coordinate,word_pages,stable_input_hash(source)))
     except PdfTableEvidenceBudgetError as exc:
         grid, grid_source_quarantined = [], []
         budget_holds.append(_grid_budget_hold(exc))
@@ -2314,6 +2525,8 @@ def extract_pdf(
         grid_source_quarantined = []
     if partitions:
         coordinate = _apply_drawn_name_partitions(coordinate,word_pages,partitions,stable_input_hash(source))
+        grid = _apply_drawn_name_partitions(grid,word_pages,partitions,stable_input_hash(source))
+        grid_source_quarantined = _apply_drawn_name_partitions(grid_source_quarantined,word_pages,partitions,stable_input_hash(source))
     records, quarantined, conflicts = _reconcile(strict, coordinate)
     quarantined.extend(grid_source_quarantined)
     if grid:
@@ -2446,23 +2659,19 @@ def _extract_large_pdf_in_chunks(
             if remaining <= 0:
                 break
             partitions: list[dict[str, Any]] = []
-            try:
-                grid, grid_source_quarantined, _ = _recover_grid_rows(
-                    path,
-                    pages=chunk_pages,
-                    timeout_seconds=min(60, remaining),
-                    fresh_body_proofs=fresh_body_proofs,
-                    cell_partition_pages=_drawn_partition_pages(strict,coordinate),
-                    fresh_name_partitions=partitions,
-                )
-            except PdfTableEvidenceBudgetError as exc:
-                grid, grid_source_quarantined = [], []
-                budget_holds.append(_grid_budget_hold(exc))
-            except PdfTableExtractionError:
-                grid = []
-                grid_source_quarantined = []
+            grid, grid_source_quarantined, scope_holds = _recover_grid_scopes(
+                path,pages=chunk_pages,deadline=deadline,
+                fresh_body_proofs=fresh_body_proofs,
+                cell_partition_pages=_drawn_partition_pages(strict,coordinate),
+                fresh_name_partitions=partitions,
+                cell_partition_requests=_drawn_partition_requests(strict,coordinate,word_pages,stable_input_hash(source)),
+                record_limit=max(0,_MAX_CHUNK_RECORDS-len(records)-len(rejected)-len(quarantined)-len(conflicts)),
+            )
+            budget_holds.extend(scope_holds)
             if partitions:
                 coordinate = _apply_drawn_name_partitions(coordinate,word_pages,partitions,stable_input_hash(source))
+                grid = _apply_drawn_name_partitions(grid,word_pages,partitions,stable_input_hash(source))
+                grid_source_quarantined = _apply_drawn_name_partitions(grid_source_quarantined,word_pages,partitions,stable_input_hash(source))
             chunk_records, chunk_quarantined, chunk_conflicts = _reconcile(strict,coordinate)
             chunk_quarantined.extend(grid_source_quarantined)
             if grid:
@@ -2494,6 +2703,8 @@ def _extract_large_pdf_in_chunks(
         if page_count < _MAX_PAGE_SPAN or (captured_pages is not None and last_page >= len(captured_pages)):
             scan_complete = True
             break
+    if any(h.get("code")=="pdf-grid-scopes-incomplete" for h in budget_holds):
+        scan_complete=False
     holds: list[dict[str, Any]] = list(budget_holds)
     if captured_pages is not None:
         pending_rows = [row for row in captured_rows if id(row) not in processed_rows]
@@ -2574,6 +2785,64 @@ def _grid_budget_hold(exc: PdfTableEvidenceBudgetError) -> dict[str, Any]:
     }
 
 
+def _recover_grid_scopes(
+    path: Path, *, pages: Sequence[int], deadline: float,
+    fresh_body_proofs: dict[int,Any], cell_partition_pages: Sequence[int],
+    fresh_name_partitions: list[dict[str,Any]], cell_partition_requests: Mapping[str,Any] | None,
+    record_limit: int = _MAX_CHUNK_RECORDS,
+) -> tuple[list[dict[str,Any]],list[dict[str,Any]],list[dict[str,Any]]]:
+    """Disjoint grid scopes share the original discovery deadline and caps.
+
+    Thirty-two pages is an execution batch, below the256-page public maximum:
+    real requested glyph proofs exhausted4MB within a58-page larger scope.
+    Layout/bbox inputs are reused, and no page is retried after a failed batch.
+    """
+    selected=sorted(set(pages));partition_set=set(cell_partition_pages)
+    records=[];quarantined=[];holds=[]
+    for start in range(0,len(selected),32):
+        remaining=int(deadline-time.monotonic())
+        if remaining<=0 or len(records)+len(quarantined)>=record_limit:
+            holds.append({"code":"pdf-grid-scopes-incomplete","severity":"hold","blocking":True,
+                "message":"Previously captured text remains available; independent grid processing did not finish within the original deadline or record allowance.",
+                "unprocessed_pages":selected[start:]})
+            break
+        scope=selected[start:start+32];scope_set=set(scope);local=[]
+        request=None if cell_partition_requests is None else {
+            "source_sha256":cell_partition_requests["source_sha256"],
+            "rows":[r for r in cell_partition_requests["rows"] if r["page"] in scope_set],
+            "words":{p:w for p,w in cell_partition_requests["words"].items() if int(p) in scope_set},
+        }
+        try:
+            found,held,_=_recover_grid_rows(path,pages=scope,timeout_seconds=min(60,remaining),
+                fresh_body_proofs=fresh_body_proofs,
+                cell_partition_pages=sorted(partition_set & scope_set),fresh_name_partitions=local,
+                cell_partition_requests=request)
+        except PdfTableEvidenceBudgetError as exc:
+            holds.append({**_grid_budget_hold(exc),"scope_pages":scope})
+            continue
+        except PdfTableExtractionError as exc:
+            # Preserve the existing optional-grid fallback on small scopes
+            # with no requested correction. Large/needed work stays explicit.
+            if len(selected)>32 or partition_set & scope_set:
+                holds.append({"code":"pdf-grid-scope-unavailable","severity":"hold","blocking":True,
+                    "message":"Independent grid scope remains unverified because the bounded reader did not return usable rows.",
+                    "reader_error_type":type(exc).__name__,"scope_pages":scope})
+            continue
+        room=record_limit-len(records)-len(quarantined)
+        if len(found)+len(held)>room:
+            kept=found[:room];room-=len(kept);kept_held=held[:room]
+            holds.append({"code":"pdf-grid-scopes-incomplete","severity":"hold","blocking":True,
+                "message":"Independent grid records exceeded the remaining original record allowance.",
+                "scope_pages":scope,"omitted_due_to_record_limit":len(found)+len(held)-len(kept)-len(kept_held),
+                "unprocessed_pages":selected[start+32:]})
+            regions={(r.get("_source",{}).get("page"),r.get("_source",{}).get("region")) for r in kept+kept_held}
+            local=[p for p in local if (p["source_locator"]["page"],p["source_locator"]["region"]) in regions]
+            records.extend(kept);quarantined.extend(kept_held);fresh_name_partitions.extend(local)
+            break
+        records.extend(found);quarantined.extend(held);fresh_name_partitions.extend(local)
+    return records,quarantined,holds
+
+
 def _recover_grid_rows(
     path: Path,
     *,
@@ -2582,8 +2851,11 @@ def _recover_grid_rows(
     fresh_body_proofs: dict[int, Any] | None = None,
     cell_partition_pages: Sequence[int] = (),
     fresh_name_partitions: list[dict[str, Any]] | None = None,
+    cell_partition_requests: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[int]]:
     options = {"cell_partition_pages": cell_partition_pages} if cell_partition_pages else {}
+    if cell_partition_pages and cell_partition_requests is not None:
+        options["cell_partition_requests"]=cell_partition_requests
     evidence = extract_pdf_table_evidence(path, pages=pages, timeout_seconds=timeout_seconds, **options)
     records = evidence["records"]
     quarantined = evidence["quarantined_records"]
