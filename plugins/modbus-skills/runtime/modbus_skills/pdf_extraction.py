@@ -492,6 +492,43 @@ def _lcd_rejection(line: str, *, page_number: int, line_number: int, parser_id: 
                                   "excerpt": lines[anchor].strip()[:160]} for anchor in context]}}
 
 
+def _aligned_layout_body_values(
+    line: str, header: Sequence[tuple[int, str, str]],
+) -> dict[str, str] | None:
+    """Use exact occupied-column starts, never a segment-count coincidence.
+
+    Only a row whose first fragment in every occupied column starts at that
+    header anchor qualifies. An explicit address must also be recognizable;
+    otherwise the existing ragged-layout/header logic remains authoritative.
+    """
+    segments = _split_boolean_columns(_layout_segments(line), header)
+    if len(segments) < 2:
+        return None
+    cells: dict[str, list[str]] = {}
+    for x, value in segments:
+        preceding = [item for item in header if item[0] <= x]
+        if not preceding:
+            return None
+        anchor, field, _raw = max(preceding, key=lambda item: item[0])
+        if field not in cells and x != anchor:
+            return None
+        if field in cells and field not in {"name", "description"} and not field.startswith("_extra:"):
+            # Multiple fragments are safe to join only as literal prose. A
+            # ragged scalar near the next heading may instead belong to that
+            # next column; do not turn it into a new executable scalar claim.
+            return None
+        cells.setdefault(field, []).append(value)
+    values = {field: " ".join(parts).strip() for field, parts in cells.items()}
+    for field in _ADDRESS_FIELDS:
+        if not values.get(field):
+            continue
+        parsed = (_parse_source_offset(values[field]) if field == "source_offset"
+                  else _parse_pdf_address(values[field], protocol_offset=field == "protocol_offset"))
+        if parsed is not None and parsed.get("status") in {"single", "range", "pair"}:
+            return values
+    return None
+
+
 def parse_layout_rows(
     text: str, *, first_page: int = 1, pages: set[int] | None = None, parser_id: str = "pdftotext-layout/v1"
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -573,7 +610,8 @@ def parse_layout_rows(
                 continue
             if line_index <= header_end:
                 continue
-            candidate = _layout_header_at(header_lines, line_index)
+            aligned_values = _aligned_layout_body_values(line, header) if header is not None else None
+            candidate = None if aligned_values is not None else _layout_header_at(header_lines, line_index)
             if candidate is not None:
                 header_end, header = candidate
                 legend_rows = []
@@ -612,26 +650,29 @@ def parse_layout_rows(
                         }
                     )
                 continue
-            cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
-            segments = _split_boolean_columns(_layout_segments(line), header)
-            if len(segments) < 2 and len(header) > 1:
-                continue
-            if len(segments) == len(header):
-                for (_x, value), (_anchor, field, _raw) in zip(
-                    segments, header, strict=True
-                ):
-                    cells[field].append(value)
+            if aligned_values is not None:
+                values = aligned_values
             else:
-                for x, value in segments:
-                    _anchor, field, _raw = min(
-                        header, key=lambda item: (abs(item[0] - x), -item[0])
-                    )
-                    cells[field].append(value)
-            values = {
-                field: " ".join(parts).strip()
-                for field, parts in cells.items()
-                if parts
-            }
+                cells: dict[str, list[str]] = {field: [] for _x, field, _raw in header}
+                segments = _split_boolean_columns(_layout_segments(line), header)
+                if len(segments) < 2 and len(header) > 1:
+                    continue
+                if len(segments) == len(header):
+                    for (_x, value), (_anchor, field, _raw) in zip(
+                        segments, header, strict=True
+                    ):
+                        cells[field].append(value)
+                else:
+                    for x, value in segments:
+                        _anchor, field, _raw = min(
+                            header, key=lambda item: (abs(item[0] - x), -item[0])
+                        )
+                        cells[field].append(value)
+                values = {
+                    field: " ".join(parts).strip()
+                    for field, parts in cells.items()
+                    if parts
+                }
             address_field = next(
                 (
                     field
