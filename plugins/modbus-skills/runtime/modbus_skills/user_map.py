@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import csv
 import html
 import io
+import math
 import re
 from typing import Any
 
@@ -27,6 +28,11 @@ USER_MAP_BUNDLE_MANIFEST_SCHEMA_VERSION = "modbus-user-map-bundle-manifest/v1"
 _DISPOSITIONS = ("included", "suggested", "excluded")
 _AMBIGUOUS_MATCHES = frozenset({"ambiguous", "near", "weak"})
 _SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_LITERAL_CONTEXT_LITERAL_BYTES = 16 * 1024
+_LITERAL_CONTEXT_BYTES = 4 * 1024 * 1024
+_LITERAL_CONTEXT_GROUPS = 4096
+_LITERAL_CONTEXT_BINDINGS = 50000
+_LITERAL_CONTEXT_FIELDS = frozenset({"units_notes", "notes", "minimum", "maximum"})
 _POINT_FIELDS = (
     "oem_point_id",
     "name",
@@ -261,7 +267,8 @@ def compile_user_map_bundle(
             selection,
             points=rendered_points,
             exception_annex=annex,
-            assumptions=_source_datatype_notes(oem_map, included_ids),
+            assumptions=[*_source_datatype_notes(oem_map, included_ids),
+                         *_selected_literal_source_context(oem_map, included_ids)],
             holds=selected_holds,
         )
     except CompilerContractError as exc:
@@ -329,6 +336,23 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
                 f"- {_note_markdown(note['source_datatype'])}: {_note_markdown(note['definition'])} "
                 f"({_note_markdown(evidence)}; "
                 f"{len(note['matching_datatype_evidence'])} included datatype evidence records)"
+            )
+    literal_context = [note for note in user_map.get("assumptions", ())
+                       if note.get("code") == "source-literal-context"]
+    if literal_context:
+        lines.extend(["", "## Literal source context", "",
+                      "These are source annotations, not confirmed engineering units, "
+                      "range domains, validity logic or read authorization. Distinct "
+                      "claims remain unresolved; no configuration is chosen. "
+                      "Exact literals and included point/source-row bindings are in "
+                      "[the JSON map](user-map.json).", ""])
+        labels = {"units_notes": "Units/notes", "notes": "Note",
+                  "minimum": "Source minimum", "maximum": "Source maximum"}
+        for note in literal_context:
+            count = len({binding["oem_point_id"] for binding in note["bindings"]})
+            lines.append(
+                f"- {labels[note['field']]}: {_note_markdown(str(note['literal']))} "
+                f"({count} included {'point' if count == 1 else 'points'})"
             )
     lines.extend(["", "## Suggestions"])
     if selection["suggested"]:
@@ -433,6 +457,251 @@ def _note_markdown(value: str) -> str:
     """Keep literal source context from becoming Markdown or HTML instructions."""
     text = html.escape(" ".join(value.split()), quote=True)
     return re.sub(r"([\\`*_{}\[\]()#+.!|>~-])", r"\\\1", text)
+
+
+def _literal_context_size(value: Any) -> int:
+    """Count escaped/formatted JSON cost without allocating its serialization.
+
+    This matches the previous indent=2, ensure_ascii=True allowance. Stop as
+    soon as one of the two provisioned copies cannot fit the context budget.
+    Context objects are bounded flat payloads/bindings, not arbitrary trees.
+    """
+    cost = 32 + 256
+    limit = _LITERAL_CONTEXT_BYTES // 2
+
+    def charge(amount: int) -> None:
+        nonlocal cost
+        cost += amount
+        if cost > limit:
+            raise UserMapError("literal source context exceeds the 4 MiB evidence budget")
+
+    def text_size(text: str) -> None:
+        if type(text) is str:
+            # Reject the minimum cost before scanning; visit only characters
+            # whose ensure_ascii JSON spelling needs additional bytes.
+            charge(2 + len(text))
+            for match in re.finditer(r'[\x00-\x1f"\\\x7f-\U0010ffff]', text):
+                char = match.group()
+                if char in '\\"\b\f\n\r\t':
+                    charge(1)
+                else:
+                    charge(11 if ord(char) > 65535 else 5)
+            return
+        # Preserve custom string iteration semantics outside the fast path.
+        charge(2)  # Quotes, without constructing an escaped copy.
+        for char in text:
+            ordinal = ord(char)
+            if char in '\\"\b\f\n\r\t':
+                charge(2)
+            elif ordinal < 32 or 127 <= ordinal <= 65535:
+                charge(6)
+            elif ordinal > 65535:
+                charge(12)
+            else:
+                charge(1)
+
+    def count(item: Any, depth: int = 0) -> None:
+        if isinstance(item, Mapping):
+            if not item:
+                charge(2)
+                return
+            charge(1 + 1 + 32)  # Opening brace and newline.
+            for index, (key, child) in enumerate(item.items()):
+                if not isinstance(key, str):
+                    raise UserMapError("literal source context JSON keys must be text")
+                if index:
+                    charge(1 + 1 + 32)  # Comma and newline.
+                charge(2 * (depth + 1))
+                text_size(key)
+                charge(2)  # Colon and space.
+                count(child, depth + 1)
+            charge(1 + 32 + 2 * depth + 1)  # Newline, indentation, brace.
+        elif isinstance(item, list) and not item:
+            charge(2)
+        elif isinstance(item, str):
+            text_size(item)
+        elif isinstance(item, bool) or item is None:
+            charge(4 if item is True or item is None else 5)
+        elif isinstance(item, int):
+            # A cheap lower bound rejects oversized integers before decimal
+            # conversion; any remaining conversion is bounded by this budget.
+            if item.bit_length() * 3 // 10 > limit - cost:
+                raise UserMapError("literal source context exceeds the 4 MiB evidence budget")
+            try:
+                charge(len(int.__repr__(item)))
+            except ValueError as exc:
+                raise UserMapError("literal source context number exceeds bounded JSON limits") from exc
+        elif isinstance(item, float) and math.isfinite(item):
+            charge(len(float.__repr__(item)))
+        else:
+            raise UserMapError("literal source context must have bounded JSON values")
+
+    charge(0)
+    count(value)
+    return cost
+
+
+def _valid_literal_source_value(field: Any, literal: Any) -> bool:
+    """Validate bounded scalar inputs before any context identity hashing."""
+    if not isinstance(field, str) or field not in _LITERAL_CONTEXT_FIELDS:
+        raise UserMapError("literal source context field is unsupported")
+    if isinstance(literal, str):
+        if len(literal) > _LITERAL_CONTEXT_LITERAL_BYTES:
+            raise UserMapError("literal source context exceeds the 16 KiB raw UTF-8 limit")
+        try:
+            literal_bytes = len(literal.encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise UserMapError("literal source context must be valid UTF-8 text") from exc
+        if literal_bytes > _LITERAL_CONTEXT_LITERAL_BYTES:
+            raise UserMapError("literal source context exceeds the 16 KiB raw UTF-8 limit")
+        return bool(literal.strip())
+    if (isinstance(literal, bool) or not isinstance(literal, (int, float))
+            or isinstance(literal, float) and not math.isfinite(literal)):
+        raise UserMapError("literal source context value must be text or a finite number")
+    # Ordinary numeric values are small; prevent a malformed imported giant
+    # integer from reaching a JSON hash before scalar validation completes.
+    if isinstance(literal, int):
+        if literal.bit_length() * 3 // 10 > _LITERAL_CONTEXT_LITERAL_BYTES:
+            raise UserMapError("literal source context exceeds the 16 KiB raw UTF-8 limit")
+        try:
+            if len(int.__repr__(literal)) > _LITERAL_CONTEXT_LITERAL_BYTES:
+                raise UserMapError("literal source context exceeds the 16 KiB raw UTF-8 limit")
+        except ValueError as exc:
+            raise UserMapError("literal source context number exceeds bounded JSON limits") from exc
+    return True
+
+
+def build_literal_source_context(entries: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate bounded literal payloads; retain compact exact associations.
+
+    Each unique payload and binding is counted without full serialization.
+    Two provisioned copies cover OEM/user context graphs, not arbitrary source
+    fields, whole artifacts or process memory. Limits fail before return.
+    """
+    groups: dict[tuple[str, type, Any], dict[str, Any]] = {}
+    seen_bindings: dict[tuple[str, type, Any], set[tuple[Any, ...]]] = {}
+    used_bytes = 0
+    binding_count = 0
+    for entry in entries:
+        if not isinstance(entry, Mapping) or set(entry) != {
+            "field", "literal", "source_field", "oem_point_id", "source_ref"
+        }:
+            raise UserMapError("literal source context entry is malformed")
+        field, literal = entry["field"], entry["literal"]
+        if not _valid_literal_source_value(field, literal):
+            continue
+        source_field = entry["source_field"]
+        if (not isinstance(source_field, str)
+                or re.fullmatch(re.escape(field) + r"(?:_(?:[2-9]|[1-9][0-9]+))?", source_field) is None):
+            raise UserMapError("literal source context source field does not match its role")
+        point_id = entry["oem_point_id"]
+        reference = entry["source_ref"]
+        if (not isinstance(point_id, str) or not point_id
+                or not isinstance(reference, Mapping) or not reference):
+            raise UserMapError("literal source context needs point and source-row identity")
+        # Source references are flat portable row locators, not arbitrary metadata.
+        if any(not isinstance(key, str) or isinstance(value, bool)
+               or not isinstance(value, (str, int)) for key, value in reference.items()):
+            raise UserMapError("literal source context source reference is malformed")
+        # Numeric equality collapses -0.0 and 0.0, but their source literals
+        # and JSON identities differ. Preserve finite float bit identity here.
+        key = (field, type(literal), float.hex(literal) if isinstance(literal, float) else literal)
+        if key not in groups:
+            if len(groups) >= _LITERAL_CONTEXT_GROUPS:
+                raise UserMapError("literal source context group limit exceeded")
+            payload = {"field": field, "literal": literal}
+            group = {"code": "source-literal-context",
+                     "context_id": "source-context-" + stable_input_hash(payload),
+                     "status": "source-context-only", **payload, "bindings": []}
+            used_bytes += 2 * _literal_context_size(group)
+            if used_bytes > _LITERAL_CONTEXT_BYTES:
+                raise UserMapError("literal source context exceeds the 4 MiB evidence budget")
+            groups[key] = group
+            seen_bindings[key] = set()
+        binding = {"oem_point_id": point_id, "source_field": source_field,
+                   "source_ref": reference}
+        # Preflight before copying, JSON serialization or digest generation.
+        # A structural key permits exact duplicates at the exhausted budget
+        # boundary without charging their already-retained association twice.
+        binding_cost = 2 * _literal_context_size(binding)
+        binding_key = (point_id, source_field, tuple(sorted(reference.items())))
+        if binding_key in seen_bindings[key]:
+            continue
+        binding_count += 1
+        if binding_count > _LITERAL_CONTEXT_BINDINGS:
+            raise UserMapError("literal source context binding limit exceeded")
+        used_bytes += binding_cost
+        if used_bytes > _LITERAL_CONTEXT_BYTES:
+            raise UserMapError("literal source context exceeds the 4 MiB evidence budget")
+        seen_bindings[key].add(binding_key)
+        groups[key]["bindings"].append({**binding, "source_ref": dict(reference)})
+    result = list(groups.values())
+    for group in result:
+        bindings = group["bindings"]
+        if any(type(binding[field]) is not str for binding in bindings
+               for field in ("oem_point_id", "source_field")):
+            bindings.sort(key=lambda binding: (binding["oem_point_id"],
+                binding["source_field"], stable_input_hash(binding["source_ref"])))
+            continue
+        prefix_counts: dict[tuple[str, str], int] = defaultdict(int)
+        for binding in bindings:
+            prefix_counts[(binding["oem_point_id"], binding["source_field"])] += 1
+
+        def binding_order(binding: Mapping[str, Any]) -> tuple[str, str, str]:
+            prefix = (binding["oem_point_id"], binding["source_field"])
+            reference = binding["source_ref"]
+            # A unique primary pair never compares its reference digest. Only
+            # skip hashing when it cannot carry JSON/UTF-8 validation either.
+            safe_singleton = prefix_counts[prefix] == 1 and all(
+                type(key) is str and key.isascii() and (
+                    type(value) is str and value.isascii()
+                    or type(value) is int and value.bit_length() <= 63)
+                for key, value in reference.items())
+            return (*prefix, "" if safe_singleton else stable_input_hash(reference))
+
+        bindings.sort(key=binding_order)
+    return sorted(result, key=lambda group: (group["field"], group["context_id"]))
+
+
+def _selected_literal_source_context(
+    oem_map: Mapping[str, Any], included_ids: set[str]
+) -> list[dict[str, Any]]:
+    """Validate the existing literal registry and keep only actual inclusions."""
+    known = {point["oem_point_id"]: point for point in oem_map["points"]}
+
+    def entries():
+        for group in oem_map.get("assumptions", ()):
+            if not isinstance(group, Mapping) or group.get("code") != "source-literal-context":
+                continue
+            if (set(group) != {"code", "context_id", "status", "field", "literal", "bindings"}
+                    or group.get("status") != "source-context-only"):
+                raise UserMapError("literal source context registry identity or status is invalid")
+            if not _valid_literal_source_value(group.get("field"), group.get("literal")):
+                raise UserMapError("literal source context registry literal must be nonblank")
+            if group.get("context_id") != "source-context-" + stable_input_hash(
+                    {"field": group["field"], "literal": group["literal"]}):
+                raise UserMapError("literal source context registry identity or status is invalid")
+            bindings = group.get("bindings")
+            if not isinstance(bindings, list) or not bindings:
+                raise UserMapError("literal source context registry bindings must be a nonempty array")
+            for binding in bindings:
+                if not isinstance(binding, Mapping) or set(binding) != {
+                    "oem_point_id", "source_field", "source_ref"
+                }:
+                    raise UserMapError("literal source context registry binding is malformed")
+                point_id = binding.get("oem_point_id")
+                point = known.get(point_id) if isinstance(point_id, str) else None
+                if point is None or binding.get("source_ref") not in point.get("source_refs", ()):
+                    raise UserMapError("literal source context binding is not an actual OEM point/source reference")
+                yield {"field": group["field"], "literal": group["literal"], **binding}
+
+    # Validate/budget the complete supplied registry before selecting a subset.
+    result = []
+    for group in build_literal_source_context(entries()):
+        bindings = [binding for binding in group["bindings"] if binding["oem_point_id"] in included_ids]
+        if bindings:
+            result.append({**group, "bindings": bindings})
+    return result
 
 
 def _source_datatype_notes(

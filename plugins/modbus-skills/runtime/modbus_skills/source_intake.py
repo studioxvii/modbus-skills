@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 import json
 import os
 from pathlib import Path
+import re
 import stat
 from typing import Any
 from urllib.parse import quote
@@ -16,7 +17,11 @@ from .map_workflows import MapWorkflowError, normalize_map
 from .parsers import ParseError, parse_source
 from .pdf_extraction import PdfExtractionError, extract_pdf, parse_page_range
 from .pdf_table_extraction import prepare_pdf_records
-from .user_map import UserMapError, validate_selection_entry_structure
+from .user_map import (
+    UserMapError,
+    build_literal_source_context,
+    validate_selection_entry_structure,
+)
 
 
 SELECTION_TEMPLATE_SCHEMA_VERSION = "modbus-user-selection-template/v1"
@@ -141,6 +146,12 @@ def compile_source_descriptor(
     points = _disambiguate_oem_point_ids(
         [_oem_point(point, index) for index, point in enumerate(canonical["points"])]
     )
+    try:
+        literal_context = build_literal_source_context(
+            _literal_context_entries(canonical["points"], points)
+        )
+    except UserMapError as exc:
+        raise SourceIntakeError(str(exc)) from exc
     holds = [
         _portable_hold(hold)
         for hold in canonical.get("holds", ())
@@ -170,7 +181,7 @@ def compile_source_descriptor(
                 if isinstance(parsed, Mapping)
                 else {}
             ),
-            assumptions=canonical.get("assumptions", ()),
+            assumptions=[*canonical.get("assumptions", ()), *literal_context],
             findings=canonical.get("source_findings", ()),
             holds=holds,
         )
@@ -456,6 +467,45 @@ def _disambiguate_oem_point_ids(points: list[dict[str, Any]]) -> list[dict[str, 
         if occurrence:
             point["oem_point_id"] = f"{point_id}-dup{occurrence + 1}"
     return points
+
+
+def _literal_context_entries(
+    canonical_points: Sequence[Mapping[str, Any]],
+    oem_points: Sequence[Mapping[str, Any]],
+):
+    """Yield only retained raw annotations; never interpret them as engineering.
+
+    Normalization has row references and normalized source-field names, not
+    necessarily the literal header/column. Preserve that actual granularity.
+    The shared registry stores long repeated literals once, outside points.
+    """
+    for point, oem_point in zip(canonical_points, oem_points):
+        binding = {
+            "oem_point_id": oem_point["oem_point_id"],
+            "source_ref": oem_point["source_refs"][0],
+        }
+        unmapped = point.get("unmapped_fields", {})
+        if isinstance(unmapped, Mapping):
+            for source_field, literal in unmapped.items():
+                if not isinstance(source_field, str):
+                    continue
+                match = re.fullmatch(
+                    r"(units_notes|notes|minimum|maximum)(?:_(?:[2-9]|[1-9][0-9]+))?",
+                    source_field,
+                )
+                if match and literal not in (None, ""):
+                    yield {**binding, "field": match[1], "literal": literal,
+                           "source_field": source_field}
+        for evidence in point.get("source_evidence", ()):
+            if not isinstance(evidence, Mapping):
+                continue
+            field = evidence.get("field")
+            source_field = evidence.get("source_field")
+            literal = evidence.get("source_value")
+            if (field in {"minimum", "maximum"} and source_field == field
+                    and literal not in (None, "")):
+                yield {**binding, "field": field, "literal": literal,
+                       "source_field": source_field}
 
 
 def _oem_point(point: Mapping[str, Any], index: int) -> dict[str, Any]:
