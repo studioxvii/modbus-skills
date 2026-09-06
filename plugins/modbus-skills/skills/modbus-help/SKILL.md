@@ -23,7 +23,8 @@ Follow `../../references/interaction-contract.md`.
 6. When a validated map is already in hand and the user named a target, recommend
    that builder or `build-tool-pack`. When a capture is already in hand, recommend
    `analyze-capture` or `check-byte-order`.
-7. Read that skill's current `SKILL.md` before describing it.
+7. Read that skill's current `SKILL.md` to verify the recommendation, not to follow
+   its execution steps or linked references in this recommendation-only invocation.
 
 Do not ask who will run the work, where files belong, or how to structure tests when
 the request or repository already answers those questions. Use the current project
@@ -32,14 +33,17 @@ and its existing output folders.
 Keep OEM and broad-setup routes on `compile-user-map` and explicit-stage routes
 direct. Offer one alternate only when the goal is materially ambiguous.
 
-For a supported goal, use this format:
+For a supported goal, aim for 60–80 words using the format below. State only the
+next skill, why it fits, its needed input, and the user's deliverable. Do not repeat
+supplied hashes/IDs, internal receipts/checkpoints, or a separate no-action summary
+unless they change the next decision. Preserve material uncertainty in one short
+clause; do not imply approval or readiness that the source does not establish.
 
 ```text
 Recommended next: skill-name
-Safe path: compile-user-map for OEM or broad setup; omit for an explicit stage request
-Why: one sentence
-Uses: exact current artifact paths or missing decision
-Produces: next artifact
+Why: one short sentence
+Uses: exact available artifact path or the missing input/decision
+Produces: requested user-facing artifact
 Other options: zero or one alternative when materially useful
 Reply `proceed` to continue.
 ```
