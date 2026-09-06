@@ -17,6 +17,7 @@ from .map_workflows import MapWorkflowError, normalize_map
 from .parsers import ParseError, parse_source
 from .pdf_extraction import PdfExtractionError, extract_pdf, parse_page_range
 from .pdf_table_extraction import prepare_pdf_records
+from .worksheet_annotations import CODE as ANNOTATION_CODE, AnnotationError, AnnotationCapacityError, bind_annotations
 from .user_map import (
     UserMapError,
     UninterpretedContextCapacityError,
@@ -186,6 +187,23 @@ def compile_source_descriptor(
     ]
     if additional_context_hold is not None:
         holds.append(additional_context_hold)
+    annotation_groups = [g for g in canonical.get("assumptions", ()) if g.get("code") == ANNOTATION_CODE]
+    if annotation_groups and source_format != "xlsx":
+        raise SourceIntakeError("worksheet annotations require their original XLSX source")
+    try:
+        annotations = bind_annotations(annotation_groups, points, source_hash, existing=literal_context)
+    except AnnotationCapacityError as exc:
+        annotations = []
+        count = sum(len(g["entries"]) for g in annotation_groups)
+        holds.append({"code": "source.worksheet-annotations-incomplete", "severity": "hold", "blocking": True,
+            "message": f"Worksheet annotations exceeded evidence capacity: {count} source text records across {len(annotation_groups)} worksheets were not retained. The existing map remains partial.",
+            "details": {"source_sha256": source_hash, "omitted_annotation_records": count, "capacity_reason": str(exc)}})
+    except AnnotationError as exc:
+        raise SourceIntakeError(str(exc)) from exc
+    if any(g["limitations"] for g in annotations):
+        holds.append({"code": "source.worksheet-annotation-limitations", "severity": "hold", "blocking": True,
+            "message": "Some worksheet annotation content is unsupported or unbound; exact package locators are retained in the JSON source context. The map remains partial.",
+            "details": {"source_sha256": source_hash}})
     rejected = canonical.get("rejected_rows", ())
     if isinstance(rejected, Sequence) and not isinstance(
         rejected, (str, bytes, bytearray)
@@ -214,7 +232,7 @@ def compile_source_descriptor(
                 if isinstance(parsed, Mapping)
                 else {}
             ),
-            assumptions=[*canonical.get("assumptions", ()), *literal_context],
+            assumptions=[*(g for g in canonical.get("assumptions", ()) if g.get("code") != ANNOTATION_CODE), *literal_context, *annotations],
             findings=canonical.get("source_findings", ()),
             holds=holds,
         )

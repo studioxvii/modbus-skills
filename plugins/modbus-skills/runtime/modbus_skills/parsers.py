@@ -7,6 +7,7 @@ type, or byte order. Normalization is a separate reviewed workflow.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import posixpath
@@ -1276,6 +1277,15 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
         shared_strings = _xlsx_shared_strings(archive)
         hidden_sheets: set[str] = set()
         sheets = _xlsx_sheet_paths(archive, hidden_sheets=hidden_sheets)
+        from .worksheet_annotations import read_annotations, AnnotationError, AnnotationCapacityError
+        try:
+            assumptions.extend(read_annotations(archive, sheets, hashlib.sha256(data).hexdigest(), _xlsx_xml))
+        except AnnotationCapacityError as exc:
+            source_holds.append({"code": "source.worksheet-annotations-incomplete", "severity": "hold", "blocking": True,
+                "message": "Worksheet annotations exceeded evidence capacity; the entire optional annotation registry was omitted. The existing map remains partial.",
+                "details": {"source_sha256": hashlib.sha256(data).hexdigest(), "capacity_reason": str(exc)}})
+        except AnnotationError as exc:
+            raise ParseError(str(exc)) from exc
         for sheet_name, sheet_path in sheets:
             root = _xlsx_xml(archive, sheet_path)
             rows = list(_xlsx_rows(root, shared_strings))
