@@ -43,6 +43,8 @@ _BIT_ENUMERATION = re.compile(
 )
 PDF_HEADER_ALIASES = {
     "address": "address",
+    "addr": "address",
+    "addr.": "address",
     "register": "address",
     "register address": "address",
     "register address (decimal)": "address",
@@ -86,12 +88,15 @@ PDF_HEADER_ALIASES = {
     "meaning": "description",
     "semantics": "description",
     "parameter details": "description",
+    "parameter description": "description",
     "contents": "name",
     "name": "name",
+    "system name": "name",
     "tag": "name",
     "item": "name",
     "symbolic register name": "name",
     "parameter": "name",
+    "parameters": "name",
     "parameter name": "name",
     "variable": "name",
     "modbus register type": "area",
@@ -123,7 +128,9 @@ _GRID_TIMEOUT_SECONDS = 60
 
 
 def extract_pdf_table_evidence(
-    path: Path, *, pages: Sequence[int] | None = None, timeout_seconds: int = _GRID_TIMEOUT_SECONDS
+    path: Path, *, pages: Sequence[int] | None = None, timeout_seconds: int = _GRID_TIMEOUT_SECONDS,
+    cell_partition_pages: Sequence[int] | None = None,
+    cell_partition_requests: Mapping[str, Any] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Extract accepted and quarantined rows through a bounded worker."""
 
@@ -139,7 +146,14 @@ def extract_pdf_table_evidence(
             raise PdfTableExtractionError(
                 f"grid extraction is limited to {_MAX_GRID_PAGES} selected pages"
             )
-    return _run_grid_worker(path, selected, timeout_seconds)
+    partition_pages = sorted(set(cell_partition_pages or ()))
+    if (len(partition_pages) > _MAX_GRID_PAGES or any(type(page) is not int or page < 1
+            or (selected is not None and page not in selected) for page in partition_pages)):
+        raise PdfTableExtractionError("cell partition pages must belong to the bounded grid scope")
+    if cell_partition_requests is not None:
+        return _run_grid_worker(path, selected, timeout_seconds, partition_pages, cell_partition_requests)
+    return (_run_grid_worker(path, selected, timeout_seconds, partition_pages)
+            if partition_pages else _run_grid_worker(path, selected, timeout_seconds))
 
 
 def extract_pdf_table_rows(
@@ -153,14 +167,31 @@ def extract_pdf_table_rows(
 
 
 def _run_grid_worker(
-    path: Path, selected: Sequence[int] | None, timeout_seconds: int
+    path: Path, selected: Sequence[int] | None, timeout_seconds: int,
+    cell_partition_pages: Sequence[int] = (),
+    cell_partition_requests: Mapping[str, Any] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     argv = [sys.executable, str(Path(__file__).resolve()), "--worker", str(path)]
     if selected is not None:
         argv.append(",".join(map(str, selected)))
+    if cell_partition_pages:
+        if selected is None:
+            argv.append("")
+        argv.append(",".join(map(str, cell_partition_pages)))
+    request_bytes = None
+    if cell_partition_requests is not None:
+        request_bytes = json.dumps(cell_partition_requests,ensure_ascii=True,separators=(",",":")).encode()
+        if len(request_bytes) > _MAX_GRID_OUTPUT_BYTES:
+            raise PdfTableExtractionError("grid correction input exceeds the bounded worker payload")
+        while len(argv) < 6:
+            argv.append("")
+        argv.append("--partition-stdin")
     try:
-        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
-            process = subprocess.Popen(argv, stdout=stdout, stderr=stderr, shell=False)
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr, tempfile.TemporaryFile() as stdin:
+            if request_bytes is not None:
+                stdin.write(request_bytes);stdin.seek(0)
+            process = subprocess.Popen(argv, stdout=stdout, stderr=stderr,
+                                       **({"stdin":stdin} if request_bytes is not None else {}), shell=False)
             try:
                 returncode = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired as exc:
@@ -217,7 +248,9 @@ def _run_grid_worker(
 
 
 def _extract_pdf_table_rows_in_process(
-    path: Path, *, pages: Sequence[int] | None = None
+    path: Path, *, pages: Sequence[int] | None = None,
+    cell_partition_pages: Sequence[int] = (),
+    cell_partition_requests: Mapping[str, Any] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Run pdfplumber inside the bounded worker process."""
 
@@ -229,16 +262,29 @@ def _extract_pdf_table_rows_in_process(
         ) from exc
 
     selected = set(pages) if pages is not None else None
+    partition_pages = set(cell_partition_pages)
+    if cell_partition_requests is not None:
+        _validate_partition_requests(cell_partition_requests,partition_pages)
+        indexed: dict[tuple[int,str],list[Any]]={}
+        by_page: dict[int,list[Any]]={}
+        for row in cell_partition_requests["rows"]:
+            indexed.setdefault((row["page"],row["address"]),[]).append(row)
+            by_page.setdefault(row["page"],[]).append(row)
+        cell_partition_requests={**cell_partition_requests,"_rows_by_identity":indexed,"_rows_by_page":by_page}
     evidence = {"records": [], "quarantined_records": []}
     merged_budget = [0]
     try:
-        with pdfplumber.open(path) as document:
+        # Ask the reader to instantiate only the already selected pages. A
+        # bounded chunk must not construct every page of a large manual again.
+        options = {"pages": sorted(selected)} if selected is not None else {}
+        with pdfplumber.open(path, **options) as document:
             source_sha256 = None
             if selected is None and len(document.pages) > _MAX_GRID_PAGES:
                 raise PdfTableExtractionError(
                     f"automatic grid extraction is limited to {_MAX_GRID_PAGES} PDF pages"
                 )
-            for page_number, page in enumerate(document.pages, start=1):
+            for ordinal, page in enumerate(document.pages, start=1):
+                page_number = page.page_number if selected is not None else ordinal
                 if selected is not None and page_number not in selected:
                     continue
                 # Table cells and header recovery need this reader's glyphs.
@@ -304,7 +350,31 @@ def _extract_pdf_table_rows_in_process(
                             for claim in row.get("_claims", []):
                                 if claim.get("column_index") == header_recovery["column_index"]:
                                     claim["header_evidence"] = header_evidence
-                    geometry = _prepare_description_cell_geometry(page, table, cells)
+                    geometry = _prepare_description_cell_geometry(page, table, cells,
+                        include_name=page_number in partition_pages)
+                    if page_number in partition_pages:
+                        if source_sha256 is None:
+                            position = document.stream.tell()
+                            document.stream.seek(0)
+                            source_sha256 = file_digest(document.stream, "sha256").hexdigest()
+                            document.stream.seek(position)
+                        if cell_partition_requests is not None and cell_partition_requests["source_sha256"] != source_sha256:
+                            raise PdfTableExtractionError("grid correction request source hash mismatch")
+                        for row in (*parsed["records"], *parsed["quarantined_records"]):
+                            if row.get("code") not in (None, "pdf-grid-type-unresolved"):
+                                continue
+                            wanted = (_requested_partition_fields(table,cells,row,cell_partition_requests,geometry=geometry)
+                                      if cell_partition_requests is not None else None)
+                            if wanted == []:
+                                continue
+                            partition = _drawn_name_partition(page, table, cells, row, source_sha256,
+                                                             geometry=geometry,requested_fields=wanted)
+                            if partition is not None:
+                                merged_budget[0] += len(json.dumps(partition, ensure_ascii=True).encode()) * 2
+                                if merged_budget[0] > _MAX_MERGED_PROOF_BYTES:
+                                    raise PdfTableEvidenceBudgetError("drawn cell evidence exceeds the shared proof budget",
+                                        page=page_number, table_index=table_index, stage="claim-association")
+                                row["_drawn_name_partition"] = partition
                     for row in parsed["records"]:
                         proof = _description_access_cell_evidence(
                             page, table, cells, row, "", geometry=geometry
@@ -531,13 +601,17 @@ def _proved_common_cells(
 
 
 def _prepare_description_cell_geometry(
-    page: Any, table: Any, cells: Sequence[Sequence[Any]],
+    page: Any, table: Any, cells: Sequence[Sequence[Any]], *, include_name: bool = False,
 ) -> dict[str, Any]:
     """Index original glyphs by every intersected row, without clipping them."""
     header = _find_header(cells)
     prepared: dict[str, Any] = {"header": header, "header_glyphs": {}}
-    if header[1] is None or any(len(header[1].get(field, ())) != 1
-                                for field in ("description", "access")):
+    literal_columns = header[1] or {}
+    literal_partition = (len(literal_columns.get("address", ())) == 1
+                         and any(len(literal_columns.get(field, ())) == 1 for field in ("name", "access")))
+    if header[1] is None or (any(len(header[1].get(field, ())) != 1
+                                for field in ("description", "access"))
+                            and (not include_name or not literal_partition)):
         return prepared
     # pdfplumber's rows property sorts/regroups all cells on each access.
     # Retain this table-local result, including the original ambiguous cells.
@@ -650,6 +724,219 @@ def _description_access_cell_evidence(
     return {"source_sha256": source_sha256, "source_locator": {
                 key: record["_source"][key] for key in ("page", "row", "region")},
             "method": "same-source-drawn-cells-and-glyphs/v1", "cells": proof_cells}
+
+
+def _validate_partition_requests(request: Any, pages: set[int]) -> None:
+    if (not isinstance(request,Mapping) or set(request)!={"source_sha256","rows","words"}
+            or re.fullmatch(r"[0-9a-f]{64}",str(request.get("source_sha256",""))) is None
+            or not isinstance(request.get("rows"),list) or len(request["rows"])>_MAX_GRID_RECORDS
+            or not isinstance(request.get("words"),Mapping)):
+        raise PdfTableExtractionError("invalid grid correction request")
+    for row in request["rows"]:
+        if (not isinstance(row,Mapping) or type(row.get("page")) is not int or row["page"] not in pages
+                or not isinstance(row.get("address"),str) or not row["address"]
+                or not isinstance(row.get("fields"),Mapping) or any(
+                    f not in {"name","description","access","engineering_unit","range"} or not isinstance(v,str)
+                    for f,v in row["fields"].items()) or not isinstance(row.get("address_bbox"),(list,tuple))
+                or len(row["address_bbox"])!=4 or any(type(v) not in (int,float) or not math.isfinite(v) for v in row["address_bbox"])
+                or row["address_bbox"][0]>=row["address_bbox"][2] or row["address_bbox"][1]>=row["address_bbox"][3]):
+            raise PdfTableExtractionError("invalid grid correction row identity")
+    for page,words in request["words"].items():
+        if str(page) not in {str(p) for p in pages} or not isinstance(words,list):
+            raise PdfTableExtractionError("invalid grid correction word page")
+        for word in words:
+            if (not isinstance(word,(list,tuple)) or len(word)!=5 or not isinstance(word[4],str)
+                    or any(type(v) not in (int,float) or not math.isfinite(v) for v in word[:4])
+                    or word[0]>=word[1] or word[2]>=word[3]):
+                raise PdfTableExtractionError("invalid grid correction word box")
+
+
+def _requested_partition_fields(table: Any, cells: Sequence[Sequence[Any]], record: Mapping[str,Any],
+                                request: Mapping[str,Any], *, geometry: dict[str,Any] | None=None) -> list[str]:
+    """Demand only actual competing fields; this never supplies field values."""
+    source=record.get("_source",{});page=source.get("page");row=source.get("row")
+    _header,columns,_extras,_confident=geometry["header"] if geometry is not None else _find_header(cells)
+    rows=geometry["rows"] if geometry is not None and "rows" in geometry else table.rows
+    if columns is None or type(row) is not int or not 0<=row<len(rows) or len(columns.get("address",()))!=1:
+        return []
+    body=rows[row].cells;address_index=columns["address"][0][0]
+    if address_index>=len(body) or body[address_index] is None:
+        return []
+    box=body[address_index]
+    def inside(b,outer):return outer[0]<=b[0] and b[2]<=outer[2] and outer[1]<=b[1] and b[3]<=outer[3]
+    demands=(request["_rows_by_identity"].get((page,record.get("source_register")),[])
+             if "_rows_by_identity" in request else
+             [r for r in request["rows"] if r["page"]==page and r["address"]==record.get("source_register")])
+    if len(demands)>1:
+        return []
+    wanted=set()
+    if demands and inside(demands[0]["address_bbox"],box):
+        for field,value in demands[0]["fields"].items():
+            field="units" if field=="engineering_unit" else field
+            if len(columns.get(field,()))==1 and _clean(_cell(cells[row],columns[field][0][0])) != _clean(value):
+                wanted.add(field)
+    words=request["words"].get(str(page),request["words"].get(page,[]))
+    # Name-only grid rows can lack a bbox candidate. Use only independently
+    # owned bbox words, with complete address/name nonspace identity.
+    if len(columns.get("name",()))==1:
+        index=columns["name"][0][0]
+        name_box=body[index] if index<len(body) else None
+        # A number in a name continuation can fall left of a centered name
+        # heading. Demand source-cell proof before allowing that bbox-only
+        # interpretation to survive as a separate register.
+        nearby = request.get("_rows_by_page", {}).get(page, ()) if "_rows_by_page" in request else (
+            r for r in request["rows"] if r["page"] == page)
+        if name_box is not None and any(r["address"] != record.get("source_register")
+                and inside(r["address_bbox"], name_box) for r in nearby):
+            wanted.add("name")
+        def owned(bounds):
+            selected=[]
+            for x0,x1,top,bottom,text in words:
+                if x0<bounds[2] and x1>bounds[0] and top<bounds[3] and bottom>bounds[1]:
+                    if not inside((x0,top,x1,bottom),bounds):return None
+                    selected.append((top,x0,text))
+            return sorted(selected)
+        address_words=owned(box)
+        name_words=owned(name_box) if name_box is not None else None
+        if (address_words and name_words and ''.join(w[2] for w in address_words)==record.get("source_register")
+                and ''.join(re.sub(r'\s+','',w[2]) for w in name_words)==re.sub(r'\s+','',_clean(_cell(cells[row],index)))
+                and ' '.join(w[2] for w in name_words)!=_clean(_cell(cells[row],index))):
+            wanted.add("name")
+    return sorted(wanted)
+
+
+def _drawn_name_partition(
+    page: Any, table: Any, cells: Sequence[Sequence[Any]],
+    record: Mapping[str, Any], source_sha256: str, *, geometry: dict[str, Any] | None = None,
+    requested_fields: Sequence[str] | None = None,
+) -> dict[str, Any] | None:
+    """Literal address/name/description cells, never inferred column edges."""
+    header_index, columns, _extras, _confident = geometry["header"] if geometry is not None else _find_header(cells)
+    fields = ("address", "name", "description")
+    if columns is None or len(columns.get("address", ())) != 1:
+        return None
+    row_index = record.get("_source", {}).get("row")
+    rows = geometry["rows"] if geometry is not None and "rows" in geometry else table.rows
+    if type(row_index) is not int or not header_index < row_index < len(rows):
+        return None
+    body = rows[row_index].cells
+    def prove_cell(field: str, *, multiline: bool = False) -> dict[str, Any] | None:
+        if len(columns.get(field, ())) != 1:
+            return None
+        index, raw_header = columns[field][0]
+        if index >= len(body):
+            return None
+        # The joined header's final row may contain only an unrelated wrapped
+        # label. Bind this exact label to its own unique earlier drawn cell.
+        header_matches = [h for h in range(header_index+1)
+            if index < len(rows[h].cells) and rows[h].cells[index] is not None
+            and _clean(_cell(cells[h],index)) == raw_header]
+        if len(header_matches) != 1:
+            return None
+        actual_header = header_matches[0]
+        header = rows[actual_header].cells
+        box, head = body[index], header[index]
+        if (box is None or head is None or any(len(b) != 4 or not all(math.isfinite(v) for v in b)
+                or b[0] >= b[2] or b[1] >= b[3] for b in (box, head))
+                or box[0::2] != head[0::2]):
+            return None
+        literal = _clean(_cell(cells[row_index], index))
+        if not literal or (field == "address" and literal != record.get("source_register")):
+            return None
+        def owned_glyphs(bounds: Any, row_cells: Any, expected: str, *, body_cell: bool):
+            glyphs = []
+            source_row = row_index if body_cell else actual_header
+            if geometry is not None and "glyphs_by_row" in geometry:
+                chars = geometry["glyphs_by_row"][source_row]
+            elif geometry is not None:
+                # Header subrows can overlap a spanning header band. Cache
+                # each original row's intersecting glyphs once, not per field.
+                cache = geometry.setdefault("partition_row_glyphs", {})
+                if source_row not in cache:
+                    boxes = [b for b in rows[source_row].cells if b is not None]
+                    top,bottom = min(b[1] for b in boxes),max(b[3] for b in boxes)
+                    cache[source_row] = [c for c in page.chars if c["top"] < bottom and c["bottom"] > top]
+                chars = cache[source_row]
+            else:
+                chars = page.chars
+            for char in chars:
+                if not char["text"].strip():
+                    continue
+                b = [char["x0"], char["top"], char["x1"], char["bottom"]]
+                if not all(math.isfinite(v) for v in b):
+                    return None
+                if not (b[0] < bounds[2] and b[2] > bounds[0] and b[1] < bounds[3] and b[3] > bounds[1]):
+                    continue
+                if (not all(math.isfinite(v) for v in b) or not char.get("upright", True)
+                        or b[0] < bounds[0] or b[2] > bounds[2] or b[1] < bounds[1] or b[3] > bounds[3]
+                        or sum(c is not None and c[0] <= b[0] and b[2] <= c[2]
+                               and c[1] <= b[1] and b[3] <= c[3] for c in row_cells) != 1):
+                    return None
+                glyphs.append({"text": char["text"], "bbox": b})
+            if (not glyphs or "".join(g["text"] for g in glyphs) != re.sub(r"\s+", "", expected)
+                    or (body_cell and not multiline and max(g["bbox"][1] for g in glyphs) >= min(g["bbox"][3] for g in glyphs))):
+                return None
+            return glyphs
+        glyphs = owned_glyphs(box, body, literal, body_cell=True)
+        header_glyphs = owned_glyphs(head, header, raw_header, body_cell=False)
+        if glyphs is None or header_glyphs is None:
+            return None
+        return {"field":"engineering_unit" if field == "units" else field, "raw_value":literal, "raw_header":raw_header,
+                            "bbox":list(box), "header_bbox":list(head), "glyphs":glyphs,
+                            "header_glyphs":header_glyphs, "column_index":index,
+                            "header_source_locator":{"page":record["_source"]["page"],"row":actual_header,
+                                "region":re.sub(r":r\d+$",f":r{actual_header}",record["_source"]["region"])}}
+    proof_cells = []
+    method = "same-source-drawn-name-cells/v1"
+    if requested_fields is not None:
+        if not requested_fields or any(f not in {"name","description","units","range","access"} for f in requested_fields):
+            return None
+        address = prove_cell("address")
+        if address is None:
+            return None
+        proof_cells = [address]
+        for field in requested_fields:
+            cell=prove_cell(field,multiline=field=="name")
+            if cell is not None:
+                proof_cells.append(cell)
+        if len(proof_cells)==1:
+            return None
+        fields=()
+        method="same-source-drawn-literal-cells/v1"
+    for field in fields:
+        cell = prove_cell(field)
+        if cell is None:
+            # Separate literal name/access cells can still be proved when a
+            # description is absent or a name spans lines. Never infer cells.
+            name_columns = columns.get("name", ())
+            multiline_name = len(name_columns) == 1 and "\n" in str(_cell(cells[row_index],name_columns[0][0]))
+            if len(columns.get("description", ())) == 1 and not multiline_name:
+                return None
+            method = "same-source-drawn-literal-cells/v1"
+            address = prove_cell("address")
+            if address is None:
+                return None
+            proof_cells = [address]
+            for optional in ("name", "access"):
+                candidate = prove_cell(optional, multiline=optional == "name")
+                if candidate is not None:
+                    proof_cells.append(candidate)
+            if len(proof_cells) == 1:
+                return None
+            break
+        proof_cells.append(cell)
+    for field in (("units","range","access") if method == "same-source-drawn-name-cells/v1" else ()):
+        if len(columns.get(field, ())) == 1:
+            cell = prove_cell(field)
+            if cell is not None:
+                proof_cells.append(cell)
+    boxes = [cell["bbox"] for cell in proof_cells]
+    if any(a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
+           for i, a in enumerate(boxes) for b in boxes[i+1:]):
+        return None
+    return {"method":method, "source_sha256":source_sha256,
+            "source_locator":{key:record["_source"][key] for key in ("page","row","region")},
+            "cells":proof_cells}
 
 
 def _recover_offset_header(page: Any, table: Any) -> tuple[list[list[Any]], dict[str, Any] | None]:
@@ -1509,11 +1796,20 @@ __all__ = [
 
 
 def _worker_main(argv: Sequence[str]) -> int:
-    if len(argv) not in {3, 4} or argv[1] != "--worker":
+    if len(argv) not in {3, 4, 5, 6} or argv[1] != "--worker" or (len(argv)==6 and argv[5]!="--partition-stdin"):
         return 2
-    pages = [int(value) for value in argv[3].split(",")] if len(argv) == 4 and argv[3] else None
+    pages = [int(value) for value in argv[3].split(",")] if len(argv) >= 4 and argv[3] else None
+    partition_pages = [int(value) for value in argv[4].split(",")] if len(argv) >= 5 and argv[4] else ()
     try:
-        evidence = _extract_pdf_table_rows_in_process(Path(argv[2]), pages=pages)
+        requests=None
+        if len(argv)==6:
+            data=sys.stdin.buffer.read(_MAX_GRID_OUTPUT_BYTES+1)
+            if len(data)>_MAX_GRID_OUTPUT_BYTES:
+                raise PdfTableExtractionError("grid correction input exceeds the bounded worker payload")
+            requests=json.loads(data)
+        evidence = _extract_pdf_table_rows_in_process(Path(argv[2]), pages=pages,
+                                                     cell_partition_pages=partition_pages,
+                                                     **({"cell_partition_requests":requests} if requests is not None else {}))
         payload = json.dumps(evidence, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
         if len(payload) > _MAX_GRID_OUTPUT_BYTES:
             raise PdfTableExtractionError(

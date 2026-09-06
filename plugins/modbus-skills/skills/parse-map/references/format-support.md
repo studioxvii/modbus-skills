@@ -30,6 +30,15 @@ Accept repeated `register` or `row` elements. Reject external entities and docum
 
 Inspect visible worksheets. Prefer a sheet with clear address and name columns. Report the selected sheet and header row. Do not execute formulas or macros.
 
+Preserve directly related worksheet comments and simple one-/two-cell DrawingML
+text callouts as bounded source-only context, with exact package hashes and
+cell/anchor locators. Compilation retains notes for selected worksheets in the
+existing JSON map with a compact Markdown pointer; it does not infer engineering
+fields, row applicability, defaults or approval from those notes. External links
+are never followed. Unsupported drawings/anchors and unresolved relationships are
+reported as source limitations. Existing scalar and combined evidence limits
+apply; whole optional-registry omission is explicit and keeps the map partial.
+
 ## Structured text
 
 Treat text rows as candidates. Require review when columns cannot be identified deterministically.

@@ -305,7 +305,8 @@ def compile_user_map_bundle(
             exception_annex=annex,
             assumptions=[*_source_datatype_notes(oem_map, included_ids),
                          *_selected_literal_source_context(oem_map, included_ids),
-                         *_selected_uninterpreted_source_context(oem_map, included_ids)],
+                         *_selected_uninterpreted_source_context(oem_map, included_ids),
+                         *_selected_worksheet_annotations(oem_map, included_ids)],
             holds=selected_holds,
         )
     except CompilerContractError as exc:
@@ -399,6 +400,11 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
                       f"{fields} literal field associations are retained with exact source-row bindings "
                       "in [the JSON map](user-map.json). These are uninterpreted source context, "
                       "not decoding, address-basis or read authorization."])
+    annotations = [g for g in user_map.get("assumptions", ()) if g.get("code") == "source-worksheet-annotations"]
+    if annotations:
+        lines.extend(["", "## Worksheet source notes", "",
+            f"{sum(len(g['entries']) for g in annotations)} comment/callout text records are retained once with exact worksheet/cell/anchor locators in [the JSON map](user-map.json). "
+            "These worksheet-scoped literals are not engineering defaults or read/write authorization."])
     lines.extend(["", "## Suggestions"])
     if selection["suggested"]:
         for entry in selection["suggested"]:
@@ -870,6 +876,20 @@ def _selected_uninterpreted_source_context(
             raise UserMapError("uninterpreted source context registry identity or status is invalid")
     return [{**g, "bindings": [b for b in g["bindings"] if b["oem_point_id"] in included_ids]}
             for g in complete if any(b["oem_point_id"] in included_ids for b in g["bindings"])]
+
+
+def _selected_worksheet_annotations(oem_map, included_ids):
+    from .worksheet_annotations import CODE, AnnotationError, bind_annotations
+    groups = [g for g in oem_map.get("assumptions", ()) if g.get("code") == CODE]
+    if not groups:
+        return []
+    existing = [g for g in oem_map.get("assumptions", ())
+                if g.get("code") in {"source-literal-context", "source-uninterpreted-fields"}]
+    try:
+        return bind_annotations(groups, oem_map["points"], oem_map["input_hashes"]["source"],
+                                existing=existing, imported=True, included=included_ids)
+    except AnnotationError as exc:
+        raise UserMapError(str(exc)) from exc
 
 
 def _source_datatype_notes(
