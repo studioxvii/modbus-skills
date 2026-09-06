@@ -35,7 +35,7 @@ def source(definitions=None):
         return compile_source_descriptor({"path": str(path)})[0]
 
 
-def bundle(oem, names=("Status", "BOOLEAN")):
+def bundle(oem, names=("Status", "BOOLEAN"), *, expected_additional_context=True):
     included = [p for p in oem["points"] if p["name"] in names]
     candidate = {
         "oem_map_hash": stable_input_hash(oem), "requested_measurements": ["selected readings"],
@@ -44,7 +44,47 @@ def bundle(oem, names=("Status", "BOOLEAN")):
                       "evidence_refs": [r["record_id"] for r in p["source_refs"]]} for p in included],
         "suggested": [], "excluded": [],
     }
-    return compile_user_map_bundle(oem, candidate, case_id="synthetic-source-definitions")
+    result = compile_user_map_bundle(oem, candidate, case_id="synthetic-source-definitions")
+    check = unittest.TestCase()
+    notes = result["user_map"]["assumptions"]
+    check.assertTrue(all(n.get("code") in {
+        "source-datatype-definition", "source-uninterpreted-fields"
+    } for n in notes))
+    additional = [n for n in notes if n.get("code") == "source-uninterpreted-fields"]
+    if expected_additional_context:
+        # Length Read is deliberately unrecognized. Equal datatype-derived
+        # width is not evidence that this literal was consumed or interpreted.
+        expected_bindings = []
+        for point in included:
+            row = {"Status": 2, "BOOLEAN": 3}[point["name"]]
+            expected_bindings.append({"oem_point_id": point["oem_point_id"], "source_ref": {
+                "record_id": f"xlsx:sheet:Points:row:{row}",
+                "format": "xlsx", "sheet": "Points", "row": row,
+            }})
+        check.assertEqual(1, len(additional))
+        note = additional[0]
+        check.assertEqual({"code", "status", "context_id", "fields", "bindings"}, set(note))
+        check.assertEqual("source-context-only", note["status"])
+        check.assertEqual({"length_read": 1}, note["fields"])
+        check.assertEqual("source-fields-" + stable_input_hash({"fields": {"length_read": 1}}), note["context_id"])
+        check.assertCountEqual(expected_bindings, note["bindings"])
+    else:
+        check.assertEqual([], additional)
+    # Adding source-only metadata must not alter engineering, holds or CSV.
+    without = copy.deepcopy(oem)
+    without["assumptions"] = [a for a in without["assumptions"]
+                              if a.get("code") != "source-uninterpreted-fields"]
+    baseline_selection = {**candidate, "oem_map_hash": stable_input_hash(without)}
+    baseline = compile_user_map_bundle(without, baseline_selection, case_id="synthetic-source-definitions")
+    for field in ("points", "holds", "exception_annex"):
+        check.assertEqual(baseline["user_map"][field], result["user_map"][field])
+    check.assertEqual(baseline["csv"], result["csv"])
+    return result
+
+
+def definition_notes(result):
+    return [n for n in result["user_map"]["assumptions"]
+            if n.get("code") == "source-datatype-definition"]
 
 
 class UserMapSourceDefinitionTests(unittest.TestCase):
@@ -52,7 +92,7 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
         oem = source()
         original = copy.deepcopy(oem)
         result = bundle(oem)
-        note, = result["user_map"]["assumptions"]
+        note, = definition_notes(result)
         status = next(p for p in oem["points"] if p["name"] == "Status")
         evidence = next(e for e in status["source_field_evidence"] if e["field"] == "datatype")
         self.assertEqual("BOOLEAN", note["source_datatype"])
@@ -61,13 +101,13 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
                           "datatype_cell": "A3", "definition_cell": "B3"}, note["source_location"])
         self.assertEqual([{"oem_point_id": status["oem_point_id"], **evidence}], note["matching_datatype_evidence"])
         self.assertEqual("BOOLEAN", note["matching_datatype_evidence"][0]["raw_value"])
-        self.assertEqual(note, json.loads(result["json"])["assumptions"][0])
+        self.assertEqual(note, definition_notes({"user_map": json.loads(result["json"])})[0])
         self.assertIn("0=IDLE; 1=RUN", result["human_summary"])
         self.assertIn("Definitions!A3, B3".replace("!", "\\!"), result["human_summary"])
         self.assertIn("do not configure decoding", result["human_summary"])
         without = copy.deepcopy(oem)
         without["assumptions"] = []
-        baseline = bundle(without)
+        baseline = bundle(without, expected_additional_context=False)
         for field in ("points", "holds", "exception_annex"):
             self.assertEqual(baseline["user_map"][field], result["user_map"][field])
         self.assertEqual(baseline["csv"], result["csv"])
@@ -79,19 +119,19 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
 
     def test_absent_legend_does_not_invent_labels(self):
         result = bundle(source([]))
-        self.assertEqual([], result["user_map"]["assumptions"])
+        self.assertEqual([], definition_notes(result))
         self.assertNotIn("Source datatype definitions", result["human_summary"])
 
     def test_inverted_definition_is_literal_not_decoding(self):
         result = bundle(source([("Definitions", legend("Two states (0=RUN; 1=IDLE)"))]))
-        self.assertEqual("Two states (0=RUN; 1=IDLE)", result["user_map"]["assumptions"][0]["definition"])
+        self.assertEqual("Two states (0=RUN; 1=IDLE)", definition_notes(result)[0]["definition"])
         self.assertEqual("bool", result["user_map"]["points"][0]["datatype"])
         self.assertNotIn('"enum_values"', result["json"])
 
     def test_numeric_point_named_datatype_and_unselected_bool_do_not_match(self):
         result = bundle(source(), names=("BOOLEAN",))
         self.assertEqual("uint16", result["user_map"]["points"][0]["datatype"])
-        self.assertEqual([], result["user_map"]["assumptions"])
+        self.assertEqual([], definition_notes(result))
 
     def test_conflicting_contexts_and_distinct_sheets_survive_duplicate_group(self):
         oem = source([("First", legend()), ("Second", legend("Two states (0=RUN; 1=IDLE)"))])
@@ -99,7 +139,7 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
         oem["assumptions"].append(copy.deepcopy(groups[0]))
         oem["assumptions"].append({"code": "unrelated", "message": "Do not copy this assumption"})
         result = bundle(oem)
-        notes = result["user_map"]["assumptions"]
+        notes = definition_notes(result)
         self.assertEqual(["First", "Second"], [n["source_location"]["sheet"] for n in notes])
         self.assertEqual([DEFINITION, "Two states (0=RUN; 1=IDLE)"], [n["definition"] for n in notes])
         self.assertNotIn("Do not copy this assumption", result["json"])
@@ -112,7 +152,7 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
                 cached = rows[row][column]
                 rows[row][column] = {"formula": '"' + cached + '"', "cached": cached}
                 result = bundle(source([("Definitions", rows)]))
-                self.assertEqual([], result["user_map"]["assumptions"])
+                self.assertEqual([], definition_notes(result))
 
     def test_matching_does_not_use_normalized_alias_or_unconfirmed_evidence(self):
         for mutation in ("alias", "missing", "unresolved", "stale"):
@@ -128,13 +168,13 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
                     evidence["status"] = "unresolved"
                 else:
                     evidence["normalized_value"] = "uint16"
-                self.assertEqual([], bundle(oem)["user_map"]["assumptions"])
+                self.assertEqual([], definition_notes(bundle(oem)))
 
     def test_sheet_definition_markdown_escaped_but_json_literal(self):
         name = "Defs_[x]&<b>"
         definition = "Two states (0=[IDLE](file); 1=<b>RUN</b>)\n# instruction"
         result = bundle(source([(name, legend(definition))]))
-        note, = result["user_map"]["assumptions"]
+        note, = definition_notes(result)
         self.assertEqual(definition, note["definition"])
         self.assertEqual(name, note["source_location"]["sheet"])
         self.assertNotIn("<b>", result["human_summary"])
@@ -144,7 +184,7 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
 
     def test_blank_leading_columns_keep_physical_cell_identity(self):
         rows = [["", *row] for row in legend()]
-        note, = bundle(source([("Definitions", rows)]))["user_map"]["assumptions"]
+        note, = definition_notes(bundle(source([("Definitions", rows)])))
         self.assertEqual("B3", note["source_location"]["datatype_cell"])
         self.assertEqual("C3", note["source_location"]["definition_cell"])
 
@@ -161,7 +201,7 @@ class UserMapSourceDefinitionTests(unittest.TestCase):
                     group["source_rows"][2]["row"] = True
                 else:
                     oem["source_reference"]["format"] = "json"
-                self.assertEqual([], bundle(oem)["user_map"]["assumptions"])
+                self.assertEqual([], definition_notes(bundle(oem)))
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from .artifacts import (
     stable_input_hash,
 )
 from .pdf_access_legend import apply_access_legend, is_access_legend
+from .pdf_protocol_context import EXCLUDED_PROTOCOL_CODE, protocol_contexts, protocol_rejection
 from .pdf_table_extraction import (
     PDF_HEADER_ALIASES,
     PdfTableExtractionError,
@@ -323,7 +324,8 @@ def _non_register_context_mask(lines: Sequence[str]) -> list[bool]:
     page-local and explicit serial-settings headings end stale register columns.
     No individual number, baud-related point name or address form is banned.
     """
-    masked = _function_table_mask(lines)
+    masked = [flag or context is not None for flag, context in
+              zip(_function_table_mask(lines), protocol_contexts(lines))]
     in_register_table = False
     in_serial_settings = False
     for index, line in enumerate(lines):
@@ -537,6 +539,15 @@ def parse_layout_rows(
     for page_number, page in enumerate(text.split("\f"), start=first_page):
         lines = page.splitlines()
         lcd_context = _lcd_context_evidence(lines)
+        other_protocol = protocol_contexts(lines)
+        for index, context in enumerate(other_protocol):
+            if context is not None:
+                item = protocol_rejection(
+                    lines[index], page=page_number, line_number=index + 1,
+                    heading_line=context + 1, heading=lines[context], parser_id=parser_id,
+                )
+                if item is not None:
+                    rejected.append(item)
         if pages is not None and page_number not in pages:
             # Discovery excludes LCD samples as candidate pages, but their
             # bounded source rejection must not disappear from extraction.
@@ -1101,6 +1112,17 @@ def parse_bbox_rows(
 
         line_items = [(y_min, sorted(lines[y_min])) for y_min in sorted(lines)]
         line_labels = [" ".join(word[3] for word in words) for _y, words in line_items]
+        other_protocol = protocol_contexts(line_labels)
+        if rejected is not None:
+            for index, context in enumerate(other_protocol):
+                if context is not None:
+                    item = protocol_rejection(
+                        line_labels[index], page=page_number, line_number=index + 1,
+                        heading_line=context + 1, heading=line_labels[context],
+                        parser_id="pdftotext-bbox/v1", region=f"p{page_number}:y{line_items[index][0]:g}",
+                    )
+                    if item is not None:
+                        rejected.append(item)
         function_mask = [
             masked or overview or lcd for masked, overview, lcd in zip(
                 _non_register_context_mask(line_labels), _overview_context_mask(line_labels), _lcd_context_mask(line_labels)
@@ -1515,10 +1537,12 @@ def _reconcile(
     # Earlier parser conflicts remain held even if a later parser agrees with
     # one interpretation. Include them in the same identity/scope uniqueness
     # checks rather than allowing their later claims to become new points.
+    protocol_excluded = [row for row in quarantined_records if row.get("code") == EXCLUDED_PROTOCOL_CODE]
+    quarantined_records = [row for row in quarantined_records if row.get("code") != EXCLUDED_PROTOCOL_CODE]
     held_count = len(quarantined_records)
     strict = [*quarantined_records, *strict]
     accepted: list[dict[str, Any]] = []
-    quarantined: list[dict[str, Any]] = []
+    quarantined: list[dict[str, Any]] = [dict(row) for row in protocol_excluded]
     conflicts: list[dict[str, Any]] = []
     description_projections = []
     unmatched_right = set(range(len(coordinate)))
@@ -1791,6 +1815,13 @@ def _envelope(
     fresh_body_proofs: Mapping[int, Any] | None = None,
 ) -> dict[str, Any]:
     page_selection = {"first_page": page_range[0], "last_page": page_range[1]} if page_range else None
+    # The grid worker's bounded two-list contract carries these separately from
+    # accepted points. They are explicit other-protocol source accounting, not
+    # unresolved Modbus engineering claims or candidates to reconcile back in.
+    protocol_excluded = [dict(row) for row in quarantined if row.get("code") == EXCLUDED_PROTOCOL_CODE]
+    if protocol_excluded:
+        rejected = [*rejected, *protocol_excluded]
+        quarantined = [row for row in quarantined if row.get("code") != EXCLUDED_PROTOCOL_CODE]
     access_conflicts = [row for row in rejected if row.get("code") == "pdf-access-annotation-conflict"]
     if access_conflicts:
         # A later grid/parser agreement cannot undo an earlier access conflict.

@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 import csv
 import html
 import io
+import itertools
 import math
 import re
 from typing import Any
@@ -74,6 +75,14 @@ _CSV_FIELDS = (
 
 class UserMapError(ValueError):
     """Raised when selection intent is stale, ambiguous, or unsafe."""
+
+
+class LiteralContextCapacityError(UserMapError):
+    """The unchanged literal byte allowance was exhausted."""
+
+
+class UninterpretedContextCapacityError(UserMapError):
+    """Only the optional new source-field representation exceeded capacity."""
 
 
 def validate_selection_candidate(
@@ -295,7 +304,8 @@ def compile_user_map_bundle(
             points=rendered_points,
             exception_annex=annex,
             assumptions=[*_source_datatype_notes(oem_map, included_ids),
-                         *_selected_literal_source_context(oem_map, included_ids)],
+                         *_selected_literal_source_context(oem_map, included_ids),
+                         *_selected_uninterpreted_source_context(oem_map, included_ids)],
             holds=selected_holds,
         )
     except CompilerContractError as exc:
@@ -381,6 +391,14 @@ def render_human_summary(user_map: Mapping[str, Any], selection: Mapping[str, An
                 f"- {labels[note['field']]}: {_note_markdown(str(note['literal']))} "
                 f"({count} included {'point' if count == 1 else 'points'})"
             )
+    extra_context = [note for note in user_map.get("assumptions", ())
+                     if note.get("code") == "source-uninterpreted-fields"]
+    if extra_context:
+        fields = sum(len(note["fields"]) * len(note["bindings"]) for note in extra_context)
+        lines.extend(["", "## Additional source fields", "",
+                      f"{fields} literal field associations are retained with exact source-row bindings "
+                      "in [the JSON map](user-map.json). These are uninterpreted source context, "
+                      "not decoding, address-basis or read authorization."])
     lines.extend(["", "## Suggestions"])
     if selection["suggested"]:
         for entry in selection["suggested"]:
@@ -502,7 +520,7 @@ def _literal_context_size(value: Any) -> int:
         nonlocal cost
         cost += amount
         if cost > limit:
-            raise UserMapError("literal source context exceeds the 4 MiB evidence budget")
+            raise LiteralContextCapacityError("literal source context exceeds the 4 MiB evidence budget")
 
     def text_size(text: str) -> None:
         if type(text) is str:
@@ -555,7 +573,7 @@ def _literal_context_size(value: Any) -> int:
             # A cheap lower bound rejects oversized integers before decimal
             # conversion; any remaining conversion is bounded by this budget.
             if item.bit_length() * 3 // 10 > limit - cost:
-                raise UserMapError("literal source context exceeds the 4 MiB evidence budget")
+                raise LiteralContextCapacityError("literal source context exceeds the 4 MiB evidence budget")
             try:
                 charge(len(int.__repr__(item)))
             except ValueError as exc:
@@ -731,6 +749,127 @@ def _selected_literal_source_context(
         if bindings:
             result.append({**group, "bindings": bindings})
     return result
+
+
+def _uninterpreted_context_size(value: Any) -> int:
+    try:
+        return _literal_context_size(value)
+    except LiteralContextCapacityError as exc:
+        raise UninterpretedContextCapacityError(str(exc)) from exc
+
+
+def validate_uninterpreted_source_fields(fields: Any) -> None:
+    """Check every scalar even if its optional evidence cannot be retained."""
+    if not isinstance(fields, Mapping) or not fields:
+        raise UserMapError("uninterpreted source fields must be a nonempty object")
+    for field, literal in fields.items():
+        if (not isinstance(field, str) or not field or field.startswith("_")
+                or field in _POINT_FIELDS
+                or re.fullmatch(r"(units_notes|notes|minimum|maximum)(?:_(?:[2-9]|[1-9][0-9]+))?", field)):
+            raise UserMapError("uninterpreted source field duplicates a known role or is invalid")
+        if not _valid_literal_source_value("notes", field) or not _valid_literal_source_value("notes", literal):
+            raise UserMapError("uninterpreted source field and literal must be nonblank")
+
+
+def build_uninterpreted_source_context(
+    entries: Iterable[Mapping[str, Any]], *, existing_context: Sequence[Mapping[str, Any]] = (),
+) -> list[dict[str, Any]]:
+    """Bound additional scalar fields with one exact association per source row.
+
+    The existing four-role context must already be validated. Its complete cost
+    and association counts share the same limits, not a second evidence budget.
+    Known engineering and note fields are not copied into this literal-only role.
+    """
+    iterator = iter(entries)
+    missing = object()
+    first = next(iterator, missing)
+    if first is missing:
+        return []
+    used = sum(2 * (_literal_context_size({**g, "bindings": []})
+                   + sum(_literal_context_size(b) for b in g["bindings"])) for g in existing_context)
+    groups_count = len(existing_context)
+    bindings_count = sum(len(g["bindings"]) for g in existing_context)
+    groups: dict[tuple[Any, ...], dict[str, Any]] = {}
+    seen: dict[tuple[Any, ...], set[tuple[Any, ...]]] = {}
+    for entry in itertools.chain((first,), iterator):
+        if not isinstance(entry, Mapping) or set(entry) != {"fields", "oem_point_id", "source_ref"}:
+            raise UserMapError("uninterpreted source context entry is malformed")
+        fields = entry["fields"]
+        validate_uninterpreted_source_fields(fields)
+        point_id, reference = entry["oem_point_id"], entry["source_ref"]
+        if (not isinstance(point_id, str) or not point_id
+                or not isinstance(reference, Mapping) or not reference
+                or any(not isinstance(k, str) or isinstance(v, bool) or not isinstance(v, (str, int))
+                       for k, v in reference.items())):
+            raise UserMapError("uninterpreted source context needs a valid point/source-row identity")
+        # Preflight the complete row payload and reference before copies/digests.
+        payload = {"code": "source-uninterpreted-fields", "status": "source-context-only",
+                   "context_id": "source-fields-" + "0" * 64, "fields": fields, "bindings": []}
+        group_cost = 2 * _uninterpreted_context_size(payload)
+        binding = {"oem_point_id": point_id, "source_ref": reference}
+        binding_cost = 2 * _uninterpreted_context_size(binding)
+        key = tuple((k, type(v), float.hex(v) if isinstance(v, float) else v)
+                    for k, v in sorted(fields.items()))
+        identity = (point_id, tuple(sorted(reference.items())))
+        if key in seen and identity in seen[key]:
+            continue
+        new = key not in groups
+        if groups_count + int(new) > _LITERAL_CONTEXT_GROUPS:
+            raise UninterpretedContextCapacityError("literal source context group limit exceeded")
+        if bindings_count + len(fields) > _LITERAL_CONTEXT_BINDINGS:
+            raise UninterpretedContextCapacityError("literal source context binding limit exceeded")
+        if used + binding_cost + (group_cost if new else 0) > _LITERAL_CONTEXT_BYTES:
+            raise UninterpretedContextCapacityError("literal source context exceeds the 4 MiB evidence budget")
+        used += binding_cost + (group_cost if new else 0)
+        bindings_count += len(fields)
+        if new:
+            groups_count += 1
+            groups[key] = {**payload, "fields": dict(fields),
+                           "context_id": "source-fields-" + stable_input_hash({"fields": fields})}
+            seen[key] = set()
+        groups[key]["bindings"].append({"oem_point_id": point_id, "source_ref": dict(reference)})
+        seen[key].add(identity)
+    result = sorted(groups.values(), key=lambda g: g["context_id"])
+    for group in result:
+        group["bindings"].sort(key=lambda b: (b["oem_point_id"], stable_input_hash(b["source_ref"])))
+    return result
+
+
+def _selected_uninterpreted_source_context(
+    oem_map: Mapping[str, Any], included_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Validate full imported field evidence before narrowing to selected rows."""
+    if not any(g.get("code") == "source-uninterpreted-fields" for g in oem_map.get("assumptions", ())):
+        return []
+    known = {p["oem_point_id"]: p for p in oem_map["points"]}
+
+    def entries():
+        for group in oem_map.get("assumptions", ()):
+            if not isinstance(group, Mapping) or group.get("code") != "source-uninterpreted-fields":
+                continue
+            if (set(group) != {"code", "status", "context_id", "fields", "bindings"}
+                    or group.get("status") != "source-context-only"):
+                raise UserMapError("uninterpreted source context registry identity or status is invalid")
+            bindings = group.get("bindings")
+            if not isinstance(bindings, list) or not bindings:
+                raise UserMapError("uninterpreted source context needs nonempty bindings")
+            for binding in bindings:
+                if not isinstance(binding, Mapping) or set(binding) != {"oem_point_id", "source_ref"}:
+                    raise UserMapError("uninterpreted source context binding is malformed")
+                point_id = binding.get("oem_point_id")
+                point = known.get(point_id) if isinstance(point_id, str) else None
+                if point is None or binding.get("source_ref") not in point.get("source_refs", ()):
+                    raise UserMapError("uninterpreted source context binding is not an actual OEM point/source reference")
+                yield {"fields": group["fields"], **binding}
+
+    # The preceding four-role selection validates this complete old registry.
+    existing = [g for g in oem_map.get("assumptions", ()) if g.get("code") == "source-literal-context"]
+    complete = build_uninterpreted_source_context(entries(), existing_context=existing)
+    for group in oem_map.get("assumptions", ()):
+        if group.get("code") == "source-uninterpreted-fields" and group.get("context_id") != "source-fields-" + stable_input_hash({"fields": group["fields"]}):
+            raise UserMapError("uninterpreted source context registry identity or status is invalid")
+    return [{**g, "bindings": [b for b in g["bindings"] if b["oem_point_id"] in included_ids]}
+            for g in complete if any(b["oem_point_id"] in included_ids for b in g["bindings"])]
 
 
 def _source_datatype_notes(

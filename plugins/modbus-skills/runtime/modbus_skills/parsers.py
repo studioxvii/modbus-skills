@@ -560,6 +560,38 @@ def _compound_area_conflicts(
              "details": {"columns": claims}}]
 
 
+def _holding_header_columns(raw_headers: Sequence[Any], headers: Sequence[str]) -> list[tuple[int, Any]]:
+    """Only an exact selected address heading conveys this explicit area."""
+    return [(i, raw) for i, (raw, field) in enumerate(zip(raw_headers, headers))
+            if field in {"address", "display_address", "protocol_offset"}
+            and re.sub(r"\s+", " ", str(raw).strip().casefold()) in {"holding register", "holding registers"}]
+
+
+def _apply_holding_header(
+    record: dict[str, Any], columns: Sequence[tuple[int, Any]],
+    location: Mapping[str, Any], *, header_row: int,
+) -> list[dict[str, Any]]:
+    claims = [{"parser_id": "structured.holding-header/v1", "field": "area",
+               "value": "holding-register", "raw_header": str(raw), "raw_value": raw,
+               "source_locator": {**location, "row": header_row, "column": i + 1}}
+              for i, raw in columns if record.get("address", record.get("display_address", record.get("protocol_offset"))) not in (None, "")]
+    if not claims:
+        return []
+    record.setdefault("_claims", []).extend(claims)
+    conflicting = {key: value for key, value in record.items()
+                   if re.fullmatch(r"area(?:_[0-9]+)?", key) and value not in (None, "")
+                   and re.sub(r"[\s_-]+", " ", str(value).strip().casefold()) not in
+                   {"holding", "holding register", "holding registers", "4x", "fc03", "03", "4x holding"}}
+    if conflicting:
+        return [{"code": "source.area-columns-conflict", "severity": "hold", "blocking": True,
+                 "field": "area", "source": dict(location),
+                 "message": "An explicit holding-register heading conflicts with a row area; no claim takes precedence.",
+                 "details": {"header_claims": claims, "row_area_claims": conflicting}}]
+    if record.get("area") in (None, ""):
+        record["area"] = "holding-register"
+    return []
+
+
 def _canonicalize_mapping(record: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     output: dict[str, Any] = {}
     warnings: list[dict[str, Any]] = []
@@ -713,6 +745,7 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
 
     headers, header_warnings = _unique_headers(raw_headers)
     compound_columns, area_columns = _compound_header_columns(raw_headers, headers)
+    holding_columns = _holding_header_columns(raw_headers, headers)
     warnings.extend(header_warnings)
     records: list[dict[str, Any]] = []
     try:
@@ -745,6 +778,8 @@ def parse_csv(source: str | bytes, *, delimiter: str | None = None) -> dict[str,
                     }
                 )
                 continue
+            if holding_columns:
+                source_holds.extend(_apply_holding_header(record, holding_columns, source_location, header_row=1))
             if area_columns:
                 source_holds.extend(_compound_area_conflicts(
                     area_columns, padded, source_location, header_row=1,
@@ -1273,6 +1308,7 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
             header_row_number, header_values, header_formula = non_empty[header_index]
             headers, header_warnings = _xlsx_headers(header_values, non_empty[:header_index])
             compound_columns, area_columns = _compound_header_columns(header_values, headers)
+            holding_columns = _holding_header_columns(header_values, headers)
             if not _sheet_has_register_header(headers):
                 # A bounded scalar statement needs conversion-topic context;
                 # merely dividing a display or mentioning a number is not one.
@@ -1369,6 +1405,8 @@ def parse_xlsx(source: bytes | bytearray | str | Path) -> dict[str, Any]:
                     if note is not None and has_formula:
                         note.update({"scope": "unresolved", "cached_formula_row": True})
                     keep_scale_note(note)
+                if holding_columns:
+                    source_holds.extend(_apply_holding_header(record, holding_columns, location, header_row=header_row_number))
                 if area_columns:
                     source_holds.extend(_compound_area_conflicts(
                         area_columns, padded, location, header_row=header_row_number,
